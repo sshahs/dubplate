@@ -107,9 +107,10 @@ function AppSidebar() {
   return (
     <Sidebar variant="inset" collapsible="icon">
       <SidebarHeader>
-        <div className="flex items-center gap-2.5 px-1 py-1.5 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
-          <DubplateMark className="size-8" />
-          <div className="leading-tight group-data-[collapsible=icon]:hidden">
+        {/* Everything keeps its place in both states (the logo shares the icons' centre line); text fades out and the rail clips it. */}
+        <div className="flex items-center gap-2.5 px-0.5 py-1.5">
+          <DubplateMark className="size-8 shrink-0" />
+          <div className="leading-tight whitespace-nowrap transition-opacity duration-200 delay-75 group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:delay-0 group-data-[collapsible=icon]:duration-100">
             <div className="font-heading text-base font-extrabold tracking-tight">Dubplate</div>
             <div className="text-muted-foreground text-[11px]">selector's tagging rig</div>
           </div>
@@ -131,7 +132,7 @@ function AppSidebar() {
                         <ViewTransition name="nav-indicator">
                           <span
                             aria-hidden
-                            className="from-rasta-red via-rasta-gold to-rasta-green pointer-events-none absolute top-1.5 bottom-1.5 -left-1 z-10 w-1 rounded-full bg-linear-to-b group-data-[collapsible=icon]:-left-2"
+                            className="from-rasta-red via-rasta-gold to-rasta-green pointer-events-none absolute top-1.5 bottom-1.5 -left-1 z-10 w-1 rounded-full bg-linear-to-b"
                           />
                         </ViewTransition>
                       )}
@@ -145,10 +146,20 @@ function AppSidebar() {
                         <span>{n.label}</span>
                       </SidebarMenuButton>
                       {count > 0 && (
-                        // Pops in when work appears; no re-pop on every tick so a running job stays calm.
-                        <SidebarMenuBadge className={cn("animate-in zoom-in-50 fade-in tabular-nums duration-300", n.badge === "review" ? "text-rasta-gold" : "text-primary")}>
-                          {count}
-                        </SidebarMenuBadge>
+                        <>
+                          {/* Pops in when work appears; no re-pop on every tick so a running job stays calm. */}
+                          <SidebarMenuBadge className={cn("animate-in zoom-in-50 fade-in tabular-nums duration-300", n.badge === "review" ? "text-rasta-gold" : "text-primary")}>
+                            {count}
+                          </SidebarMenuBadge>
+                          {/* Collapsed rail: the count becomes a dot on the icon. */}
+                          <span
+                            aria-hidden
+                            className={cn(
+                              "pointer-events-none absolute top-1.5 left-6 size-1.5 rounded-full opacity-0 transition-opacity duration-200 group-data-[collapsible=icon]:opacity-100 group-data-[collapsible=icon]:delay-100",
+                              n.badge === "review" ? "bg-rasta-gold" : "bg-primary"
+                            )}
+                          />
+                        </>
                       )}
                     </SidebarMenuItem>
                   )
@@ -159,9 +170,12 @@ function AppSidebar() {
         ))}
       </SidebarContent>
       <SidebarFooter>
-        <div className="text-muted-foreground flex items-center gap-2 px-2 pb-1 text-[11px] group-data-[collapsible=icon]:hidden">
-          <span className={connected ? "bg-rasta-green size-2 rounded-full" : "bg-rasta-red size-2 animate-pulse rounded-full"} />
-          {connected ? "Sound system online" : "Reconnecting…"}
+        {/* The status dot stays on the icons' centre line when collapsed; only the words fade. */}
+        <div className="text-muted-foreground flex items-center gap-2 px-3.5 pb-1 text-[11px] whitespace-nowrap" title={connected ? "Sound system online" : "Reconnecting…"}>
+          <span className={cn("size-2 shrink-0 rounded-full", connected ? "bg-rasta-green" : "bg-rasta-red animate-pulse")} />
+          <span className="transition-opacity duration-200 delay-75 group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:delay-0 group-data-[collapsible=icon]:duration-100">
+            {connected ? "Sound system online" : "Reconnecting…"}
+          </span>
         </div>
       </SidebarFooter>
     </Sidebar>
@@ -200,7 +214,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <SidebarProvider>
       <AppSidebar />
-      <SidebarInset className="yard-backdrop overflow-hidden">
+      <SidebarInset className="yard-backdrop overflow-clip">
         <RastaStripe />
         <header className="bg-background/70 sticky top-0 z-20 flex h-14 items-center gap-2 border-b px-3 backdrop-blur-xl md:px-5">
           <SidebarTrigger />

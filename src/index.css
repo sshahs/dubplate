@@ -244,6 +244,7 @@
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in: cubic-bezier(0.5, 0, 0.75, 0);
   --ease-spring: cubic-bezier(0.34, 1.36, 0.64, 1);
+  --sidebar-duration: 280ms;
 }
 
 @keyframes page-in {
@@ -339,6 +340,9 @@ html.theme-reveal::view-transition-new(root) {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    --sidebar-duration: 0ms;
+  }
   .animate-spin-slow,
   .animate-vu,
   .animate-rise-in {

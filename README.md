@@ -230,6 +230,7 @@ npm run dev
 | Keys | Where | Does |
 | --- | --- | --- |
 | <kbd>⌘</kbd> <kbd>K</kbd> / <kbd>Ctrl</kbd> <kbd>K</kbd> | anywhere | Command palette |
+| <kbd>⌘</kbd> <kbd>B</kbd> / <kbd>Ctrl</kbd> <kbd>B</kbd> | anywhere | Fold the sidebar to icons and back (remembered) |
 | <kbd>J</kbd> / <kbd>K</kbd> | Review | Next / previous track |
 | <kbd>A</kbd> | Review | Approve (and learn) |
 | <kbd>X</kbd> | Review | Leave as-is |
