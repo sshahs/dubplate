@@ -9,7 +9,7 @@
   <img alt="shadcn/ui preset b6FArvVnDX" src="https://img.shields.io/badge/shadcn%2Fui-b6FArvVnDX-1f9d55?style=for-the-badge&logo=shadcnui&logoColor=white&labelColor=1b1511">
   <br>
   <img alt="Ollama local or cloud" src="https://img.shields.io/badge/AI-local%20%2B%20cloud-f4c20d?style=for-the-badge&logo=ollama&logoColor=white&labelColor=1b1511">
-  <img alt="Docker ready" src="https://img.shields.io/badge/docker-ready-d62f2f?style=for-the-badge&logo=docker&logoColor=white&labelColor=1b1511">
+  <a href="https://github.com/sshahs/dubplate/pkgs/container/dubplate"><img alt="Docker image on ghcr.io" src="https://img.shields.io/badge/ghcr.io-sshahs%2Fdubplate-d62f2f?style=for-the-badge&logo=docker&logoColor=white&labelColor=1b1511"></a>
   <img alt="Read-only by default" src="https://img.shields.io/badge/files-read--only%20by%20default-1f9d55?style=for-the-badge&labelColor=1b1511">
 </p>
 
@@ -238,15 +238,44 @@ npm run dev
 
 ## 🐳 Container ting: Docker
 
+A ready-made image is published to GitHub Container Registry for
+**amd64 and arm64**, so it runs on PCs, Macs, NAS boxes and a Raspberry Pi 4/5.
+No Node.js or build step needed.
+
+**One command**
+
 ```bash
-cp .env.example .env        # set MUSIC_DIR, PUID/PGID and keys (all optional)
-docker compose up -d        # → http://localhost:4455
+docker run -d --name dubplate --init -p 4455:4455 \
+  -v dubplate-data:/data \
+  -v /path/to/your/music:/music \
+  ghcr.io/sshahs/dubplate:latest
 ```
 
+Then open **http://localhost:4455** and add libraries as `/music/…`.
+
+**With compose** (recommended: keys, Ollama and updates in one place)
+
+```bash
+curl -O https://raw.githubusercontent.com/sshahs/dubplate/main/compose.yaml
+curl -o .env https://raw.githubusercontent.com/sshahs/dubplate/main/.env.example
+# edit .env: set MUSIC_DIR, PUID/PGID and any API keys (all optional)
+docker compose up -d              # → http://localhost:4455
+```
+
+Update to the newest build with `docker compose pull && docker compose up -d`.
+
+| Tag | What it is |
+| --- | --- |
+| `latest` | The newest build of `main` |
+| `1.2.3` · `1.2` · `1` | Releases, from `v*` git tags |
+| `sha-abc1234` | One exact commit, for pinning or rolling back |
+
+Pick one with `DUBPLATE_TAG` in `.env`.
+
 - 🎵 Your music is mounted at **`/music`**. Add libraries in the app as `/music/…`.
-- 💾 The staging database lives in the `dubplate-data` volume (`/data`).
-- 👤 The container runs as `PUID:PGID` (default `1000:1000`). That user needs write access to your music for renames to work.
-- 🔍 `fpcalc` (Chromaprint) is bundled for AcoustID. Build with `--build-arg WITH_FPCALC=0` to leave it out.
+- 💾 The staging database lives in the `dubplate-data` volume (`/data`). Keep it between upgrades.
+- 👤 The container runs as `PUID:PGID` (default `1000:1000`). That user needs write access to your music for renames to work. With plain `docker run`, add `--user 1000:1000`.
+- 🔍 `fpcalc` (Chromaprint) is bundled, so AcoustID fingerprinting works out of the box.
 - 🧠 **Ollama on the host** is reached at `host.docker.internal:11434` by default. To run Ollama in the stack instead:
 
   ```bash
@@ -255,6 +284,28 @@ docker compose up -d        # → http://localhost:4455
   ```
 
 - 🌐 If you browse to it by a LAN name or IP (e.g. a NAS), add that name or IP to `DUBPLATE_ALLOWED_HOSTS`.
+- ❤️ A built-in healthcheck reports the container as healthy once the server is up.
+
+<details>
+<summary><b>Build the image yourself</b></summary>
+
+From a checkout:
+
+```bash
+docker compose -f compose.yaml -f compose.build.yaml up -d --build
+# or
+docker build -t dubplate .
+```
+
+Add `--build-arg WITH_FPCALC=0` to leave out Chromaprint.
+
+Every push to `main` and every `v*` tag is built by
+[`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml).
+It smoke-tests the image (boots it and checks the API and UI), then publishes
+both architectures to `ghcr.io`. Pull requests get the build and smoke test
+without publishing.
+
+</details>
 
 <img src="docs/stripe.svg" width="100%" height="6" alt="">
 

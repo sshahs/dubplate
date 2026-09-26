@@ -1,15 +1,29 @@
 # syntax=docker/dockerfile:1
 
-# ---- build: compile the web app ----
-FROM node:22-bookworm-slim AS build
+# ---- web: compile the UI once, natively on the build machine ----
+# The output is plain HTML/JS/CSS, so it doesn't need emulating per platform.
+FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS web
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
-RUN npm run build && npm prune --omit=dev
+RUN npm run build
+
+# ---- deps: runtime dependencies for the target platform ----
+# Installed separately so platform-specific binaries (esbuild, used by tsx)
+# match the image's architecture.
+FROM node:22-bookworm-slim AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
 # ---- runtime ----
 FROM node:22-bookworm-slim
+
+LABEL org.opencontainers.image.title="Dubplate" \
+      org.opencontainers.image.description="AI-assisted music tagger and renamer for sound-system collections" \
+      org.opencontainers.image.source="https://github.com/sshahs/dubplate"
+
 # libchromaprint-tools provides fpcalc for AcoustID audio fingerprinting.
 # Build with --build-arg WITH_FPCALC=0 to skip it (e.g. without apt access).
 ARG WITH_FPCALC=1
@@ -27,11 +41,11 @@ ENV NODE_ENV=production \
     DUBPLATE_PORT=4455 \
     DUBPLATE_DATA_DIR=/data
 
-COPY --from=build --chown=node:node /app/package.json ./
-COPY --from=build --chown=node:node /app/node_modules ./node_modules
-COPY --from=build --chown=node:node /app/dist ./dist
-COPY --from=build --chown=node:node /app/server ./server
-COPY --from=build --chown=node:node /app/shared ./shared
+COPY --chown=node:node package.json ./
+COPY --from=deps --chown=node:node /app/node_modules ./node_modules
+COPY --from=web --chown=node:node /app/dist ./dist
+COPY --chown=node:node server ./server
+COPY --chown=node:node shared ./shared
 
 USER node
 VOLUME ["/data"]
