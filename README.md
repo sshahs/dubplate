@@ -137,7 +137,7 @@ The **Evidence** tab shows every factor behind a score:
   </tr>
   <tr>
     <td><img src="docs/screenshots/untangler.png" alt="Untangler"><p align="center"><b>Untangler</b>: test any filename</p></td>
-    <td><img src="docs/screenshots/sources.png" alt="Sources"><p align="center"><b>The scourer</b>: sources, keys and trust weights</p></td>
+    <td><img src="docs/screenshots/sources.png" alt="Sources"><p align="center"><b>The scourer</b>: sources grouped by where they look, with keys and trust weights</p></td>
   </tr>
   <tr>
     <td><img src="docs/screenshots/dashboard-light.png" alt="Light theme"><p align="center"><b>Daytime</b>: light theme</p></td>
