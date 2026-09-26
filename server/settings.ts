@@ -37,7 +37,7 @@ const DEFAULT_PROVIDERS: LlmProviderConfig[] = [
   { id: "ollama-cloud", kind: "ollama-cloud", label: "Ollama Cloud", baseUrl: "https://ollama.com", model: "gpt-oss:120b", enabled: true },
   { id: "openai", kind: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-5-mini", enabled: true },
   { id: "anthropic", kind: "anthropic", label: "Anthropic", baseUrl: "https://api.anthropic.com", model: "claude-haiku-4-5", enabled: true },
-  { id: "commandcode", kind: "commandcode", label: "Command Code", baseUrl: "https://api.commandcode.ai/provider/v1", model: "", enabled: true },
+  { id: "commandcode", kind: "commandcode", label: "Command Code", baseUrl: "https://api.commandcode.ai/provider/v1", model: "", enabled: true, zdr: false },
   { id: "custom", kind: "openai-compatible", label: "OpenAI-compatible (LM Studio, OpenRouter, Groq…)", baseUrl: "http://localhost:1234/v1", model: "", enabled: true },
 ]
 
@@ -47,6 +47,11 @@ const PROVIDER_ENV: Partial<Record<LlmProviderConfig["kind"], string>> = {
   "ollama-cloud": "OLLAMA_API_KEY",
   commandcode: "COMMANDCODE_API_KEY",
   "openai-compatible": "OPENAI_COMPATIBLE_API_KEY",
+}
+
+/** CMD_ZDR=1 (or true) forces Command Code's Zero Data Retention on, whatever the UI says. */
+export function zdrForcedByEnv(): boolean {
+  return process.env.CMD_ZDR === "1" || process.env.CMD_ZDR === "true"
 }
 
 /**
@@ -161,10 +166,11 @@ function mergeProviders(stored: LlmProviderConfig[] | undefined): LlmProviderCon
 export function loadSettings(): Settings {
   const row = getDb().prepare("SELECT value_json FROM settings WHERE key = 'app'").get() as { value_json: string } | undefined
   const stored = row ? (JSON.parse(row.value_json) as Partial<Settings>) : {}
-  const s = deepMerge(DEFAULT_SETTINGS, stored)
+  // Clone the defaults: callers (effectiveSettings) mutate the result.
+  const s = deepMerge(structuredClone(DEFAULT_SETTINGS), stored)
   s.llm.providers = mergeProviders(stored.llm?.providers)
-  s.scrapers = stored.scrapers ?? SCRAPER_PRESETS
-  s.sources = deepMerge(DEFAULT_SOURCES, stored.sources ?? {})
+  s.scrapers = stored.scrapers ?? structuredClone(SCRAPER_PRESETS)
+  s.sources = deepMerge(structuredClone(DEFAULT_SOURCES), stored.sources ?? {})
   return s
 }
 
@@ -174,6 +180,7 @@ export function effectiveSettings(): Settings {
   for (const p of s.llm.providers) {
     const env = PROVIDER_ENV[p.kind]
     if (!p.apiKey && env && process.env[env]) p.apiKey = process.env[env]
+    if (p.kind === "commandcode" && zdrForcedByEnv()) p.zdr = true
   }
   for (const [id, meta] of Object.entries(SOURCE_META)) {
     const cfg = s.sources[id]
@@ -193,21 +200,22 @@ export function mask(value: string | undefined): string | undefined {
 }
 
 /** Settings safe to send to the browser. */
-export function publicSettings(): Settings & { secretsFromEnv: string[] } {
+export function publicSettings(): Settings & { secretsFromEnv: string[]; zdrFromEnv: boolean } {
   const stored = loadSettings()
   const eff = effectiveSettings()
   const fromEnv: string[] = []
   const s = structuredClone(eff)
   s.llm.providers = s.llm.providers.map((p, i) => {
     if (p.apiKey && !stored.llm.providers[i]?.apiKey) fromEnv.push(`llm:${p.id}`)
-    return { ...p, apiKey: mask(p.apiKey) }
+    // Report the saved ZDR choice; CMD_ZDR is surfaced separately as zdrFromEnv.
+    return { ...p, apiKey: mask(p.apiKey), zdr: stored.llm.providers[i]?.zdr }
   })
   for (const [id, cfg] of Object.entries(s.sources)) {
     if (cfg.apiKey && !stored.sources[id]?.apiKey) fromEnv.push(`source:${id}`)
     cfg.apiKey = mask(cfg.apiKey)
     cfg.apiSecret = mask(cfg.apiSecret)
   }
-  return { ...s, secretsFromEnv: fromEnv }
+  return { ...s, secretsFromEnv: fromEnv, zdrFromEnv: zdrForcedByEnv() }
 }
 
 function keepSecret(incoming: string | undefined, previous: string | undefined) {

@@ -187,7 +187,7 @@ sound-clash archive ship switched off until you've verified them.
 | ☁️ Ollama Cloud | `gpt-oss:120b` | `https://ollama.com` plus an API key |
 | OpenAI | `gpt-5-mini` | Strict JSON-schema responses |
 | Anthropic | `claude-haiku-4-5` | Forced tool call for structured output |
-| Command Code | pick from list | OpenAI-compatible Provider API at `https://api.commandcode.ai/provider/v1` |
+| Command Code | pick from list | OpenAI-compatible Provider API at `https://api.commandcode.ai/provider/v1`. Has a **Zero Data Retention** switch (sends `x-cmd-zdr: 1`); `CMD_ZDR=1` forces it on. |
 | OpenAI-compatible | – | LM Studio, OpenRouter, Groq, vLLM and others. Falls back from JSON-schema to JSON mode to plain instructions. |
 
 Try any filename against the parser and the active model in the
@@ -327,6 +327,7 @@ secrets, and keys entered in the UI take precedence.
 | `DUBPLATE_ALLOWED_HOSTS` | – | Extra `Host` names allowed (DNS-rebinding guard); `*` disables the check |
 | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | `http://localhost:11434`, `qwen3:8b` | |
 | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OLLAMA_API_KEY`, `COMMANDCODE_API_KEY`, `OPENAI_COMPATIBLE_API_KEY` | – | |
+| `CMD_ZDR` | – | `1` or `true` forces Command Code's Zero Data Retention on (the Settings switch is locked) |
 | `DISCOGS_TOKEN`, `LASTFM_API_KEY`, `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `YOUTUBE_API_KEY`, `ACOUSTID_API_KEY` | – | |
 | `FPCALC_PATH` | `fpcalc` on `PATH` | |
 

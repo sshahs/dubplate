@@ -91,7 +91,7 @@ function sel(s: Selection) {
   return "ids" in s ? { ids: s.ids } : { filter: serverFilter(s.filter) }
 }
 
-export type PublicSettings = Settings & { secretsFromEnv: string[] }
+export type PublicSettings = Settings & { secretsFromEnv: string[]; zdrFromEnv: boolean }
 
 export interface SourceStatus {
   id: string

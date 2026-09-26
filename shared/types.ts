@@ -286,6 +286,8 @@ export interface LlmProviderConfig {
   model: string
   apiKey?: string
   enabled: boolean
+  /** Command Code only: ask for Zero Data Retention (`x-cmd-zdr: 1`) on every request. */
+  zdr?: boolean
 }
 
 export interface SourceConfig {
