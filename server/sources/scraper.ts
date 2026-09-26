@@ -28,7 +28,18 @@ function decodeHtml(s: string) {
   return collapseSpaces(cheerio.load(`<p>${s}</p>`)("p").text())
 }
 
-function toCandidate(def: ScraperDefinition, raw: { artist?: string; title?: string; combined?: string; url?: string; year?: string; label?: string; album?: string }, baseUrl: string): Candidate | null {
+type RawHit = { artist?: string; title?: string; combined?: string; url?: string; year?: string; label?: string; album?: string; artwork?: string }
+
+function absolute(url: string | undefined, baseUrl: string) {
+  if (!url) return undefined
+  try {
+    return new URL(url, baseUrl).toString()
+  } catch {
+    return undefined
+  }
+}
+
+function toCandidate(def: ScraperDefinition, raw: RawHit, baseUrl: string): Candidate | null {
   let artist = raw.artist ? decodeHtml(raw.artist) : ""
   let title = raw.title ? decodeHtml(raw.title) : ""
   let artists: string[] | undefined
@@ -40,14 +51,7 @@ function toCandidate(def: ScraperDefinition, raw: { artist?: string; title?: str
   }
   artist = artist.replace(/^by\s+/i, "")
   if (!title) return null
-  let url = raw.url
-  if (url) {
-    try {
-      url = new URL(url, baseUrl).toString()
-    } catch {
-      url = undefined
-    }
-  }
+  const url = absolute(raw.url, baseUrl)
   return {
     source: `scraper:${def.id}`,
     sourceLabel: def.name,
@@ -58,6 +62,7 @@ function toCandidate(def: ScraperDefinition, raw: { artist?: string; title?: str
     label: raw.label ? decodeHtml(raw.label) : undefined,
     year: yearOf(raw.year),
     url,
+    artwork: absolute(raw.artwork, baseUrl),
   }
 }
 
@@ -78,7 +83,7 @@ export async function runScraper(def: ScraperDefinition, q: Pick<SourceQuery, "q
       }
       const c = toCandidate(
         def,
-        { artist: pick(def.fields.artist), title: pick(def.fields.title), combined: pick(def.fields.combined), url: pick(def.fields.url), year: pick(def.fields.year), label: pick(def.fields.label), album: pick(def.fields.album) },
+        { artist: pick(def.fields.artist), title: pick(def.fields.title), combined: pick(def.fields.combined), url: pick(def.fields.url), year: pick(def.fields.year), label: pick(def.fields.label), album: pick(def.fields.album), artwork: pick(def.fields.artwork) },
         url
       )
       if (c) out.push(c)
@@ -101,7 +106,7 @@ export async function runScraper(def: ScraperDefinition, q: Pick<SourceQuery, "q
       }
       const c = toCandidate(
         def,
-        { artist: pick(def.fields.artist), title: pick(def.fields.title), combined: pick(def.fields.combined), url: pick(def.fields.url), year: pick(def.fields.year), label: pick(def.fields.label), album: pick(def.fields.album) },
+        { artist: pick(def.fields.artist), title: pick(def.fields.title), combined: pick(def.fields.combined), url: pick(def.fields.url), year: pick(def.fields.year), label: pick(def.fields.label), album: pick(def.fields.album), artwork: pick(def.fields.artwork) },
         url
       )
       if (c) out.push(c)

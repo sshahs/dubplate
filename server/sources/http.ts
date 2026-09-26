@@ -18,11 +18,13 @@ const HOST_INTERVAL_MS: Record<string, number> = {
   "api.mixcloud.com": 400,
   "www.googleapis.com": 120,
   "api.acoustid.org": 350,
+  "coverartarchive.org": 1100,
+  "i.discogs.com": 1100,
 }
 
 const nextSlot = new Map<string, number>()
 
-async function waitForSlot(host: string, signal?: AbortSignal) {
+export async function waitForSlot(host: string, signal?: AbortSignal) {
   const interval = HOST_INTERVAL_MS[host] ?? 1000
   const now = Date.now()
   const at = Math.max(now, nextSlot.get(host) ?? 0)

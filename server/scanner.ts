@@ -5,14 +5,19 @@ import { createHash } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
 import { parseFile } from "music-metadata"
-import type { ExistingTags, Library, Settings } from "../shared/types"
+import type { ArtRef, ExistingTags, Library, Settings } from "../shared/types"
+import { parseKey } from "../shared/keys"
+import { describeArt, pickFrontCover } from "./art"
 import { parseFilename } from "./core/filename-parser"
 import { getDb } from "./db"
 import type { JobContext } from "./jobs"
 import { mapLimit } from "./jobs"
-import { knownArtists, rowToTrack, touchLibraryScan, updateTrack } from "./repo"
+import { getTrack, knownArtists, touchLibraryScan, updateTrack } from "./repo"
+import type { Track } from "../shared/types"
 
 const HASH_CHUNK = 64 * 1024
+/** Bump when readAudio starts collecting something new, so unchanged files get re-read once. */
+export const TAGS_VERSION = 2
 
 /** Fast content fingerprint: size + first and last 64 KiB. Enough to spot
  *  duplicates and follow files that were moved outside Dubplate. */
@@ -72,8 +77,11 @@ function firstString(v: unknown): string | undefined {
 
 export async function readAudio(file: string) {
   try {
-    const meta = await parseFile(file, { duration: false, skipCovers: true })
+    const meta = await parseFile(file, { duration: false, skipCovers: false })
     const c = meta.common
+    // Only a description of the cover is kept (hash, size); the bytes stay in the file.
+    const cover = pickFrontCover(c.picture)
+    const art: ArtRef | null = cover ? describeArt(cover.data, "embedded") : null
     const tags: ExistingTags = {
       artist: c.artist?.trim() || undefined,
       artists: c.artists?.length ? c.artists : undefined,
@@ -85,9 +93,13 @@ export async function readAudio(file: string) {
       track: c.track?.no ?? undefined,
       label: firstString(c.label),
       comment: firstString(c.comment),
+      bpm: c.bpm && c.bpm > 0 ? Math.round(c.bpm * 10) / 10 : undefined,
+      key: firstString(c.key),
+      cover: art?.hash,
     }
     return {
       tags,
+      art,
       duration: meta.format.duration ?? null,
       bitrate: meta.format.bitrate ? Math.round(meta.format.bitrate) : null,
       sampleRate: meta.format.sampleRate ?? null,
@@ -95,15 +107,38 @@ export async function readAudio(file: string) {
       error: null as string | null,
     }
   } catch (err) {
-    return { tags: {}, duration: null, bitrate: null, sampleRate: null, codec: null, error: err instanceof Error ? err.message : String(err) }
+    return { tags: {}, art: null, duration: null, bitrate: null, sampleRate: null, codec: null, error: err instanceof Error ? err.message : String(err) }
   }
+}
+
+/**
+ * Tempo/key from a re-read file's tags. Tags win over an earlier analysis, but
+ * values you typed in (neither from the old tags nor the analyser) are kept.
+ */
+function tempoAndKeyFromTags(t: Track, tags: ExistingTags): Partial<Track> {
+  const out: Partial<Track> = {}
+  const mine = (field: "bpm" | "key") => {
+    const v = t[field]
+    const fromOldTags = field === "bpm" ? v === t.tags.bpm : v === parseKey(t.tags.key)
+    return v !== null && !fromOldTags && v !== t.analysis?.[field]
+  }
+  if (tags.bpm && !mine("bpm")) out.bpm = tags.bpm
+  const key = parseKey(tags.key)
+  if (key && !mine("key")) out.key = key
+  return out
 }
 
 export function folderContext(relDir: string): string[] {
   return relDir.split(/[\\/]/).filter(Boolean).reverse()
 }
 
-export async function scanLibrary(lib: Library, settings: Settings, ctx: JobContext) {
+export interface ScanResult {
+  /** ids of tracks seen for the first time */
+  added: number[]
+  changed: number[]
+}
+
+export async function scanLibrary(lib: Library, settings: Settings, ctx: JobContext): Promise<ScanResult> {
   const db = getDb()
   if (!fs.existsSync(lib.path)) throw new Error(`Library folder not found: ${lib.path}`)
   const extensions = new Set(settings.scanner.extensions.map((e) => e.toLowerCase().replace(/^\./, "")))
@@ -118,9 +153,15 @@ export async function scanLibrary(lib: Library, settings: Settings, ctx: JobCont
   ctx.setTotal(files.length)
   ctx.log("info", `${lib.name}: found ${files.length} audio files`)
 
-  const existing = new Map<string, { id: number; size: number; mtime: number }>()
-  for (const r of db.prepare("SELECT id, path, size, mtime_ms FROM tracks WHERE library_id = ?").all(lib.id) as { id: number; path: string; size: number; mtime_ms: number }[]) {
-    existing.set(r.path, { id: r.id, size: r.size, mtime: r.mtime_ms })
+  const existing = new Map<string, { id: number; size: number; mtime: number; tagsVersion: number }>()
+  for (const r of db.prepare("SELECT id, path, size, mtime_ms, tags_version FROM tracks WHERE library_id = ?").all(lib.id) as {
+    id: number
+    path: string
+    size: number
+    mtime_ms: number
+    tags_version: number
+  }[]) {
+    existing.set(r.path, { id: r.id, size: r.size, mtime: r.mtime_ms, tagsVersion: r.tags_version })
   }
   // Files we knew about that aren't on disk any more are flagged up front, so
   // a file that merely moved can be matched back to its record by hash below.
@@ -134,20 +175,23 @@ export async function scanLibrary(lib: Library, settings: Settings, ctx: JobCont
   const known = knownArtists()
   const seen = new Set<number>()
   const changed: number[] = []
-  let added = 0
+  const addedIds: number[] = []
   let moved = 0
 
-  const findMissingByHash = db.prepare("SELECT * FROM tracks WHERE hash = ? AND missing = 1 LIMIT 1")
+  const findMissingByHash = db.prepare("SELECT id FROM tracks WHERE hash = ? AND missing = 1 LIMIT 1")
   const insert = db.prepare(
-    `INSERT INTO tracks (library_id, path, original_path, rel_dir, filename, ext, size, mtime_ms, hash, duration, bitrate, sample_rate, codec, tags_json, heuristic_json, status, note)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?) RETURNING id`
+    `INSERT INTO tracks (library_id, path, original_path, rel_dir, filename, ext, size, mtime_ms, hash, duration, bitrate, sample_rate, codec, tags_json, status, note, art_json, bpm, musical_key, tags_version)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ${TAGS_VERSION}) RETURNING id`
   )
+  const markRead = db.prepare(`UPDATE tracks SET tags_version = ${TAGS_VERSION} WHERE id = ?`)
+  const insertData = db.prepare("INSERT INTO track_data (track_id, heuristic_json) VALUES (?, ?)")
+  const prevTrack = (id: number) => getTrack(id)!
 
   await mapLimit(files, 8, ctx.signal, async (file) => {
     try {
       const st = await fs.promises.stat(file)
       const prev = existing.get(file)
-      if (prev && prev.size === st.size && Math.round(prev.mtime) === Math.round(st.mtimeMs)) {
+      if (prev && prev.size === st.size && Math.round(prev.mtime) === Math.round(st.mtimeMs) && prev.tagsVersion >= TAGS_VERSION) {
         seen.add(prev.id)
         db.prepare("UPDATE tracks SET missing = 0 WHERE id = ? AND missing = 1").run(prev.id)
         ctx.tick(true)
@@ -169,17 +213,23 @@ export async function scanLibrary(lib: Library, settings: Settings, ctx: JobCont
           sampleRate: audio.sampleRate,
           codec: audio.codec,
           tags: audio.tags,
+          art: audio.art,
+          ...tempoAndKeyFromTags(prevTrack(prev.id), audio.tags),
           heuristic,
           missing: false,
         })
+        markRead.run(prev.id)
         seen.add(prev.id)
         changed.push(prev.id)
       } else {
         // A file that disappeared from its old path and reappeared here was moved.
-        const movedRow = hash ? (findMissingByHash.get(hash) as Record<string, unknown> | undefined) : undefined
-        if (movedRow) {
-          const t = rowToTrack(movedRow)
-          updateTrack(t.id, { path: file, filename, ext, relDir, mtimeMs: st.mtimeMs, missing: false, heuristic })
+        const movedRow = hash ? (findMissingByHash.get(hash) as { id: number } | undefined) : undefined
+        // (a moved file's tags are re-read below, like any new path)
+        const movedTrack = movedRow ? getTrack(movedRow.id) : null
+        if (movedTrack) {
+          const t = movedTrack
+          updateTrack(t.id, { path: file, filename, ext, relDir, mtimeMs: st.mtimeMs, missing: false, heuristic, tags: audio.tags, art: audio.art, ...tempoAndKeyFromTags(t, audio.tags) })
+          markRead.run(t.id)
           db.prepare("UPDATE tracks SET library_id = ? WHERE id = ?").run(lib.id, t.id)
           seen.add(t.id)
           changed.push(t.id)
@@ -200,12 +250,15 @@ export async function scanLibrary(lib: Library, settings: Settings, ctx: JobCont
             audio.sampleRate,
             audio.codec,
             JSON.stringify(audio.tags),
-            JSON.stringify(heuristic),
-            audio.error ? `Tag read failed: ${audio.error}` : null
+            audio.error ? `Tag read failed: ${audio.error}` : null,
+            audio.art ? JSON.stringify(audio.art) : null,
+            audio.tags.bpm ?? null,
+            parseKey(audio.tags.key)
           ) as { id: number }
+          insertData.run(r.id, JSON.stringify(heuristic))
           seen.add(r.id)
           changed.push(r.id)
-          added++
+          addedIds.push(r.id)
         }
       }
       ctx.tick(true)
@@ -215,10 +268,39 @@ export async function scanLibrary(lib: Library, settings: Settings, ctx: JobCont
     }
   })
 
-  if (ctx.signal.aborted) return
+  if (ctx.signal.aborted) return { added: addedIds, changed }
 
+  const added = addedIds.length
   missing -= moved
   touchLibraryScan(lib.id)
   ctx.tracksChanged(changed)
   ctx.log("success", `${lib.name}: ${added} new, ${changed.length - added - moved} updated, ${moved} moved, ${missing} missing`)
+  return { added: addedIds, changed }
+}
+
+/**
+ * A cheap look for changes without touching the job queue: walks the folders
+ * and compares sizes and times with what's stored. Used by folder watching so
+ * a quiet library never fills the job history with empty scans.
+ */
+export async function libraryHasChanges(lib: Library, settings: Settings, signal?: AbortSignal): Promise<boolean> {
+  if (!fs.existsSync(lib.path)) return false
+  const extensions = new Set(settings.scanner.extensions.map((e) => e.toLowerCase().replace(/^\./, "")))
+  const ignore = settings.scanner.ignore.map(globToRegex)
+  const stale = getDb().prepare("SELECT 1 FROM tracks WHERE library_id = ? AND missing = 0 AND tags_version < ? LIMIT 1").get(lib.id, TAGS_VERSION)
+  if (stale) return true
+  const known = new Map<string, { size: number; mtime: number; missing: number }>()
+  for (const r of getDb().prepare("SELECT path, size, mtime_ms, missing FROM tracks WHERE library_id = ?").all(lib.id) as { path: string; size: number; mtime_ms: number; missing: number }[]) {
+    known.set(r.path, { size: r.size, mtime: r.mtime_ms, missing: r.missing })
+  }
+  let present = 0
+  for await (const file of walk(lib.path, extensions, ignore, signal)) {
+    const k = known.get(file)
+    if (!k || k.missing) return true
+    const st = await fs.promises.stat(file).catch(() => null)
+    if (!st || st.size !== k.size || Math.round(st.mtimeMs) !== Math.round(k.mtime)) return true
+    present++
+  }
+  const stillKnown = [...known.values()].filter((k) => !k.missing).length
+  return present !== stillKnown
 }

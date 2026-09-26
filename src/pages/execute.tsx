@@ -4,8 +4,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 import { Link } from "react-router"
 import { toast } from "sonner"
-import type { OperationBatch } from "@shared/types"
+import type { OperationBatch, ExistingTags } from "@shared/types"
 import { PageHeader } from "@/components/app-shell"
+import { QueryError } from "@/components/query-error"
 import { ConfidenceMeter } from "@/components/confidence"
 import {
   AlertDialog,
@@ -108,10 +109,12 @@ function BatchRow({ batch, busy }: { batch: OperationBatch; busy: boolean }) {
   )
 }
 
+const TAG_NAMES: Partial<Record<keyof ExistingTags, string>> = { cover: "artwork", bpm: "BPM" }
+
 export default function ExecutePage() {
   const qc = useQueryClient()
   const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: api.settings })
-  const { data: plan, isLoading: planLoading } = useQuery({ queryKey: ["tracks", "plan"], queryFn: () => api.plan() })
+  const { data: plan, isLoading: planLoading, error: planError, refetch: refetchPlan } = useQuery({ queryKey: ["tracks", "plan"], queryFn: () => api.plan() })
   const { data: batches } = useQuery({ queryKey: ["batches"], queryFn: api.batches })
   const [excluded, setExcluded] = useState<Set<number>>(new Set())
   // A cut or rewind in flight: lock the controls and show its progress.
@@ -183,7 +186,8 @@ export default function ExecutePage() {
               <Skeleton className="h-40 w-full" />
             </div>
           )}
-          {!plan?.length && !planLoading && (
+          {planError && !plan && <QueryError compact error={planError} onRetry={() => void refetchPlan()} />}
+          {!plan?.length && !planLoading && !planError && (
             <div className="text-muted-foreground text-sm">
               {batches?.some((b) => !b.dryRun && b.done > 0) ? "Every approved track has been cut. " : "No approved tracks yet. "}
               Approve matches in{" "}
@@ -275,7 +279,7 @@ export default function ExecutePage() {
                           ))}
                         </TableCell>
                         <TableCell className="text-muted-foreground hidden text-xs md:table-cell">
-                          {p.tagChanges.length ? p.tagChanges.map((c) => c.field).join(", ") : "–"}
+                          {p.tagChanges.length ? p.tagChanges.map((c) => TAG_NAMES[c.field] ?? c.field).join(", ") : "–"}
                         </TableCell>
                         <TableCell className="hidden md:table-cell">
                           <ConfidenceMeter value={p.confidence} />

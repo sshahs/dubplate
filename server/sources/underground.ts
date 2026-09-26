@@ -27,6 +27,12 @@ interface BcAutoResult {
   item_url_path?: string
   item_url_root?: string
   id?: number
+  img?: string
+}
+
+/** Bandcamp image URLs end in a size code; _10 is the 1200px original. */
+function bandcampArt(url?: string) {
+  return url && /bcbits\.com\/img\//.test(url) ? url.replace(/_\d+\.(jpg|png)$/, "_10.$1") : undefined
 }
 
 async function bandcampHtml(query: string, signal?: AbortSignal): Promise<Candidate[]> {
@@ -41,8 +47,9 @@ async function bandcampHtml(query: string, signal?: AbortSignal): Promise<Candid
     const album = sub.match(/^from\s+(.+?)\s+by\s+/i)?.[1]
     const url = item.find(".itemurl a").first().attr("href") ?? item.find(".heading a").first().attr("href")
     const released = item.find(".released").first().text()
+    const art = item.find(".art img").first().attr("src")
     if (title && by) {
-      out.push({ source: "bandcamp", sourceLabel: "Bandcamp", artist: by, title, album, year: yearOf(released), url: url?.split("?")[0] })
+      out.push({ source: "bandcamp", sourceLabel: "Bandcamp", artist: by, title, album, year: yearOf(released), url: url?.split("?")[0], artwork: bandcampArt(art) })
     }
   })
   return out.slice(0, 8)
@@ -72,6 +79,7 @@ export const bandcamp: SourceAdapter = {
           album: r.album_name,
           url: r.item_url_path ?? r.item_url_root,
           externalId: r.id ? String(r.id) : undefined,
+          artwork: bandcampArt(r.img),
         }))
       }
     } catch {

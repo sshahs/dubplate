@@ -20,24 +20,44 @@ import type {
 } from "@shared/types"
 
 export class ApiError extends Error {
+  /** HTTP status; 0 when the server couldn't be reached at all */
   status: number
   constructor(status: number, message: string) {
     super(message)
     this.status = status
   }
+  get offline() {
+    return this.status === 0
+  }
+  /** The Host header guard (DUBPLATE_ALLOWED_HOSTS) turned the request away. */
+  get hostBlocked() {
+    return this.status === 403 && /not allowed/i.test(this.message)
+  }
 }
 
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
-  const res = await fetch(url, {
-    method,
-    headers: {
-      "x-dubplate": "1",
-      ...(body !== undefined ? { "content-type": "application/json" } : {}),
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method,
+      headers: {
+        "x-dubplate": "1",
+        ...(body !== undefined ? { "content-type": "application/json" } : {}),
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    })
+  } catch {
+    throw new ApiError(0, "Can't reach the Dubplate server — is it running?")
+  }
   const text = await res.text()
-  const data = text ? JSON.parse(text) : null
+  let data: { error?: string } | null = null
+  try {
+    data = text ? JSON.parse(text) : null
+  } catch {
+    // A proxy's HTML error page, a half-restarted server…: say what happened instead of a JSON parse error.
+    if (!res.ok) throw new ApiError(res.status, `The server replied ${res.status} ${res.statusText}`.trim())
+    throw new ApiError(res.status, "The server sent something unexpected — try reloading")
+  }
   if (!res.ok) throw new ApiError(res.status, data?.error ?? res.statusText)
   return data as T
 }
@@ -54,7 +74,7 @@ export interface TrackFilter {
   q?: string
   min?: number
   max?: number
-  sort?: "filename" | "confidence" | "status" | "updated" | "path"
+  sort?: "filename" | "confidence" | "status" | "updated" | "path" | "bpm" | "key"
   dir?: "asc" | "desc"
   limit?: number
   offset?: number
@@ -102,6 +122,21 @@ export interface SourceStatus {
   meta: { label: string; needs: ("apiKey" | "apiSecret")[]; keyLabel?: string; secretLabel?: string; about: string; signup?: string } | null
 }
 
+/** Fields bulk edit can set; null or "" clears. */
+export interface BulkChanges {
+  artists?: string[]
+  featuring?: string[]
+  version?: string | null
+  album?: string | null
+  year?: number | null
+  label?: string | null
+  genre?: string | null
+  bpm?: number | null
+  key?: string | null
+}
+
+type Undoable = { undoId: string | null }
+
 export interface DuplicateGroup {
   key: string
   kind: "hash" | "name"
@@ -114,6 +149,7 @@ export const api = {
 
   libraries: () => get<Library[]>("/api/libraries"),
   addLibrary: (path: string, name?: string) => post<Library>("/api/libraries", { path, name }),
+  updateLibrary: (id: number, body: { name?: string; watch?: boolean }) => patch<Library>(`/api/libraries/${id}`, body),
   removeLibrary: (id: number) => del<{ ok: true }>(`/api/libraries/${id}`),
   scanLibrary: (id: number) => post<Job>(`/api/libraries/${id}/scan`),
   scanAll: () => post<Job[]>("/api/libraries/scan-all"),
@@ -121,9 +157,20 @@ export const api = {
 
   tracks: (f: TrackFilter) => get<{ items: TrackSummary[]; total: number }>(`/api/tracks?${filterToQuery(f)}`),
   track: (id: number) => get<Track>(`/api/tracks/${id}`),
-  updateTrack: (id: number, body: { final?: Partial<FinalMeta>; note?: string }) => patch<Track>(`/api/tracks/${id}`, body),
-  approve: (id: number, final?: Partial<FinalMeta>, learn = true) => post<Track>(`/api/tracks/${id}/approve`, { final, learn }),
-  bulk: (s: Selection, action: "approve" | "reject" | "reset" | "unapprove") => post<{ changed: number }>("/api/tracks/bulk", { ...sel(s), action }),
+  updateTrack: (id: number, body: { final?: Partial<FinalMeta>; note?: string; bpm?: number | null; key?: string | null }) => patch<Track>(`/api/tracks/${id}`, body),
+  approve: (id: number, final?: Partial<FinalMeta>, learn = true) => post<Track & Undoable>(`/api/tracks/${id}/approve`, { final, learn }),
+  bulk: (s: Selection, action: "approve" | "reject" | "reset" | "unapprove") => post<{ changed: number } & Undoable>("/api/tracks/bulk", { ...sel(s), action }),
+  bulkEdit: (s: Selection, changes: BulkChanges) => post<{ changed: number; skipped: number } & Undoable>("/api/tracks/bulk-edit", { ...sel(s), changes }),
+  undo: (undoId: string) => post<{ restored: number; label: string }>(`/api/undo/${undoId}`),
+  analyze: (s: Selection, force = false) => post<Job>("/api/analyze", { ...sel(s), force }),
+  findArtwork: (s: Selection, force = false) => post<Job>("/api/artwork", { ...sel(s), force }),
+  findTrackArtwork: (id: number) => post<Track>(`/api/tracks/${id}/artwork/find`),
+  dropFoundArtwork: (id: number) => del<Track>(`/api/tracks/${id}/artwork/found`),
+  /** Thumbnail URL; the hash in it keeps the browser cache honest. */
+  artUrl: (t: { id: number; art: { hash: string } | null; artFound: { hash: string } | null }, which: "current" | "found", size = 160) => {
+    const ref = which === "found" ? t.artFound : t.art
+    return ref ? `/api/tracks/${t.id}/art?which=${which}&size=${size}&h=${ref.hash.slice(0, 12)}` : null
+  },
   rescoreOne: (id: number) => post<Track>(`/api/tracks/${id}/rescore`),
   audioUrl: (id: number) => `/api/tracks/${id}/audio`,
 

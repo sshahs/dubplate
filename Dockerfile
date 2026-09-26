@@ -24,12 +24,13 @@ LABEL org.opencontainers.image.title="Dubplate" \
       org.opencontainers.image.description="AI-assisted music tagger and renamer for sound-system collections" \
       org.opencontainers.image.source="https://github.com/sshahs/dubplate"
 
-# libchromaprint-tools provides fpcalc for AcoustID audio fingerprinting.
-# Build with --build-arg WITH_FPCALC=0 to skip it (e.g. without apt access).
+# libchromaprint-tools provides fpcalc for AcoustID audio fingerprinting;
+# tzdata lets TZ set the clock the nightly scan runs by.
+# Build with --build-arg WITH_FPCALC=0 to skip both (e.g. without apt access).
 ARG WITH_FPCALC=1
 RUN if [ "$WITH_FPCALC" = "1" ]; then \
       apt-get update \
-      && apt-get install -y --no-install-recommends libchromaprint-tools \
+      && apt-get install -y --no-install-recommends libchromaprint-tools tzdata \
       && rm -rf /var/lib/apt/lists/*; \
     fi \
   && mkdir -p /data /music \

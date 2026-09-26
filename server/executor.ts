@@ -4,8 +4,10 @@
 import { randomUUID } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
+import { formatKey } from "../shared/keys"
 import type { ExistingTags, FinalMeta, Operation, PlanItem, Settings, Track } from "../shared/types"
-import { decisionToFinal, renderTemplate, tagDiff, tagsFor } from "./core/naming"
+import { artToEmbed, describeArt, cachedArt } from "./art"
+import { decisionToFinal, renderTemplate, tagDiff, tagsFor, type TagExtras } from "./core/naming"
 import type { JobContext } from "./jobs"
 import { getTrack, insertOperation, listOperations, markOperationReverted, updateTrack } from "./repo"
 import { readManagedTags, writeTags } from "./tagger"
@@ -21,6 +23,17 @@ export function proposedFilename(t: Track, settings: Settings): string | null {
   if (!meta || !meta.title || !meta.artists.length) return null
   const base = renderTemplate(settings.naming.template, meta, settings.naming)
   return base ? `${base}.${t.ext.toLowerCase()}` : null
+}
+
+/** BPM, key and artwork to write for a track, per the settings. */
+export function extrasFor(t: Track, settings: Settings): TagExtras {
+  const out: TagExtras = {}
+  if (settings.analysis.writeTags) {
+    out.bpm = t.bpm
+    out.key = formatKey(t.key, settings.analysis.keyNotation)
+  }
+  out.cover = artToEmbed(t, settings)?.hash ?? null
+  return out
 }
 
 function sameFile(a: string, b: string) {
@@ -41,7 +54,7 @@ export function buildPlan(tracks: Track[], settings: Settings): PlanItem[] {
     const toName = proposedFilename(t, settings) ?? t.filename
     const toPath = path.join(path.dirname(t.path), toName)
     const rename = settings.naming.renameFiles && toName !== t.filename
-    const tags = meta && settings.naming.writeTags ? tagsFor(meta, t.tags, settings.naming) : {}
+    const tags = meta && settings.naming.writeTags ? tagsFor(meta, t.tags, settings.naming, extrasFor(t, settings)) : {}
     const tagChanges = tagDiff(t.tags, tags)
     if (!meta) issues.push("No approved artist/title yet")
     if (!fs.existsSync(t.path)) issues.push("File is missing on disk — rescan the library")
@@ -125,6 +138,7 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
       }
       if (item.rename) await renameSafely(track.path, item.toPath)
       const after = await fs.promises.stat(item.toPath)
+      const embedded = item.tags.cover && track.artFound?.hash === item.tags.cover
       updateTrack(track.id, {
         path: item.toPath,
         filename: path.basename(item.toPath),
@@ -133,6 +147,8 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
         tags: { ...track.tags, ...item.tags },
         status: "done",
         proposedName: path.basename(item.toPath),
+        // The found cover is now the file's own.
+        ...(embedded ? { art: track.artFound, artFound: null } : {}),
       })
       insertOperation({ batchId, trackId: track.id, kind, fromPath: item.fromPath, toPath: item.toPath, tagsBefore, tagsAfter: item.tags, status: "done", error: null })
       changed.push(track.id)
@@ -180,7 +196,14 @@ export async function rewind(opIds: number[] | null, batchId: string | null, ctx
         if (t) {
           const restored: ExistingTags = { ...t.tags }
           for (const [k, v] of Object.entries(op.tagsBefore ?? {})) (restored as Record<string, unknown>)[k] = v ?? undefined
-          updateTrack(t.id, { path: op.fromPath, filename: path.basename(op.fromPath), size: st.size, mtimeMs: st.mtimeMs, tags: restored, status: "approved" })
+          const artPatch: Partial<Track> = {}
+          if (op.tagsBefore && "cover" in op.tagsBefore) {
+            // Put the old picture's description back, and offer the removed one again.
+            const old = op.tagsBefore.cover ? cachedArt(op.tagsBefore.cover) : null
+            artPatch.art = old ? describeArt(old, "embedded") : null
+            if (t.art && t.art.hash === op.tagsAfter?.cover) artPatch.artFound = t.art
+          }
+          updateTrack(t.id, { path: op.fromPath, filename: path.basename(op.fromPath), size: st.size, mtimeMs: st.mtimeMs, tags: restored, status: "approved", ...artPatch })
           changed.push(t.id)
         }
       }

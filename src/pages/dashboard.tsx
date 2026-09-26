@@ -1,13 +1,14 @@
 import { HugeiconsIcon } from "@hugeicons/react"
 import { AiMagicIcon, CheckListIcon, FolderLibraryIcon, RefreshIcon, Scissor01Icon } from "@hugeicons/core-free-icons"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import type { CSSProperties } from "react"
+import { useState, type CSSProperties } from "react"
 import { Link } from "react-router"
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, XAxis, YAxis } from "recharts"
 import { toast } from "sonner"
 import { AnimatedNumber } from "@/components/animated-number"
 import { DubplateMark, VuMeter } from "@/components/brand"
 import { PageHeader } from "@/components/app-shell"
+import { QueryError } from "@/components/query-error"
 import { StatusBadge } from "@/components/confidence"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -59,11 +60,14 @@ const FLOW: { status: TrackStatus[]; label: string }[] = [
 ]
 
 export default function DashboardPage() {
-  const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: api.stats })
+  const { data: stats, error: statsError, refetch: refetchStats } = useQuery({ queryKey: ["stats"], queryFn: api.stats })
   const { data: libraries } = useQuery({ queryKey: ["libraries"], queryFn: api.libraries })
   const { data: health } = useQuery({ queryKey: ["health"], queryFn: api.health })
   const { data: jobs } = useQuery({ queryKey: ["jobs"], queryFn: api.jobs })
   const active = useActiveJobs()
+  // Bars grow in once. Recharts re-tweens them on every resize, so during a sidebar slide they lagged
+  // behind, overshot the card and hid their labels; after the first grow they redraw directly.
+  const [barsGrown, setBarsGrown] = useState(false)
 
   const processNew = useMutation({
     mutationFn: () => api.process(null, {}),
@@ -101,6 +105,15 @@ export default function DashboardPage() {
         </div>
         <p className="text-muted-foreground mt-6 text-xs">Scanning is read-only. Nothing on disk changes until you approve it and switch off read-only mode.</p>
       </div>
+    )
+  }
+
+  if (statsError && !stats) {
+    return (
+      <>
+        <PageHeader eyebrow="The yard" title="Dashboard" description="Where your crates stand — from raw rips to properly credited tunes." />
+        <QueryError error={statsError} onRetry={() => void refetchStats()} />
+      </>
     )
   }
 
@@ -185,7 +198,7 @@ export default function DashboardPage() {
                   <XAxis dataKey="bucket" tickLine={false} axisLine={false} tickMargin={8} />
                   <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={40} />
                   <ChartTooltip cursor={{ fillOpacity: 0.06 }} content={<ChartTooltipContent hideIndicator />} />
-                  <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={56} stroke="var(--card)" strokeWidth={2} animationDuration={600} animationEasing="ease-out">
+                  <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={56} stroke="var(--card)" strokeWidth={2} isAnimationActive={!barsGrown} onAnimationEnd={() => setBarsGrown(true)} animationDuration={600} animationEasing="ease-out">
                     {stats.confidenceBuckets.map((b) => (
                       <Cell key={b.bucket} fill={BUCKET_COLOR[b.bucket]} />
                     ))}

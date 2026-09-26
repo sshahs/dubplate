@@ -2,6 +2,7 @@ import { HugeiconsIcon } from "@hugeicons/react"
 import { Copy01Icon } from "@hugeicons/core-free-icons"
 import { useQuery } from "@tanstack/react-query"
 import { PageHeader } from "@/components/app-shell"
+import { QueryError } from "@/components/query-error"
 import { ConfidenceMeter, StatusBadge } from "@/components/confidence"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,7 +11,7 @@ import { api } from "@/lib/api"
 import { fmtBytes, fmtDuration } from "@/lib/format"
 
 export default function DuplicatesPage() {
-  const { data: groups } = useQuery({ queryKey: ["tracks", "duplicates"], queryFn: api.duplicates })
+  const { data: groups, error, refetch } = useQuery({ queryKey: ["tracks", "duplicates"], queryFn: api.duplicates })
   return (
     <>
       <PageHeader
@@ -18,6 +19,7 @@ export default function DuplicatesPage() {
         title="Duplicates"
         description="Identical audio (same content fingerprint) and different files that would end up with the same name. Dubplate never deletes — this is for your information."
       />
+      {error && !groups && <QueryError error={error} onRetry={() => void refetch()} />}
       {groups?.length === 0 && (
         <Empty className="border">
           <EmptyHeader>

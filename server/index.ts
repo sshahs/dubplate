@@ -9,6 +9,7 @@ import { getDb } from "./db"
 import { markInterruptedJobs } from "./jobs"
 import { upsertAlias } from "./repo"
 import { pruneHttpCache } from "./sources/http"
+import { startAutomation } from "./watcher"
 
 /** A starter set of common shorthand → credited names. Editable in Settings → Learning. */
 const STARTER_ALIASES: [string, string][] = [
@@ -72,4 +73,6 @@ serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => 
   console.log(`\n  ◉ Dubplate ${VERSION} — selector ready`)
   console.log(`  ➜ http://${host}:${info.port}`)
   console.log(`  ➜ data: ${config.dataDir}\n`)
+  // Watched folders, periodic re-checks and the nightly scan.
+  startAutomation()
 })
