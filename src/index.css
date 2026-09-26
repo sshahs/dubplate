@@ -1,0 +1,242 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+@import "@fontsource-variable/manrope";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * shadcn preset b6FArvVnDX — base / luma / taupe / red / hugeicons /
+ * geist + manrope / radius large / inverted-translucent menus —
+ * recoloured for a roots sound-system feel: warm taupe "yard" neutrals,
+ * red as the primary, with gold and green carried as first-class tokens.
+ */
+
+@theme inline {
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, monospace;
+  --font-heading: "Manrope Variable", "Geist Variable", sans-serif;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Rasta tricolour + semantic aliases used by the confidence UI. */
+  --color-rasta-red: var(--rasta-red);
+  --color-rasta-gold: var(--rasta-gold);
+  --color-rasta-green: var(--rasta-green);
+  --color-success: var(--rasta-green);
+  --color-warning: var(--rasta-gold);
+  --color-danger: var(--rasta-red);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+
+  --animate-spin-slow: spin 2.4s linear infinite;
+  --animate-vu: vu 0.9s ease-in-out infinite alternate;
+
+  @keyframes vu {
+    0% {
+      transform: scaleY(0.25);
+    }
+    100% {
+      transform: scaleY(1);
+    }
+  }
+}
+
+:root {
+  --radius: 0.875rem;
+
+  --rasta-red: oklch(0.56 0.21 27);
+  --rasta-gold: oklch(0.72 0.16 80);
+  --rasta-green: oklch(0.55 0.15 150);
+
+  --background: oklch(0.985 0.006 85);
+  --foreground: oklch(0.18 0.012 50);
+  --card: oklch(1 0.004 85);
+  --card-foreground: oklch(0.18 0.012 50);
+  --popover: oklch(1 0.004 85);
+  --popover-foreground: oklch(0.18 0.012 50);
+  --primary: oklch(0.505 0.213 27.518);
+  --primary-foreground: oklch(0.971 0.013 17.38);
+  --secondary: oklch(0.955 0.02 88);
+  --secondary-foreground: oklch(0.28 0.03 60);
+  --muted: oklch(0.955 0.008 70);
+  --muted-foreground: oklch(0.5 0.022 50);
+  --accent: oklch(0.95 0.03 150);
+  --accent-foreground: oklch(0.3 0.08 150);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.905 0.012 60);
+  --input: oklch(0.905 0.012 60);
+  --ring: oklch(0.72 0.16 80);
+  /* chart steps validated for CVD separation + lightness band (dataviz validator) */
+  --chart-1: oklch(0.56 0.21 27);
+  --chart-2: oklch(0.7 0.15 78);
+  --chart-3: oklch(0.55 0.15 150);
+  --chart-4: oklch(0.68 0.17 50);
+  --chart-5: oklch(0.42 0.1 155);
+  --sidebar: oklch(0.97 0.01 80);
+  --sidebar-foreground: oklch(0.18 0.012 50);
+  --sidebar-primary: oklch(0.505 0.213 27.518);
+  --sidebar-primary-foreground: oklch(0.971 0.013 17.38);
+  --sidebar-accent: oklch(0.93 0.025 85);
+  --sidebar-accent-foreground: oklch(0.22 0.02 50);
+  --sidebar-border: oklch(0.905 0.012 60);
+  --sidebar-ring: oklch(0.72 0.16 80);
+}
+
+.dark {
+  --rasta-red: oklch(0.64 0.22 27);
+  --rasta-gold: oklch(0.85 0.165 88);
+  --rasta-green: oklch(0.7 0.17 150);
+
+  --background: oklch(0.155 0.008 55);
+  --foreground: oklch(0.965 0.012 85);
+  --card: oklch(0.2 0.012 50);
+  --card-foreground: oklch(0.965 0.012 85);
+  --popover: oklch(0.22 0.012 50);
+  --popover-foreground: oklch(0.965 0.012 85);
+  --primary: oklch(0.6 0.22 27);
+  --primary-foreground: oklch(0.985 0.01 20);
+  --secondary: oklch(0.28 0.03 75);
+  --secondary-foreground: oklch(0.92 0.06 88);
+  --muted: oklch(0.26 0.012 50);
+  --muted-foreground: oklch(0.72 0.02 65);
+  --accent: oklch(0.3 0.05 150);
+  --accent-foreground: oklch(0.93 0.05 150);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.85 0.165 88);
+  --chart-1: oklch(0.58 0.21 27);
+  --chart-2: oklch(0.665 0.14 88);
+  --chart-3: oklch(0.5 0.13 150);
+  --chart-4: oklch(0.74 0.16 55);
+  --chart-5: oklch(0.55 0.13 155);
+  --sidebar: oklch(0.18 0.01 52);
+  --sidebar-foreground: oklch(0.965 0.012 85);
+  --sidebar-primary: oklch(0.64 0.22 27);
+  --sidebar-primary-foreground: oklch(0.985 0.01 20);
+  --sidebar-accent: oklch(0.26 0.02 60);
+  --sidebar-accent-foreground: oklch(0.965 0.012 85);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: oklch(0.85 0.165 88);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "ss01", "cv11";
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-heading tracking-tight;
+  }
+}
+
+@layer components {
+  /* The red-gold-green band that runs along the top of the app. */
+  .rasta-stripe {
+    background: linear-gradient(
+      90deg,
+      var(--rasta-red) 0 33.33%,
+      var(--rasta-gold) 33.33% 66.66%,
+      var(--rasta-green) 66.66% 100%
+    );
+  }
+
+  .rasta-text {
+    background: linear-gradient(90deg, var(--rasta-red), var(--rasta-gold), var(--rasta-green));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Faint speaker-grille dots + tricolour glow behind the main canvas. */
+  .yard-backdrop {
+    background-image:
+      radial-gradient(
+        60rem 30rem at 110% -10%,
+        color-mix(in oklch, var(--rasta-green) 14%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(
+        50rem 28rem at -10% 110%,
+        color-mix(in oklch, var(--rasta-red) 12%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(
+        40rem 20rem at 50% 120%,
+        color-mix(in oklch, var(--rasta-gold) 8%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(color-mix(in oklch, var(--foreground) 5%, transparent) 1px, transparent 1px);
+    background-size:
+      auto,
+      auto,
+      auto,
+      14px 14px;
+  }
+
+  .vinyl-grooves {
+    background: repeating-radial-gradient(
+      circle at center,
+      oklch(0.14 0 0) 0 1.5px,
+      oklch(0.2 0 0) 1.5px 3px
+    );
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin-slow,
+  .animate-vu {
+    animation: none;
+  }
+}

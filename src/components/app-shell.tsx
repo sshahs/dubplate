@@ -1,0 +1,196 @@
+import { HugeiconsIcon } from "@hugeicons/react"
+import {
+  AiMagicIcon,
+  CheckListIcon,
+  Copy01Icon,
+  DashboardSquare01Icon,
+  DatabaseIcon,
+  FolderLibraryIcon,
+  Moon02Icon,
+  MusicNote03Icon,
+  Scissor01Icon,
+  Search01Icon,
+  Settings02Icon,
+  SquareLock02Icon,
+  Sun03Icon,
+} from "@hugeicons/core-free-icons"
+import { useQuery } from "@tanstack/react-query"
+import { useState, type ReactNode } from "react"
+import { NavLink, useLocation } from "react-router"
+import { CommandPalette } from "@/components/command-palette"
+import { DubplateMark, RastaStripe } from "@/components/brand"
+import { JobDock } from "@/components/job-dock"
+import { useTheme } from "@/components/theme-provider"
+import { Button } from "@/components/ui/button"
+import { Kbd } from "@/components/ui/kbd"
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuBadge,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { api } from "@/lib/api"
+import { useLive } from "@/lib/events"
+
+export const NAV = [
+  { to: "/", label: "Dashboard", icon: DashboardSquare01Icon, group: "Selector" },
+  { to: "/libraries", label: "Libraries", icon: FolderLibraryIcon, group: "Selector" },
+  { to: "/tracks", label: "Tracks", icon: MusicNote03Icon, group: "Selector" },
+  { to: "/review", label: "Review", icon: CheckListIcon, group: "Selector", badge: "review" as const },
+  { to: "/execute", label: "Cut & Tag", icon: Scissor01Icon, group: "Selector", badge: "approved" as const },
+  { to: "/untangler", label: "Untangler", icon: AiMagicIcon, group: "Tools" },
+  { to: "/sources", label: "Sources", icon: DatabaseIcon, group: "Tools" },
+  { to: "/duplicates", label: "Duplicates", icon: Copy01Icon, group: "Tools" },
+  { to: "/settings", label: "Settings", icon: Settings02Icon, group: "Tools" },
+]
+
+function ThemeToggle() {
+  const { resolvedTheme, setTheme } = useTheme()
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button variant="ghost" size="icon-sm" onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")} aria-label="Toggle theme" />
+        }
+      >
+        <HugeiconsIcon icon={resolvedTheme === "dark" ? Sun03Icon : Moon02Icon} strokeWidth={2} />
+      </TooltipTrigger>
+      <TooltipContent>{resolvedTheme === "dark" ? "Daytime" : "Night session"}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+function AppSidebar() {
+  const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: api.stats })
+  const { connected } = useLive()
+  const location = useLocation()
+  const groups = [...new Set(NAV.map((n) => n.group))]
+  const badgeFor = (b?: "review" | "approved") => {
+    if (!b || !stats) return 0
+    return b === "review" ? stats.byStatus.review + stats.byStatus.conflict : stats.byStatus.approved
+  }
+  return (
+    <Sidebar variant="inset" collapsible="icon">
+      <SidebarHeader>
+        <div className="flex items-center gap-2.5 px-1 py-1.5 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+          <DubplateMark className="size-8" />
+          <div className="leading-tight group-data-[collapsible=icon]:hidden">
+            <div className="font-heading text-base font-extrabold tracking-tight">Dubplate</div>
+            <div className="text-muted-foreground text-[11px]">selector's tagging rig</div>
+          </div>
+        </div>
+      </SidebarHeader>
+      <SidebarContent>
+        {groups.map((g) => (
+          <SidebarGroup key={g}>
+            <SidebarGroupLabel>{g}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {NAV.filter((n) => n.group === g).map((n) => {
+                  const active = n.to === "/" ? location.pathname === "/" : location.pathname.startsWith(n.to)
+                  const count = badgeFor(n.badge)
+                  return (
+                    <SidebarMenuItem key={n.to}>
+                      <SidebarMenuButton isActive={active} tooltip={n.label} render={<NavLink to={n.to} />}>
+                        <HugeiconsIcon icon={n.icon} strokeWidth={2} />
+                        <span>{n.label}</span>
+                      </SidebarMenuButton>
+                      {count > 0 && <SidebarMenuBadge className={n.badge === "review" ? "text-rasta-gold" : "text-primary"}>{count}</SidebarMenuBadge>}
+                    </SidebarMenuItem>
+                  )
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
+      </SidebarContent>
+      <SidebarFooter>
+        <div className="text-muted-foreground flex items-center gap-2 px-2 pb-1 text-[11px] group-data-[collapsible=icon]:hidden">
+          <span className={connected ? "bg-rasta-green size-2 rounded-full" : "bg-rasta-red size-2 animate-pulse rounded-full"} />
+          {connected ? "Sound system online" : "Reconnecting…"}
+        </div>
+      </SidebarFooter>
+    </Sidebar>
+  )
+}
+
+function ReadOnlyPill() {
+  const { data } = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000 })
+  if (!data) return null
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <NavLink
+            to="/execute#safety"
+            aria-label={data.readOnly ? "Read-only mode" : "Writes enabled"}
+            className={
+              data.readOnly
+                ? "bg-rasta-green/12 text-rasta-green ring-rasta-green/25 inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium ring-1 ring-inset"
+                : "bg-rasta-red/12 text-rasta-red ring-rasta-red/30 inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium ring-1 ring-inset"
+            }
+          />
+        }
+      >
+        <HugeiconsIcon icon={SquareLock02Icon} strokeWidth={2} className="size-3.5" />
+        <span className="hidden whitespace-nowrap sm:inline">{data.readOnly ? "Read-only" : "Live — writes enabled"}</span>
+      </TooltipTrigger>
+      <TooltipContent>{data.readOnly ? "Files cannot be changed. Turn off in Settings → Safety." : "Dubplate can rename and tag files."}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+export function AppShell({ children }: { children: ReactNode }) {
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  return (
+    <SidebarProvider>
+      <AppSidebar />
+      <SidebarInset className="yard-backdrop overflow-hidden">
+        <RastaStripe />
+        <header className="bg-background/70 sticky top-0 z-20 flex h-14 items-center gap-2 border-b px-3 backdrop-blur-xl md:px-5">
+          <SidebarTrigger />
+          <button
+            type="button"
+            onClick={() => setPaletteOpen(true)}
+            className="text-muted-foreground bg-input/40 hover:bg-input/60 flex h-8 w-full max-w-xs items-center gap-2 rounded-full px-3 text-sm transition-colors"
+          >
+            <HugeiconsIcon icon={Search01Icon} strokeWidth={2} className="size-4" />
+            <span className="flex-1 text-left">Jump to…</span>
+            <Kbd className="hidden sm:inline-flex">⌘K</Kbd>
+          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <JobDock />
+            <ReadOnlyPill />
+            <ThemeToggle />
+          </div>
+        </header>
+        <main className="mx-auto w-full max-w-7xl flex-1 px-3 py-5 md:px-6 md:py-7">{children}</main>
+      </SidebarInset>
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+    </SidebarProvider>
+  )
+}
+
+export function PageHeader({ title, description, actions, eyebrow }: { title: string; description?: ReactNode; actions?: ReactNode; eyebrow?: string }) {
+  return (
+    <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div className="min-w-0">
+        {eyebrow && <div className="text-rasta-gold mb-1 text-xs font-semibold tracking-[0.2em] uppercase">{eyebrow}</div>}
+        <h1 className="text-2xl font-extrabold md:text-3xl">{title}</h1>
+        {description && <p className="text-muted-foreground mt-1 max-w-2xl text-sm">{description}</p>}
+      </div>
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+    </div>
+  )
+}

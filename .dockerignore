@@ -1,0 +1,13 @@
+node_modules
+dist
+.git
+.github
+*.db
+*.db-*
+data
+demo-crates
+coverage
+.env
+.env.*
+!.env.example
+*.log
