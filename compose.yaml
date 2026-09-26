@@ -1,5 +1,8 @@
 # Dubplate — docker compose up -d, then open http://localhost:4455
 #
+# Uses the published image from GitHub Container Registry. To build from
+# source instead: docker compose -f compose.yaml -f compose.build.yaml up -d --build
+#
 # Mount the folders you want tagged under /music and add them in the app as
 # libraries (e.g. /music/reggae). Dubplate only writes to them once you switch
 # off read-only mode, so the container user needs write access for renames —
@@ -7,8 +10,7 @@
 
 services:
   dubplate:
-    build: .
-    image: dubplate:latest
+    image: ghcr.io/sshahs/dubplate:${DUBPLATE_TAG:-latest}
     container_name: dubplate
     restart: unless-stopped
     init: true
