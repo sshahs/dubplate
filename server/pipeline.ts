@@ -14,7 +14,7 @@ import { aliasMap, getTrack, knownArtists, listCorrections, updateTrack } from "
 import { folderContext } from "./scanner"
 import { scourTrack, SourceBreaker } from "./sources"
 
-/** Statuses a human set — automated passes must not overwrite them. */
+/** Statuses a human set - automated passes must not overwrite them. */
 const HUMAN_STATUSES: TrackStatus[] = ["approved", "done", "rejected"]
 
 export function weightsFrom(settings: Settings): Record<string, number> {
@@ -94,7 +94,7 @@ export async function processTracks(ids: number[], settings: Settings, opts: Pro
           // Same error three times in a row = config problem, not the file.
           if (aiFailures >= 3) {
             aiDisabled = true
-            ctx.log("error", `Stopping AI for this run after repeated errors — continuing with the rule-based parser. (${message})`)
+            ctx.log("error", `Stopping AI for this run after repeated errors - continuing with the rule-based parser. (${message})`)
           }
         }
       }
@@ -104,7 +104,7 @@ export async function processTracks(ids: number[], settings: Settings, opts: Pro
         if (reading) {
           const result = await scourTrack(track, reading, settings, track.ai?.searchQueries ?? [], ctx.signal, breaker)
           for (const e of result.errors) ctx.log("warn", `${e.source}: ${e.message}`)
-          for (const s of result.tripped) ctx.log("error", `${s} keeps failing — skipping it for the rest of this run`)
+          for (const s of result.tripped) ctx.log("error", `${s} keeps failing - skipping it for the rest of this run`)
           track = { ...track, candidates: result.candidates }
           updateTrack(id, { candidates: result.candidates, status: HUMAN_STATUSES.includes(track.status) ? track.status : "scoured" })
         }

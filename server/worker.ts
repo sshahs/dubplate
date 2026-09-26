@@ -1,5 +1,5 @@
-// Worker-thread entry for CPU-heavy work — decoding audio for BPM/key and
-// shrinking cover art — so the API stays responsive while it runs.
+// Worker-thread entry for CPU-heavy work - decoding audio for BPM/key and
+// shrinking cover art - so the API stays responsive while it runs.
 
 import { parentPort } from "node:worker_threads"
 import { analyseFile, type AnalyseRequest } from "./analysis/analyse"

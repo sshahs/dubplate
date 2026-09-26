@@ -65,7 +65,7 @@ function decodeImage(bytes: Uint8Array, mime: string): Rgba | null {
 
 /**
  * Centre-crop to a square and shrink to `size` pixels with an area average, as
- * a JPEG. Returns null for formats we can't decode (WebP, GIF) — callers serve
+ * a JPEG. Returns null for formats we can't decode (WebP, GIF) - callers serve
  * the original then.
  */
 export function makeThumbnail(bytes: Uint8Array, size: number): Buffer | null {

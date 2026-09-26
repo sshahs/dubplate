@@ -57,13 +57,13 @@ export function buildPlan(tracks: Track[], settings: Settings): PlanItem[] {
     const tags = meta && settings.naming.writeTags ? tagsFor(meta, t.tags, settings.naming, extrasFor(t, settings)) : {}
     const tagChanges = tagDiff(t.tags, tags)
     if (!meta) issues.push("No approved artist/title yet")
-    if (!fs.existsSync(t.path)) issues.push("File is missing on disk — rescan the library")
+    if (!fs.existsSync(t.path)) issues.push("File is missing on disk - rescan the library")
     if (rename && fs.existsSync(toPath) && !sameFile(t.path, toPath)) issues.push(`"${toName}" already exists in this folder`)
     if (rename) {
       const key = toPath.toLowerCase()
       targets.set(key, (targets.get(key) ?? 0) + 1)
     }
-    if (!rename && !tagChanges.length && meta) issues.push("Already clean — nothing to change")
+    if (!rename && !tagChanges.length && meta) issues.push("Already clean - nothing to change")
     return {
       trackId: t.id,
       fromPath: t.path,
@@ -105,7 +105,7 @@ function pickBefore(before: ExistingTags, fields: (keyof ExistingTags)[]): Exist
 }
 
 export async function executePlan(items: PlanItem[], settings: Settings, opts: { dryRun: boolean }, ctx: JobContext): Promise<string> {
-  if (settings.safety.readOnly && !opts.dryRun) throw new Error("Read-only mode is on — switch it off in Settings to write to files")
+  if (settings.safety.readOnly && !opts.dryRun) throw new Error("Read-only mode is on - switch it off in Settings to write to files")
   const batchId = randomUUID()
   const runnable = items.filter((i) => !i.blocked)
   ctx.setTotal(runnable.length)
@@ -128,7 +128,7 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
     try {
       const st = await fs.promises.stat(track.path)
       if (st.size !== track.size || Math.round(st.mtimeMs) !== Math.round(track.mtimeMs)) {
-        throw new Error("File changed on disk since it was scanned — rescan first")
+        throw new Error("File changed on disk since it was scanned - rescan first")
       }
       if (item.tagChanges.length) {
         tagsBefore = pickBefore(readManagedTags(track.path), fields)
@@ -160,7 +160,7 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
         try {
           writeTags(track.path, tagsBefore)
         } catch {
-          // best effort — the journal records what happened
+          // best effort - the journal records what happened
         }
       }
       insertOperation({ batchId, trackId: track.id, kind, fromPath: item.fromPath, toPath: item.toPath, tagsBefore, tagsAfter: item.tags, status: "failed", error: message })
@@ -185,7 +185,7 @@ export async function rewind(opIds: number[] | null, batchId: string | null, ctx
     try {
       if (!fs.existsSync(op.toPath)) throw new Error(`${path.basename(op.toPath)} is no longer there`)
       if (op.kind !== "tag" && op.fromPath !== op.toPath && fs.existsSync(op.fromPath) && !sameFile(op.fromPath, op.toPath)) {
-        throw new Error(`${path.basename(op.fromPath)} exists again — not overwriting it`)
+        throw new Error(`${path.basename(op.fromPath)} exists again - not overwriting it`)
       }
       if (op.tagsBefore && Object.keys(op.tagsBefore).length) writeTags(op.toPath, op.tagsBefore as Record<string, unknown>)
       if (op.kind !== "tag") await renameSafely(op.toPath, op.fromPath)

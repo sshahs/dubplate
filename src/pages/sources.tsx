@@ -58,7 +58,7 @@ const GROUPS: { id: GroupId; label: string; icon: SectionItem["icon"]; title: st
     description: "Recognises the recording itself, so it still works when the filename is nonsense.",
     ids: ["acoustid"],
   },
-  { id: "scrapers", label: "Custom scrapers", icon: SourceCodeIcon, title: "Custom scrapers", description: "Grime archives, clash databases, label shops — anything with a search page." },
+  { id: "scrapers", label: "Custom scrapers", icon: SourceCodeIcon, title: "Custom scrapers", description: "Grime archives, clash databases, label shops - anything with a search page." },
 ]
 
 const groupOf = (id: string): GroupId => (id.startsWith("scraper:") ? "scrapers" : (GROUPS.find((g) => g.ids?.includes(id))?.id ?? "catalogues"))
@@ -81,7 +81,7 @@ function CandidateList({ items }: { items: Candidate[] }) {
       {items.slice(0, 8).map((c, i) => (
         <div key={i} className="flex items-center gap-2 text-xs">
           <span className="min-w-0 flex-1 truncate">
-            {c.artist || "?"} — {c.title}
+            {c.artist || "?"} - {c.title}
             {c.year ? ` · ${c.year}` : ""}
             {c.album ? ` · ${c.album}` : ""}
           </span>
@@ -205,7 +205,7 @@ function SourceRow({
                       <a href={meta.signup} target="_blank" rel="noreferrer noopener" className="text-foreground underline underline-offset-2">
                         {hostOf(meta.signup)}
                       </a>
-                      {keyFromEnv && " — currently read from the environment."}
+                      {keyFromEnv && " - currently read from the environment."}
                     </>
                   ) : undefined
                 }
@@ -567,7 +567,7 @@ export default function SourcesPage() {
                 <CardTitle>{group.title}</CardTitle>
                 <CardDescription>
                   {group.description}
-                  {section === "scrapers" && " Presets ship switched off and unverified — test one before trusting it."}
+                  {section === "scrapers" && " Presets ship switched off and unverified - test one before trusting it."}
                 </CardDescription>
                 <CardAction>
                   {section === "scrapers" ? (

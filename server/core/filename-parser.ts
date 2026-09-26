@@ -58,7 +58,7 @@ const VERSION_HINTS: [RegExp, string][] = [
   [/\bedit\b/i, "edit"],
 ]
 
-const SEPARATORS = [/\s+[-–—]+\s+/, /\s*--+\s*/, /\s+~\s+/, /\s*\|\s*/, /\s+:\s+/]
+const SEPARATORS = [/\s+[-–-]+\s+/, /\s*--+\s*/, /\s+~\s+/, /\s*\|\s*/, /\s+:\s+/]
 
 function decode(raw: string): { text: string; hadUnderscores: boolean } {
   let s = raw
@@ -74,7 +74,7 @@ function decode(raw: string): { text: string; hadUnderscores: boolean } {
   if (!/\s/.test(s) && (s.match(/\./g)?.length ?? 0) >= 2) s = s.replace(/\./g, " ")
   // "A1-Tenor_Saw-Ring_The_Alarm" / "Artist-Title": with no spaced separator,
   // treat hyphens between 2+ character chunks as separators ("Jay-Z" survives).
-  if (!/\s[-–—]\s/.test(s) && (hadUnderscores || !/\s/.test(raw))) {
+  if (!/\s[-–-]\s/.test(s) && (hadUnderscores || !/\s/.test(raw))) {
     s = s.replace(/(?<=[\p{L}\p{N}]{2})-(?=[\p{L}\p{N}]{2})/gu, " - ")
   }
   return { text: collapseSpaces(s), hadUnderscores }
@@ -201,7 +201,7 @@ export function parseFilename(filename: string, ctx: ParseContext = {}): Heurist
       const folderAlbum = ctx.folders?.[0] ? normArtist(ctx.folders[0]) : ""
       if (folderAlbum && normArtist(meaningful[1]) === folderAlbum) {
         titlePart = meaningful.slice(2).join(" - ")
-        notes.push("middle segment matches folder name — treated as album")
+        notes.push("middle segment matches folder name - treated as album")
       } else {
         titlePart = meaningful.slice(1).join(" - ")
       }
@@ -247,9 +247,9 @@ export function parseFilename(filename: string, ctx: ParseContext = {}): Heurist
     } else if (ctx.tagArtist) {
       artistPart = ctx.tagArtist
       confidence = 0.25
-      notes.push("no separator — artist taken from embedded tag")
+      notes.push("no separator - artist taken from embedded tag")
     } else if (ctx.folders?.[0] && !/^(?:music|downloads?|mp3s?|new folder|misc|various|unsorted|tunes|singles)$/i.test(ctx.folders[0])) {
-      notes.push("no separator — the folder name may be the artist")
+      notes.push("no separator - the folder name may be the artist")
     }
   }
 
@@ -259,7 +259,7 @@ export function parseFilename(filename: string, ctx: ParseContext = {}): Heurist
   const trailing = /\s+(?:live|dub\s?plate|special|clash|sound\s?clash|version|tape|recording|session)$/i
   let guard = 0
   while (trailing.test(title) && guard++ < 4) title = title.replace(trailing, "")
-  title = collapseSpaces(title.replace(/^[-–—:~|]+|[-–—:~|]+$/g, ""))
+  title = collapseSpaces(title.replace(/^[-–-:~|]+|[-–-:~|]+$/g, ""))
 
   const { artists, featuring, relation } = splitArtists(artistPart, known)
   // Featuring credits sometimes live in the title: "Title (feat. X)"
@@ -275,7 +275,7 @@ export function parseFilename(filename: string, ctx: ParseContext = {}): Heurist
     notes.push("title looks generic or empty")
   }
   if (hints.includes("clash") || relation === "vs") {
-    notes.push("looks like a clash recording — title may need to describe the event")
+    notes.push("looks like a clash recording - title may need to describe the event")
   }
 
   let version = bracketVersion

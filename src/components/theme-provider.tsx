@@ -53,7 +53,7 @@ export function ThemeProvider({
     try {
       localStorage.setItem(STORAGE_KEY, next)
     } catch {
-      // storage unavailable (private mode) — theme still applies for this session
+      // storage unavailable (private mode) - theme still applies for this session
     }
   }
 

@@ -189,7 +189,7 @@ function ProviderItem({
                 </Button>
               </div>
               <datalist id={`models-${p.id}`}>{models?.map((m) => <option key={m} value={m} />)}</datalist>
-              {models && <FieldDescription>{models.length} models available — start typing to pick.</FieldDescription>}
+              {models && <FieldDescription>{models.length} models available - start typing to pick.</FieldDescription>}
             </Field>
             {(needsKey || p.kind === "openai-compatible") && (
               <Field className="sm:col-span-2">
@@ -341,7 +341,7 @@ function Learning() {
                 <div className="min-w-0 flex-1">
                   <div className="text-muted-foreground truncate font-mono text-[11px]">{c.filename}</div>
                   <div className="truncate text-sm">
-                    {c.artists.join(" & ")} — {c.title}
+                    {c.artists.join(" & ")} - {c.title}
                     {c.version ? ` (${c.version})` : ""}
                   </div>
                 </div>
@@ -386,11 +386,11 @@ function NotificationsCard() {
             title="Pop up a notification"
             description={
               support === "insecure"
-                ? "Browsers only allow notifications on HTTPS or localhost — open Dubplate through an HTTPS reverse proxy to use them."
+                ? "Browsers only allow notifications on HTTPS or localhost - open Dubplate through an HTTPS reverse proxy to use them."
                 : support === "unsupported"
                   ? "This browser doesn't support notifications."
                   : denied
-                    ? "Blocked for this site — allow notifications in the browser's site settings, then switch this on."
+                    ? "Blocked for this site - allow notifications in the browser's site settings, then switch this on."
                     : "Scans, identifies and cuts that take a while."
             }
           >
@@ -405,8 +405,8 @@ function NotificationsCard() {
 // ---------- options ----------
 
 const KEY_NOTATIONS = [
-  { value: "musical" as const, label: "Musical — Am, F#" },
-  { value: "camelot" as const, label: "Camelot — 8A, 2B" },
+  { value: "musical" as const, label: "Musical - Am, F#" },
+  { value: "camelot" as const, label: "Camelot - 8A, 2B" },
 ]
 const BPM_RANGES = [
   { value: "60", label: "60–119 (half-time)" },
@@ -520,7 +520,7 @@ export default function SettingsPage() {
                 </CardHeader>
                 <CardContent>
                   <SettingRows>
-                    <SettingRow title="Temperature" description="Keep it low — this is transcription, not creative writing.">
+                    <SettingRow title="Temperature" description="Keep it low - this is transcription, not creative writing.">
                       <SliderControl label="Temperature" value={draft.llm.temperature} min={0} max={1} step={0.05} format={(v) => v.toFixed(2)} onChange={(v) => set((d) => void (d.llm.temperature = v))} />
                     </SettingRow>
                     <SettingRow title="Parallel requests" description="1–2 for a local Ollama, higher for cloud APIs.">
@@ -529,7 +529,7 @@ export default function SettingsPage() {
                     <SettingRow title="Learn from my corrections" description="Show the AI your past approvals as examples for similar filenames.">
                       <Switch checked={draft.llm.useCorrections} onCheckedChange={(v) => set((d) => void (d.llm.useCorrections = v))} aria-label="Learn from my corrections" />
                     </SettingRow>
-                    <SettingRow stack htmlFor="scene-hint" title="What's in your crates" description="A sentence or two about the collection — it shapes how ambiguous names are read.">
+                    <SettingRow stack htmlFor="scene-hint" title="What's in your crates" description="A sentence or two about the collection - it shapes how ambiguous names are read.">
                       <Textarea id="scene-hint" value={draft.llm.sceneHint} onChange={(e) => set((d) => void (d.llm.sceneHint = e.target.value))} rows={2} />
                     </SettingRow>
                   </SettingRows>

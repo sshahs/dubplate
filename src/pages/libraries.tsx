@@ -91,7 +91,7 @@ function AddLibraryDialog() {
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Add a library</DialogTitle>
-          <DialogDescription>A folder on this machine (or mounted into the container). It's scanned read-only — every subfolder included.</DialogDescription>
+          <DialogDescription>A folder on this machine (or mounted into the container). It's scanned read-only - every subfolder included.</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <Field>
@@ -156,7 +156,7 @@ export default function LibrariesPage() {
       <PageHeader
         eyebrow="Crates"
         title="Libraries"
-        description="Folders Dubplate watches. Scans only ever read — they never modify, move or tag anything."
+        description="Folders Dubplate watches. Scans only ever read - they never modify, move or tag anything."
         actions={<AddLibraryDialog />}
       />
       {error && !libraries && <QueryError error={error} onRetry={() => void refetch()} />}
@@ -210,7 +210,7 @@ export default function LibrariesPage() {
                         ? `Picked up as they land${pollMinutes ? `, and re-checked every ${pollMinutes} min` : ""}.`
                         : lib.watchState === "polling"
                           ? `This folder doesn't report changes (network share?), so it's checked every ${pollMinutes || 15} min.`
-                          : "Off — rescan by hand, or turn on the nightly scan in Settings."}
+                          : "Off - rescan by hand, or turn on the nightly scan in Settings."}
                     </span>
                   </span>
                 </label>

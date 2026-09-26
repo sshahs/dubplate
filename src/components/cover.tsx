@@ -24,7 +24,7 @@ export function Cover({ track, size = 40, which, className, rounded = "rounded-l
       ) : (
         <HugeiconsIcon icon={MusicNote01Icon} strokeWidth={2} className="text-muted-foreground/60 size-[45%]" />
       )}
-      {pending && !which && <span title="New artwork — embedded when you cut" className="bg-rasta-gold ring-background absolute top-0.5 right-0.5 size-2 rounded-full ring-2" />}
+      {pending && !which && <span title="New artwork - embedded when you cut" className="bg-rasta-gold ring-background absolute top-0.5 right-0.5 size-2 rounded-full ring-2" />}
     </span>
   )
 }

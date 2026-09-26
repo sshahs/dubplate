@@ -93,7 +93,7 @@ export default function ReviewPage() {
       <PageHeader
         eyebrow="Selector's chair"
         title="Review"
-        description="The tracks the engine wasn't sure about. Have a listen, check the evidence, and make the call — every approval teaches the AI your style."
+        description="The tracks the engine wasn't sure about. Have a listen, check the evidence, and make the call - every approval teaches the AI your style."
         actions={
           <div className="text-muted-foreground hidden items-center gap-1.5 text-xs md:flex">
             <Kbd>J</Kbd>/<Kbd>K</Kbd> move · <Kbd>A</Kbd> approve · <Kbd>X</Kbd> leave as-is · <Kbd>Z</Kbd> undo
@@ -123,7 +123,7 @@ export default function ReviewPage() {
             <EmptyMedia variant="icon">
               <HugeiconsIcon icon={CheckListIcon} strokeWidth={2} />
             </EmptyMedia>
-            <EmptyTitle>Queue clear — nuff respect</EmptyTitle>
+            <EmptyTitle>Queue clear - nuff respect</EmptyTitle>
             <EmptyDescription>Nothing waiting in "{QUEUES[queue].label}". Process more tracks or head to Cut & Tag.</EmptyDescription>
           </EmptyHeader>
           <EmptyContent>

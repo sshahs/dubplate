@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/banner.svg" alt="Dubplate — AI-assisted tagging for sound-system crates" width="100%">
+  <img src="docs/banner.svg" alt="Dubplate - AI-assisted tagging for sound-system crates" width="100%">
 </p>
 
 <p align="center">
@@ -354,7 +354,7 @@ Tags are written with
 FLAC, M4A, OGG/Opus, WAV, AIFF, WMA and APE are all supported. Artist and
 title are always written. Album, year, genre and label only fill fields that
 are empty. BPM and key are written too (key as `Am` or Camelot `8A`, your
-choice), and a found cover becomes the front cover — other pictures in the
+choice), and a found cover becomes the front cover - other pictures in the
 file are left alone, and a file's existing cover is only replaced if you
 allow it.
 
@@ -376,7 +376,7 @@ allow it.
 - 🎨 **Cover art**: found from the sources that identified a track, shown as thumbnails everywhere, and embedded when you cut.
 - 🥁 **BPM & key**: worked out by listening (pure JS/WASM decoders, no ffmpeg), folded into a DJ-style range (88–175 by default, so a one-drop at 75 reads 150). Tags from the file and your own edits always win.
 - 👀 **Watch folders**: new files are scanned and identified as they land, with a periodic re-check for network shares and an optional nightly rescan.
-- ✏️ **Bulk edit**: set album, label, genre, year, artists, BPM or key across a selection — with Undo.
+- ✏️ **Bulk edit**: set album, label, genre, year, artists, BPM or key across a selection - with Undo.
 - 🗄️ **Big libraries**: the Tracks list only draws what's on screen and loads rows in blocks as you scroll, so tens of thousands of tracks stay quick.
 - 🔔 **Job notifications**: a long job finishing in a background tab flags the tab title, and can pop a browser notification (needs HTTPS or localhost).
 - 🎧 **Audio preview** in the review screen, with streaming and seeking.

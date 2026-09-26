@@ -110,7 +110,7 @@ export const MIGRATIONS: string[] = [
     canonical TEXT NOT NULL
   );
   `,
-  // 2: BPM & key, artwork, watched libraries — and big libraries: the bulky per-track JSON
+  // 2: BPM & key, artwork, watched libraries - and big libraries: the bulky per-track JSON
   // (parser readings, source hits, decision) moves to its own table so track rows stay
   // small and lists, counts and stats never have to wade through it.
   `

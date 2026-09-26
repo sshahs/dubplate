@@ -119,7 +119,7 @@ export function scraperAdapter(def: ScraperDefinition): SourceAdapter {
   return {
     id: `scraper:${def.id}`,
     label: def.name,
-    unavailable: () => (def.searchUrl.includes("example.com") ? "template — set a real URL first" : null),
+    unavailable: () => (def.searchUrl.includes("example.com") ? "template - set a real URL first" : null),
     async search(q, { signal }) {
       const query = q.descriptiveTitle ? q.artist : q.query
       if (!query) return []

@@ -49,7 +49,7 @@ export function ArtworkPanel({ track, embed, replace }: { track: Track; embed: b
   if (found) {
     const from = SOURCE_NAMES[found.source] ?? found.sourceLabel ?? found.source
     line = willEmbed
-      ? `From ${from}${size(found) ? ` · ${size(found)}` : ""} — embedded when you cut.`
+      ? `From ${from}${size(found) ? ` · ${size(found)}` : ""} - embedded when you cut.`
       : !embed
         ? `From ${from}. Embedding is off in Settings.`
         : `From ${from}. The file already has a picture; replacing it is off in Settings.`

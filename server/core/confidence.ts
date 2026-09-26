@@ -115,7 +115,7 @@ export function scoreTrack(input: ScoreInput): Decision {
   if (!primary) {
     return {
       ...emptyDecision(),
-      warnings: ["Nothing could be read from this file — no filename structure, tags or AI reading."],
+      warnings: ["Nothing could be read from this file - no filename structure, tags or AI reading."],
     }
   }
 
@@ -138,7 +138,7 @@ export function scoreTrack(input: ScoreInput): Decision {
     label: input.ai ? "AI certainty" : "Parser certainty",
     score: round(selfConf),
     weight: 0.5,
-    detail: input.ai ? `${input.ai.model}: ${input.ai.reasoning || "no reasoning given"}` : "No AI reading yet — rule-based parser only",
+    detail: input.ai ? `${input.ai.model}: ${input.ai.reasoning || "no reasoning given"}` : "No AI reading yet - rule-based parser only",
   })
   const parseScore = 0.5 * agreement + 0.5 * selfConf
 
@@ -198,7 +198,7 @@ export function scoreTrack(input: ScoreInput): Decision {
       label: "Sources match the reading",
       score: round(sourceMatch),
       weight: 0.5,
-      detail: `Closest hit: ${best.rep.sourceLabel} — ${best.rep.artist} - ${best.rep.title}`,
+      detail: `Closest hit: ${best.rep.sourceLabel} - ${best.rep.artist} - ${best.rep.title}`,
     })
     factors.push({
       key: "consensus",
@@ -249,7 +249,7 @@ export function scoreTrack(input: ScoreInput): Decision {
           label: "Duration check",
           score: adj > 0 ? 1 : 0,
           weight: adj,
-          detail: adj > 0 ? `Within ${Math.round(delta)}s of the source` : `${Math.round(delta)}s longer/shorter than any source — maybe a different version`,
+          detail: adj > 0 ? `Within ${Math.round(delta)}s of the source` : `${Math.round(delta)}s longer/shorter than any source - maybe a different version`,
         })
       }
     }
@@ -259,7 +259,7 @@ export function scoreTrack(input: ScoreInput): Decision {
       basis = "sources"
       reading = mergeFromSources(reading, best.rep, best.candidates)
     } else {
-      warnings.push(`Closest source hit only matches ${Math.round(sourceMatch * 100)}% — keeping the ${basis === "ai" ? "AI" : "parsed"} reading`)
+      warnings.push(`Closest source hit only matches ${Math.round(sourceMatch * 100)}% - keeping the ${basis === "ai" ? "AI" : "parsed"} reading`)
     }
   } else {
     final = Math.min(input.thresholds.parseOnlyMax / 100, parseScore * 0.85)
@@ -268,9 +268,9 @@ export function scoreTrack(input: ScoreInput): Decision {
       label: "Source consensus",
       score: 0,
       weight: 0,
-      detail: input.candidates.length ? "Sources returned results, but none matched this reading" : "No source had this track — common for dubplates and specials",
+      detail: input.candidates.length ? "Sources returned results, but none matched this reading" : "No source had this track - common for dubplates and specials",
     })
-    warnings.push(`No source confirmation — capped at ${input.thresholds.parseOnlyMax}`)
+    warnings.push(`No source confirmation - capped at ${input.thresholds.parseOnlyMax}`)
   }
 
   if (!reading.artists.length) warnings.push("No artist identified")

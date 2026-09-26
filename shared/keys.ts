@@ -16,8 +16,8 @@ export function keyName(pitchClass: number, minor: boolean): string {
 }
 
 /**
- * Read a key written by any tool — "Am", "A minor", "A#m", "Bbmin", Camelot "8A"
- * or Open Key "1m" — and return it in Dubplate's musical notation.
+ * Read a key written by any tool - "Am", "A minor", "A#m", "Bbmin", Camelot "8A"
+ * or Open Key "1m" - and return it in Dubplate's musical notation.
  */
 export function parseKey(input: string | null | undefined): string | null {
   const s = (input ?? "").trim()

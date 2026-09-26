@@ -47,7 +47,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
       body: body !== undefined ? JSON.stringify(body) : undefined,
     })
   } catch {
-    throw new ApiError(0, "Can't reach the Dubplate server — is it running?")
+    throw new ApiError(0, "Can't reach the Dubplate server - is it running?")
   }
   const text = await res.text()
   let data: { error?: string } | null = null
@@ -56,7 +56,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   } catch {
     // A proxy's HTML error page, a half-restarted server…: say what happened instead of a JSON parse error.
     if (!res.ok) throw new ApiError(res.status, `The server replied ${res.status} ${res.statusText}`.trim())
-    throw new ApiError(res.status, "The server sent something unexpected — try reloading")
+    throw new ApiError(res.status, "The server sent something unexpected - try reloading")
   }
   if (!res.ok) throw new ApiError(res.status, data?.error ?? res.statusText)
   return data as T

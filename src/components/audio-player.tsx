@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { fmtDuration } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
-/** Compact preview player — listen before you commit a name. */
+/** Compact preview player - listen before you commit a name. */
 export function AudioPlayer({ src, className }: { src: string; className?: string }) {
   const ref = useRef<HTMLAudioElement>(null)
   const [playing, setPlaying] = useState(false)

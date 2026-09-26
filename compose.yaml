@@ -1,11 +1,11 @@
-# Dubplate — docker compose up -d, then open http://localhost:4455
+# Dubplate - docker compose up -d, then open http://localhost:4455
 #
 # Uses the published image from GitHub Container Registry. To build from
 # source instead: docker compose -f compose.yaml -f compose.build.yaml up -d --build
 #
 # Mount the folders you want tagged under /music and add them in the app as
 # libraries (e.g. /music/reggae). Dubplate only writes to them once you switch
-# off read-only mode, so the container user needs write access for renames —
+# off read-only mode, so the container user needs write access for renames -
 # set PUID/PGID to the owner of your music.
 
 services:
@@ -26,7 +26,7 @@ services:
       # bundled service below (docker compose --profile ollama up -d).
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
-      # Cloud keys are optional — they can also be entered in Settings.
+      # Cloud keys are optional - they can also be entered in Settings.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}

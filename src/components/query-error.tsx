@@ -18,7 +18,7 @@ function explainError(error: unknown): { title: string; detail: string; kind: "h
     }
   }
   if (error instanceof ApiError && error.offline) {
-    return { kind: "offline", title: "Can't reach Dubplate", detail: "The server isn't answering. It may be restarting — this retries on its own." }
+    return { kind: "offline", title: "Can't reach Dubplate", detail: "The server isn't answering. It may be restarting - this retries on its own." }
   }
   return { kind: "other", title: "That didn't load", detail: error instanceof Error ? error.message : String(error) }
 }

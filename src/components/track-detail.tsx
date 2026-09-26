@@ -81,7 +81,7 @@ export function TrackDetail({
   const approve = useMutation({
     mutationFn: () => api.approve(trackId, draft ? fromDraft(draft) : undefined, true),
     onSuccess: ({ undoId, ...updated }) => {
-      toastUndoable(qc, "Approved — big up!", undoId, { description: preview ?? undefined, onUndone })
+      toastUndoable(qc, "Approved - big up!", undoId, { description: preview ?? undefined, onUndone })
       qc.setQueryData(["track", trackId], updated)
       setEdit(null)
       refresh()
@@ -208,7 +208,7 @@ export function TrackDetail({
         </TabsList>
 
         <TabsContent value="evidence" className="space-y-2 pt-3">
-          {!d && <p className="text-muted-foreground text-sm">Not scored yet — run the pipeline on this track.</p>}
+          {!d && <p className="text-muted-foreground text-sm">Not scored yet - run the pipeline on this track.</p>}
           {d?.factors.map((f) => (
             <div key={f.key} className="bg-card/60 rounded-2xl border p-3">
               <div className="flex items-center gap-3">
@@ -241,7 +241,7 @@ export function TrackDetail({
               <div className="flex items-start gap-2">
                 <div className="min-w-0 flex-1">
                   <div className="font-medium">
-                    {cl.artist} — {cl.title}
+                    {cl.artist} - {cl.title}
                   </div>
                   <div className="mt-1 flex flex-wrap gap-1">
                     {[...new Set(cl.candidates.map((c) => c.sourceLabel))].map((s) => (
@@ -263,7 +263,7 @@ export function TrackDetail({
                   <div key={j} className="text-muted-foreground flex items-center gap-2 text-xs">
                     <span className="w-24 shrink-0 truncate">{c.sourceLabel}</span>
                     <span className="flex-1 truncate">
-                      {c.artist} — {c.title}
+                      {c.artist} - {c.title}
                       {c.album ? ` · ${c.album}` : ""}
                       {c.year ? ` · ${c.year}` : ""}
                       {c.duration ? ` · ${fmtDuration(c.duration)}` : ""}
@@ -288,7 +288,7 @@ export function TrackDetail({
                 AI · {track.ai.provider} · {Math.round(track.ai.confidence * 100)}%
               </div>
               <div className="text-sm">
-                {track.ai.artists.join(track.ai.relation === "vs" ? " vs " : " & ")} — {track.ai.title}
+                {track.ai.artists.join(track.ai.relation === "vs" ? " vs " : " & ")} - {track.ai.title}
                 {track.ai.version ? ` (${track.ai.version})` : ""}
                 {track.ai.year ? ` · ${track.ai.year}` : ""}
                 {track.ai.riddim ? ` · ${track.ai.riddim} riddim` : ""}
@@ -302,7 +302,7 @@ export function TrackDetail({
                   className="text-muted-foreground hover:text-foreground mt-1 block text-left text-xs underline-offset-2 hover:underline"
                   onClick={() => editDraft({ ...draft, artists: alt.artists.join(", "), title: alt.title })}
                 >
-                  or: {alt.artists.join(" & ")} — {alt.title}
+                  or: {alt.artists.join(" & ")} - {alt.title}
                 </button>
               ))}
             </div>
@@ -314,7 +314,7 @@ export function TrackDetail({
                 Rule-based parser · {Math.round(track.heuristic.confidence * 100)}%
               </div>
               <div className="text-sm">
-                {track.heuristic.artists.join(track.heuristic.relation === "vs" ? " vs " : " & ") || "?"} — {track.heuristic.title || "?"}
+                {track.heuristic.artists.join(track.heuristic.relation === "vs" ? " vs " : " & ") || "?"} - {track.heuristic.title || "?"}
               </div>
               <div className="mt-1 flex flex-wrap gap-1">
                 {track.heuristic.hints.map((h) => (

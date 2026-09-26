@@ -54,7 +54,7 @@ export function normTitle(s: string | undefined | null): string {
   return normKey(t)
 }
 
-/** Title with *all* bracketed parts removed — the bare song name. */
+/** Title with *all* bracketed parts removed - the bare song name. */
 export function bareTitle(s: string | undefined | null): string {
   if (!s) return ""
   return normTitle(s.replace(/[([][^)\]]*[)\]]/g, " "))
@@ -152,7 +152,7 @@ export function titleSimilarity(a: string | undefined, b: string | undefined): n
   return Math.max(full, bare * 0.96)
 }
 
-/** Compare artist lists — the primary artist matters most. */
+/** Compare artist lists - the primary artist matters most. */
 export function artistSimilarity(a: string[] | string | undefined, b: string[] | string | undefined): number {
   const la = (Array.isArray(a) ? a : a ? splitArtists(a).artists : []).map(normArtist).filter(Boolean)
   const lb = (Array.isArray(b) ? b : b ? splitArtists(b).artists : []).map(normArtist).filter(Boolean)
@@ -160,7 +160,7 @@ export function artistSimilarity(a: string[] | string | undefined, b: string[] |
   const joinedA = la.join(" ")
   const joinedB = lb.join(" ")
   const whole = similarity(joinedA, joinedB)
-  // best match per artist in A, averaged — order independent
+  // best match per artist in A, averaged - order independent
   let sum = 0
   for (const x of la) sum += Math.max(...lb.map((y) => similarity(x, y)))
   const perArtist = sum / la.length

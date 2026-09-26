@@ -34,7 +34,7 @@ function toChanges(values: Partial<Record<FieldKey, string>>, on: Set<FieldKey>)
   for (const k of on) {
     const v = (values[k] ?? "").trim()
     if (k === "artists") {
-      if (!list(v).length) return { changes, error: "Artists can't be blank — untick it to leave them alone." }
+      if (!list(v).length) return { changes, error: "Artists can't be blank - untick it to leave them alone." }
       changes.artists = list(v)
     } else if (k === "featuring") changes.featuring = list(v)
     else if (k === "year") {
@@ -45,7 +45,7 @@ function toChanges(values: Partial<Record<FieldKey, string>>, on: Set<FieldKey>)
       if (v && !(n >= 30 && n <= 300)) return { changes, error: "BPM should be a number between 30 and 300." }
       changes.bpm = v ? n : null
     } else if (k === "key") {
-      if (v && !parseKey(v)) return { changes, error: `"${v}" isn't a key Dubplate knows — try Am, F# or 8A.` }
+      if (v && !parseKey(v)) return { changes, error: `"${v}" isn't a key Dubplate knows - try Am, F# or 8A.` }
       changes.key = v || null
     } else changes[k] = v || null
   }
@@ -113,7 +113,7 @@ export function BulkEditDialog({
                   <Input
                     id={`bulk-${f.key}`}
                     value={values[f.key] ?? ""}
-                    placeholder={checked ? (f.placeholder ? `${f.placeholder} — empty clears it` : "Empty clears it") : f.placeholder}
+                    placeholder={checked ? (f.placeholder ? `${f.placeholder} - empty clears it` : "Empty clears it") : f.placeholder}
                     inputMode={f.key === "year" || f.key === "bpm" ? "decimal" : undefined}
                     onChange={(e) => {
                       setValues({ ...values, [f.key]: e.target.value })

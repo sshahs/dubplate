@@ -31,17 +31,17 @@ export function fmtAgo(iso: string | null | undefined) {
 }
 
 export const STATUS_META: Record<TrackStatus, { label: string; tone: "red" | "gold" | "green" | "muted" | "primary"; hint: string }> = {
-  new: { label: "New", tone: "muted", hint: "Scanned — not yet interpreted" },
+  new: { label: "New", tone: "muted", hint: "Scanned - not yet interpreted" },
   interpreted: { label: "Interpreted", tone: "muted", hint: "AI has read the filename" },
   scoured: { label: "Scoured", tone: "muted", hint: "Sources queried, awaiting score" },
-  matched: { label: "Matched", tone: "green", hint: "High-confidence consensus — ready to approve" },
-  review: { label: "Review", tone: "gold", hint: "Medium confidence — needs a selector's ear" },
+  matched: { label: "Matched", tone: "green", hint: "High-confidence consensus - ready to approve" },
+  review: { label: "Review", tone: "gold", hint: "Medium confidence - needs a selector's ear" },
   conflict: { label: "Conflict", tone: "red", hint: "Sources disagree with each other" },
   unmatched: { label: "Unmatched", tone: "red", hint: "Nothing trustworthy found" },
-  approved: { label: "Approved", tone: "primary", hint: "Signed off — ready to cut" },
+  approved: { label: "Approved", tone: "primary", hint: "Signed off - ready to cut" },
   done: { label: "Done", tone: "green", hint: "Renamed / tagged on disk" },
   rejected: { label: "Rejected", tone: "muted", hint: "Left untouched" },
-  error: { label: "Error", tone: "red", hint: "Something went wrong — see note" },
+  error: { label: "Error", tone: "red", hint: "Something went wrong - see note" },
 }
 
 export function confidenceTone(c: number | null | undefined, auto = 90, review = 60): "red" | "gold" | "green" | "muted" {

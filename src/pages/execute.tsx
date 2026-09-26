@@ -70,7 +70,7 @@ function BatchRow({ batch, busy }: { batch: OperationBatch; busy: boolean }) {
               <AlertDialogHeader>
                 <AlertDialogTitle>Rewind this batch?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Pull up! Every file in batch {batch.batchId.slice(0, 8)} goes back to its old name and old tags — as long as nothing else has touched it since.
+                  Pull up! Every file in batch {batch.batchId.slice(0, 8)} goes back to its old name and old tags - as long as nothing else has touched it since.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -126,7 +126,7 @@ export default function ExecutePage() {
     onSuccess: (s) => {
       qc.setQueryData(["settings"], s)
       void qc.invalidateQueries({ queryKey: ["health"] })
-      toast(s.safety.readOnly ? "Read-only mode on — files are safe" : "Writes enabled — handle with care")
+      toast(s.safety.readOnly ? "Read-only mode on - files are safe" : "Writes enabled - handle with care")
     },
   })
 
@@ -224,7 +224,7 @@ export default function ExecutePage() {
                       <AlertDialogHeader>
                         <AlertDialogTitle>Cut {runnable.length} files?</AlertDialogTitle>
                         <AlertDialogDescription>
-                          Files are renamed in place and their tags updated. Each change is journalled — you can rewind the whole batch from the history below.
+                          Files are renamed in place and their tags updated. Each change is journalled - you can rewind the whole batch from the history below.
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>

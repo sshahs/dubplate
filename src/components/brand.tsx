@@ -28,7 +28,7 @@ export function RastaStripe({ className }: { className?: string }) {
   return <div className={cn("rasta-stripe h-1 w-full", className)} aria-hidden />
 }
 
-/** Little animated VU meter — shown while jobs are running. */
+/** Little animated VU meter - shown while jobs are running. */
 export function VuMeter({ className, active = true }: { className?: string; active?: boolean }) {
   const bars = [
     { c: "bg-rasta-green", d: "0s" },

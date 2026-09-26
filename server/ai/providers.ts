@@ -1,5 +1,5 @@
 // Thin clients for the LLM back-ends. Every provider returns JSON that
-// matches a schema — natively where supported, by instruction otherwise.
+// matches a schema - natively where supported, by instruction otherwise.
 
 import type { LlmProviderConfig } from "../../shared/types"
 

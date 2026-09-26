@@ -1,4 +1,4 @@
-// Read-only library scanner. It only ever stats, lists and reads files —
+// Read-only library scanner. It only ever stats, lists and reads files -
 // nothing here opens a file for writing.
 
 import { createHash } from "node:crypto"
@@ -54,7 +54,7 @@ export async function* walk(root: string, extensions: Set<string>, ignore: RegEx
     try {
       entries = await fs.promises.readdir(dir, { withFileTypes: true })
     } catch {
-      continue // unreadable directory — skip, never fail the whole scan
+      continue // unreadable directory - skip, never fail the whole scan
     }
     for (const e of entries) {
       if (e.name.startsWith(".") || ignore.some((re) => re.test(e.name))) continue

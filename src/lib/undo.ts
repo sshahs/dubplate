@@ -23,7 +23,7 @@ export function toastUndoable(qc: QueryClient, message: string, undoId: string |
     if (last?.undoId === undoId) last = null
     try {
       const r = await api.undo(undoId)
-      toast(`Undone: ${message.replace(/[.!—].*$/, "").trim()}`, { description: `${r.restored} track${r.restored === 1 ? "" : "s"} put back` })
+      toast(`Undone: ${message.replace(/[.!-].*$/, "").trim()}`, { description: `${r.restored} track${r.restored === 1 ? "" : "s"} put back` })
       refresh(qc)
       opts.onUndone?.()
     } catch (e) {

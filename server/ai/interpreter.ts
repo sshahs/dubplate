@@ -53,7 +53,7 @@ export const AI_SCHEMA = {
 } as const
 
 export function systemPrompt(sceneHint: string) {
-  return `You are the music librarian inside "Dubplate", a tagger for sound-system collections. You know Jamaican and UK sound-system culture deeply — reggae, roots, dub, dancehall, lovers rock, sound clash, UK grime, garage, jungle, drum & bass, dubstep, bassline and UK funky — and you are expert at untangling messy digital filenames.
+  return `You are the music librarian inside "Dubplate", a tagger for sound-system collections. You know Jamaican and UK sound-system culture deeply - reggae, roots, dub, dancehall, lovers rock, sound clash, UK grime, garage, jungle, drum & bass, dubstep, bassline and UK funky - and you are expert at untangling messy digital filenames.
 
 Collection context: ${sceneHint || "general music library"}
 
@@ -62,14 +62,14 @@ Given one audio file's name, folder path and any embedded tags, work out who per
 Rules:
 - artists: the main performer(s) in their commonly credited spelling and capitalisation (e.g. "Buju Banton", "Beenie Man", "Dizzee Rascal", "JME", "Sizzla"). Featured guests go in "featuring", not "artists".
 - relation: "vs" for clashes / versus, "&" for collaborations, "x" when the name uses " x ", null for a single artist.
-- title: the song name only — no version, year, bitrate or featuring text. If there is no song name (a live clash, radio set or session), write a short descriptive title such as "Live Clash" or "Live at Sting".
+- title: the song name only - no version, year, bitrate or featuring text. If there is no song name (a live clash, radio set or session), write a short descriptive title such as "Live Clash" or "Live at Sting".
 - version: e.g. "Dubplate", "Special", "Live", "Remix", "Skepta Remix", "VIP", "Dub", "Instrumental", "Refix", "Freestyle". null for the original release.
 - riddim: the riddim name if referenced (e.g. "Sleng Teng", "Diwali"), else null.
 - year: four-digit year if stated or clearly implied ("live 93" means 1993), else null.
 - event: clash, session or show name if relevant (e.g. "Sting", "Fire in the Booth", "Rinse FM"), else null.
 - Ignore rip-site names, bitrates, track numbers, "official video" and similar noise.
 - Never invent facts. When a filename is genuinely ambiguous (e.g. order could be Title - Artist), give your best reading in the main fields and the others in "alternatives".
-- confidence: 0 to 1 — how sure you are of artists + title together.
+- confidence: 0 to 1 - how sure you are of artists + title together.
 - searchQueries: 1 to 3 short queries you would type into MusicBrainz or Discogs to verify this.
 - reasoning: one or two short sentences.`
 }
@@ -127,7 +127,7 @@ export function buildUserPrompt(track: Track, corrections: Correction[]): string
     )
   }
   if (corrections.length) {
-    lines.push("", "The owner previously confirmed these readings of similar files — follow their spelling and style:")
+    lines.push("", "The owner previously confirmed these readings of similar files - follow their spelling and style:")
     for (const c of corrections) lines.push(`- "${c.filename}" → ${c.artists.join(" & ")} - ${c.title}${c.version ? ` (${c.version})` : ""}`)
   }
   return lines.join("\n")
@@ -185,7 +185,7 @@ export async function interpretTrack(
   opts: { corrections: Correction[]; aliases: Map<string, string>; signal?: AbortSignal }
 ): Promise<AiParse> {
   const provider = activeProvider(settings)
-  if (!provider) throw new Error("No AI provider is enabled — pick one in Settings")
+  if (!provider) throw new Error("No AI provider is enabled - pick one in Settings")
   const examples = settings.llm.useCorrections ? similarCorrections(track.filename, opts.corrections) : []
   const raw = await completeJson(provider, {
     system: systemPrompt(settings.llm.sceneHint),

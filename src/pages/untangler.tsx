@@ -43,7 +43,7 @@ function Reading({ label, icon, artists, relation, title, version, year, extra, 
       </div>
       <div className="font-medium">
         {artists.length ? artists.join(relation === "vs" ? " vs " : " & ") : <span className="text-muted-foreground italic">no artist</span>}
-        <span className="text-muted-foreground"> — </span>
+        <span className="text-muted-foreground"> - </span>
         {title || <span className="text-muted-foreground italic">no title</span>}
       </div>
       <div className="mt-1 flex flex-wrap gap-1">
@@ -88,7 +88,7 @@ export default function UntanglerPage() {
       <PageHeader
         eyebrow="Playground"
         title="Untangler"
-        description="Paste messy filenames and see how the rule-based parser and the AI read them — no files touched, nothing saved."
+        description="Paste messy filenames and see how the rule-based parser and the AI read them - no files touched, nothing saved."
       />
       <div className="grid gap-4 lg:grid-cols-[1fr_1.2fr]">
         <Card>
@@ -115,7 +115,7 @@ export default function UntanglerPage() {
                 Ask the AI too
               </label>
               <span className="text-muted-foreground text-xs">
-                {health?.llm ? `${health.llm.label} · ${health.llm.model || "no model"}` : <Link to="/settings#ai">no AI provider — set one up</Link>}
+                {health?.llm ? `${health.llm.label} · ${health.llm.model || "no model"}` : <Link to="/settings#ai">no AI provider - set one up</Link>}
               </span>
               <Button className="ml-auto" onClick={() => run.mutate()} disabled={run.isPending}>
                 {run.isPending ? <Spinner data-icon="inline-start" /> : <HugeiconsIcon icon={AiMagicIcon} strokeWidth={2} data-icon="inline-start" />}

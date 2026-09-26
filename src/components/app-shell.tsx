@@ -214,7 +214,7 @@ function ReadOnlyPill() {
         }
       >
         <HugeiconsIcon icon={SquareLock02Icon} strokeWidth={2} className="size-3.5" />
-        <span className="hidden whitespace-nowrap sm:inline">{data.readOnly ? "Read-only" : "Live — writes enabled"}</span>
+        <span className="hidden whitespace-nowrap sm:inline">{data.readOnly ? "Read-only" : "Live - writes enabled"}</span>
       </TooltipTrigger>
       <TooltipContent>{data.readOnly ? "Files cannot be changed. Turn off in Settings → Safety." : "Dubplate can rename and tag files."}</TooltipContent>
     </Tooltip>

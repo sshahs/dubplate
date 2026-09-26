@@ -85,7 +85,7 @@ export function writeTags(file: string, changes: Partial<Record<keyof ExistingTa
       const others = (t.pictures ?? []).filter((p) => p !== frontCover(t.pictures ?? []))
       const hash = str(changes.cover)
       const bytes = hash ? cachedArt(hash) : null
-      if (hash && !bytes) throw new Error("Artwork is missing from the cache — find it again")
+      if (hash && !bytes) throw new Error("Artwork is missing from the cache - find it again")
       t.pictures = bytes ? [Picture.fromFullData(ByteVector.fromByteArray(bytes), PictureType.FrontCover, sniffImage(bytes)?.mime ?? "image/jpeg", ""), ...others] : others
     }
     f.save()

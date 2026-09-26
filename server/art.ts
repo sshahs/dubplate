@@ -132,7 +132,7 @@ export function artworkCandidates(track: Track): ArtLead[] {
   return out
 }
 
-/** Ask the keyless stores (Apple Music, Deezer) directly — for tracks you've re-identified by hand. */
+/** Ask the keyless stores (Apple Music, Deezer) directly - for tracks you've re-identified by hand. */
 async function searchArtwork(track: Track, meta: TrackReading, settings: Settings, signal?: AbortSignal) {
   const q = buildQuery(track, meta)
   const found: Candidate[] = []

@@ -7,15 +7,15 @@ export const SOURCE_META: Record<
   { label: string; needs: ("apiKey" | "apiSecret")[]; keyLabel?: string; secretLabel?: string; env?: [string, string?]; about: string; signup?: string }
 > = {
   musicbrainz: { label: "MusicBrainz", needs: [], about: "Open music encyclopaedia. Free, 1 request/second.", signup: "https://musicbrainz.org" },
-  discogs: { label: "Discogs", needs: ["apiKey"], keyLabel: "Personal access token", env: ["DISCOGS_TOKEN"], about: "Vinyl-first database — strong on reggae 7\"s, white labels and grime 12\"s.", signup: "https://www.discogs.com/settings/developers" },
+  discogs: { label: "Discogs", needs: ["apiKey"], keyLabel: "Personal access token", env: ["DISCOGS_TOKEN"], about: "Vinyl-first database - strong on reggae 7\"s, white labels and grime 12\"s.", signup: "https://www.discogs.com/settings/developers" },
   lastfm: { label: "Last.fm", needs: ["apiKey"], keyLabel: "API key", env: ["LASTFM_API_KEY"], about: "Scrobble data incl. spelling corrections. Crowd-sourced, so weighted lower.", signup: "https://www.last.fm/api/account/create" },
   spotify: { label: "Spotify", needs: ["apiKey", "apiSecret"], keyLabel: "Client ID", secretLabel: "Client secret", env: ["SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET"], about: "Streaming catalogue search (client-credentials flow).", signup: "https://developer.spotify.com/dashboard" },
-  itunes: { label: "Apple Music / iTunes", needs: [], about: "iTunes Search API — no key needed, ~20 requests/minute." },
-  deezer: { label: "Deezer", needs: [], about: "Open search API with durations — no key needed." },
-  bandcamp: { label: "Bandcamp", needs: [], about: "Scrapes Bandcamp search — home of independent dub, grime and sound-system releases." },
-  archive: { label: "Internet Archive", needs: [], about: "Advanced search over archive.org — clash tapes, pirate radio sets and dubplate rips." },
-  mixcloud: { label: "Mixcloud", needs: [], about: "Radio shows and sets — useful for clash and pirate-radio recordings." },
-  youtube: { label: "YouTube", needs: ["apiKey"], keyLabel: "Data API v3 key", env: ["YOUTUBE_API_KEY"], about: "Many specials and dubplates only exist as uploads. Low weight — titles are messy.", signup: "https://console.cloud.google.com/apis/library/youtube.googleapis.com" },
+  itunes: { label: "Apple Music / iTunes", needs: [], about: "iTunes Search API - no key needed, ~20 requests/minute." },
+  deezer: { label: "Deezer", needs: [], about: "Open search API with durations - no key needed." },
+  bandcamp: { label: "Bandcamp", needs: [], about: "Scrapes Bandcamp search - home of independent dub, grime and sound-system releases." },
+  archive: { label: "Internet Archive", needs: [], about: "Advanced search over archive.org - clash tapes, pirate radio sets and dubplate rips." },
+  mixcloud: { label: "Mixcloud", needs: [], about: "Radio shows and sets - useful for clash and pirate-radio recordings." },
+  youtube: { label: "YouTube", needs: ["apiKey"], keyLabel: "Data API v3 key", env: ["YOUTUBE_API_KEY"], about: "Many specials and dubplates only exist as uploads. Low weight - titles are messy.", signup: "https://console.cloud.google.com/apis/library/youtube.googleapis.com" },
   acoustid: { label: "AcoustID fingerprint", needs: ["apiKey"], keyLabel: "Application API key", env: ["ACOUSTID_API_KEY"], about: "Identifies audio by fingerprint (needs fpcalc / Chromaprint installed). Strongest signal when it hits.", signup: "https://acoustid.org/new-application" },
 }
 
@@ -57,7 +57,7 @@ export function zdrForcedByEnv(): boolean {
 
 /**
  * Community scraper presets. Site markup drifts, so these ship disabled and
- * unverified — use "Test" in Sources to check them before switching on.
+ * unverified - use "Test" in Sources to check them before switching on.
  */
 export const SCRAPER_PRESETS: ScraperDefinition[] = [
   {

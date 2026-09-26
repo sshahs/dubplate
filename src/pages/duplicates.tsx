@@ -17,7 +17,7 @@ export default function DuplicatesPage() {
       <PageHeader
         eyebrow="Doubles"
         title="Duplicates"
-        description="Identical audio (same content fingerprint) and different files that would end up with the same name. Dubplate never deletes — this is for your information."
+        description="Identical audio (same content fingerprint) and different files that would end up with the same name. Dubplate never deletes - this is for your information."
       />
       {error && !groups && <QueryError error={error} onRetry={() => void refetch()} />}
       {groups?.length === 0 && (

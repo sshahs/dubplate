@@ -60,7 +60,7 @@ if (fs.existsSync(path.join(distDir, "index.html"))) {
   )
   const indexHtml = fs.readFileSync(path.join(distDir, "index.html"), "utf8")
   app.get("*", (c) => {
-    // A missing asset or API route is a 404, not the app shell — otherwise a stale
+    // A missing asset or API route is a 404, not the app shell - otherwise a stale
     // tab asking for an old chunk after an upgrade gets HTML back and breaks.
     if (c.req.path.startsWith("/api/") || c.req.path.startsWith("/assets/") || /\.[a-z0-9]+$/i.test(c.req.path)) return c.notFound()
     c.header("cache-control", "no-cache")
@@ -70,7 +70,7 @@ if (fs.existsSync(path.join(distDir, "index.html"))) {
 
 serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
   const host = config.host === "0.0.0.0" ? "localhost" : config.host
-  console.log(`\n  ◉ Dubplate ${VERSION} — selector ready`)
+  console.log(`\n  ◉ Dubplate ${VERSION} - selector ready`)
   console.log(`  ➜ http://${host}:${info.port}`)
   console.log(`  ➜ data: ${config.dataDir}\n`)
   // Watched folders, periodic re-checks and the nightly scan.

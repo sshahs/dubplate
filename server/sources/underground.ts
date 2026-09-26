@@ -83,7 +83,7 @@ export const bandcamp: SourceAdapter = {
         }))
       }
     } catch {
-      // the JSON endpoint is unofficial — fall back to the HTML search page
+      // the JSON endpoint is unofficial - fall back to the HTML search page
     }
     return bandcampHtml(query, signal)
   },

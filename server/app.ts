@@ -121,7 +121,7 @@ export function createApp() {
     const host = (c.req.header("host") ?? "").replace(/:\d+$/, "").replace(/^\[|\]$/g, "")
     const okHosts = new Set(["localhost", "127.0.0.1", "::1", config.host, ...config.allowedHosts])
     if (host && !okHosts.has(host) && !config.allowedHosts.includes("*")) {
-      return c.json({ error: `Host "${host}" not allowed — add it to DUBPLATE_ALLOWED_HOSTS` }, 403)
+      return c.json({ error: `Host "${host}" not allowed - add it to DUBPLATE_ALLOWED_HOSTS` }, 403)
     }
     if (c.req.method !== "GET" && c.req.method !== "HEAD" && c.req.header("x-dubplate") !== "1") {
       return c.json({ error: "Missing X-Dubplate header" }, 403)
@@ -129,7 +129,7 @@ export function createApp() {
     await next()
   })
 
-  // Gzip JSON (a page of tracks shrinks ~8×) — but never the event stream, audio or images.
+  // Gzip JSON (a page of tracks shrinks ~8×) - but never the event stream, audio or images.
   const gzip = compress()
   app.use("*", (c, next) => (c.req.path === "/api/events" || /\/(audio|art)$/.test(c.req.path) ? next() : gzip(c, next)))
 
@@ -459,7 +459,7 @@ export function createApp() {
     return c.json(
       enqueueJob("execute", `${dryRun ? "Dry run" : "Rename & tag"} ${runnable} files`, async (ctx) => {
         const batchId = await executePlan(plan, settingsNow(), { dryRun }, ctx)
-        ctx.log("success", `${dryRun ? "Dry run" : "Batch"} ${batchId.slice(0, 8)} complete — ${ctx.job.done} ok, ${ctx.job.failed} failed`)
+        ctx.log("success", `${dryRun ? "Dry run" : "Batch"} ${batchId.slice(0, 8)} complete - ${ctx.job.done} ok, ${ctx.job.failed} failed`)
       })
     )
   })
@@ -470,7 +470,7 @@ export function createApp() {
   app.post("/api/rewind", async (c) => {
     const body = await c.req.json<{ batchId?: string; opIds?: number[] }>()
     if (!body.batchId && !body.opIds?.length) return c.json({ error: "Nothing to rewind" }, 400)
-    if (settingsNow().safety.readOnly) return c.json({ error: "Read-only mode is on — turn it off to rewind." }, 409)
+    if (settingsNow().safety.readOnly) return c.json({ error: "Read-only mode is on - turn it off to rewind." }, 409)
     return c.json(enqueueJob("rewind", `Rewind ${body.batchId ? `batch ${body.batchId.slice(0, 8)}` : `${body.opIds!.length} operations`}`, (ctx) => rewind(body.opIds ?? null, body.batchId ?? null, ctx)))
   })
 

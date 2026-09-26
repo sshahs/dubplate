@@ -38,7 +38,7 @@ export function JobDock() {
       <PopoverContent align="end" className="w-[min(92vw,28rem)] p-0">
         <div className="border-b p-3">
           <div className="text-sm font-semibold">Jobs</div>
-          {active.length === 0 && <div className="text-muted-foreground mt-1 text-xs">Nothing running — the rig is idle.</div>}
+          {active.length === 0 && <div className="text-muted-foreground mt-1 text-xs">Nothing running - the rig is idle.</div>}
           <div className="mt-2 space-y-3">
             {active.map((j) => {
               const p = j.total ? ((j.done + j.failed) / j.total) * 100 : 0

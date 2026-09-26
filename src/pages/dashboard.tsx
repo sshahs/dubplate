@@ -92,7 +92,7 @@ export default function DashboardPage() {
         </h1>
         <p className="text-muted-foreground mt-3 text-balance">
           Point it at a folder of badly named tunes. It reads every filename like a selector would, checks MusicBrainz, Discogs, Bandcamp and friends
-          for consensus, and only renames what it's sure of — everything else waits for your ear.
+          for consensus, and only renames what it's sure of - everything else waits for your ear.
         </p>
         <div className="mt-6 flex gap-2">
           <Button nativeButton={false} render={<Link to="/libraries" />} size="lg">
@@ -111,7 +111,7 @@ export default function DashboardPage() {
   if (statsError && !stats) {
     return (
       <>
-        <PageHeader eyebrow="The yard" title="Dashboard" description="Where your crates stand — from raw rips to properly credited tunes." />
+        <PageHeader eyebrow="The yard" title="Dashboard" description="Where your crates stand - from raw rips to properly credited tunes." />
         <QueryError error={statsError} onRetry={() => void refetchStats()} />
       </>
     )
@@ -123,7 +123,7 @@ export default function DashboardPage() {
       <PageHeader
         eyebrow="The yard"
         title="Dashboard"
-        description="Where your crates stand — from raw rips to properly credited tunes."
+        description="Where your crates stand - from raw rips to properly credited tunes."
         actions={
           <>
             <Button variant="outline" onClick={() => scanAll.mutate()} disabled={scanAll.isPending}>
@@ -188,7 +188,7 @@ export default function DashboardPage() {
         <Card className="lg:col-span-3">
           <CardHeader>
             <CardTitle>Confidence spread</CardTitle>
-            <CardDescription>Scored tracks by confidence band — green auto-matches, gold waits for review, red is guesswork.</CardDescription>
+            <CardDescription>Scored tracks by confidence band - green auto-matches, gold waits for review, red is guesswork.</CardDescription>
           </CardHeader>
           <CardContent>
             {stats ? (

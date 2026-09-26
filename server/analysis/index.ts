@@ -14,7 +14,7 @@ export function analyse(req: AnalyseRequest): Promise<TrackAnalysis> {
 }
 
 /**
- * Store an analysis and let it fill tempo/key — unless those came from the
+ * Store an analysis and let it fill tempo/key - unless those came from the
  * file's tags or from you, which win over a machine's guess.
  */
 export function applyAnalysis(t: Track, analysis: TrackAnalysis): Partial<Track> {

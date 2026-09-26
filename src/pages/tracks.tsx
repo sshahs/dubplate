@@ -134,7 +134,7 @@ const TrackRow = memo(function TrackRow({
           </div>
         ) : t.proposedArtist || t.proposedTitle ? (
           <div className="text-muted-foreground truncate text-sm">
-            {t.proposedArtist || "?"} — {t.proposedTitle || "?"}
+            {t.proposedArtist || "?"} - {t.proposedTitle || "?"}
           </div>
         ) : (
           <span className="text-muted-foreground text-xs">–</span>
@@ -274,7 +274,7 @@ export default function TracksPage() {
   })
   const job = useMutation({
     mutationFn: (kind: "analyze" | "reanalyze" | "artwork") => (kind === "artwork" ? api.findArtwork(selection!) : api.analyze(selection!, kind === "reanalyze")),
-    onSuccess: (j) => toast(j.label, { description: "Runs in the background — watch the job dock." }),
+    onSuccess: (j) => toast(j.label, { description: "Runs in the background - watch the job dock." }),
     onError: (e) => toast.error(e.message),
   })
   const bulk = useMutation({
@@ -291,7 +291,7 @@ export default function TracksPage() {
     try {
       const r = await api.bulkEdit(selection!, changes)
       toastUndoable(qc, `Updated ${r.changed} track${r.changed === 1 ? "" : "s"}`, r.undoId, {
-        description: r.skipped ? `${r.skipped} not identified yet — their artist/title fields were left alone` : undefined,
+        description: r.skipped ? `${r.skipped} not identified yet - their artist/title fields were left alone` : undefined,
       })
       refresh()
     } catch (e) {

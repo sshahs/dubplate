@@ -57,7 +57,7 @@ export function jobFinished(job: Job) {
   if (!unseen) baseTitle = document.title
   unseen++
   const ok = job.status === "done"
-  document.title = `(${unseen}) ${ok ? "✓" : "✗"} ${job.label} — Dubplate`
+  document.title = `(${unseen}) ${ok ? "✓" : "✗"} ${job.label} - Dubplate`
   if (notifyEnabled()) {
     const body = ok ? `${job.done} done${job.failed ? ` · ${job.failed} failed` : ""}` : (job.message ?? "Failed")
     const n = new Notification(`${ok ? "Finished" : "Failed"}: ${job.label}`, { body, tag: job.id, icon: "/favicon.svg" })

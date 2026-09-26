@@ -38,7 +38,7 @@ function spawn(): Slot | null {
     const died = () => {
       if (slots.includes(slot) && ++crashes >= 3) {
         inProcess = true
-        console.error("[dubplate] worker threads keep failing — analysing on the main thread instead")
+        console.error("[dubplate] worker threads keep failing - analysing on the main thread instead")
       }
       retire(slot)
     }
