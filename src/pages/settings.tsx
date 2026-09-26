@@ -13,6 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Slider } from "@/components/ui/slider"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
@@ -194,10 +195,9 @@ export default function SettingsPage() {
   const qc = useQueryClient()
   const location = useLocation()
   const { data } = useQuery({ queryKey: ["settings"], queryFn: api.settings })
-  const [draft, setDraft] = useState<PublicSettings | null>(null)
-  useEffect(() => {
-    if (data) setDraft(structuredClone(data))
-  }, [data])
+  // Unsaved edits sit on top of the loaded settings; derived in render so the form never flashes empty.
+  const [edit, setEdit] = useState<PublicSettings | null>(null)
+  const draft = edit ?? data ?? null
   useEffect(() => {
     if (location.hash && draft) document.getElementById(location.hash.slice(1))?.scrollIntoView({ behavior: "smooth" })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -207,6 +207,7 @@ export default function SettingsPage() {
     mutationFn: (s: Partial<Settings>) => api.saveSettings(s),
     onSuccess: (next) => {
       qc.setQueryData(["settings"], next)
+      setEdit(null)
       void qc.invalidateQueries({ queryKey: ["health"] })
       void qc.invalidateQueries({ queryKey: ["sources"] })
       toast.success("Settings saved")
@@ -214,7 +215,7 @@ export default function SettingsPage() {
     onError: (e) => toast.error(e.message),
   })
 
-  const dirty = useMemo(() => !!draft && !!data && JSON.stringify(draft) !== JSON.stringify(data), [draft, data])
+  const dirty = useMemo(() => !!edit && !!data && JSON.stringify(edit) !== JSON.stringify(data), [edit, data])
   const preview = useMemo(() => {
     if (!draft) return ""
     const meta = { artists: ["Buju Banton", "Beenie Man"], relation: "vs" as const, featuring: [], title: "Live Clash", version: "Dubplate", year: 1993 }
@@ -222,11 +223,21 @@ export default function SettingsPage() {
     return [renderTemplate(draft.naming.template, meta, draft.naming), renderTemplate(draft.naming.template, meta2, draft.naming)]
   }, [draft])
 
-  if (!draft) return null
+  if (!draft) {
+    return (
+      <>
+        <PageHeader eyebrow="Mixing desk" title="Settings" description="AI providers, confidence thresholds, naming and safety." />
+        <div className="space-y-4">
+          <Skeleton className="h-96 rounded-4xl" />
+          <Skeleton className="h-56 rounded-4xl" />
+        </div>
+      </>
+    )
+  }
   const set = (fn: (d: PublicSettings) => void) => {
     const next = structuredClone(draft)
     fn(next)
-    setDraft(next)
+    setEdit(next)
   }
 
   return (
@@ -437,7 +448,7 @@ export default function SettingsPage() {
         )}
       >
         <span className="text-sm">Unsaved changes</span>
-        <Button variant="ghost" size="sm" onClick={() => data && setDraft(structuredClone(data))}>
+        <Button variant="ghost" size="sm" onClick={() => setEdit(null)}>
           Discard
         </Button>
         <Button

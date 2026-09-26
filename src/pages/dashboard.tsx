@@ -1,9 +1,11 @@
 import { HugeiconsIcon } from "@hugeicons/react"
 import { AiMagicIcon, CheckListIcon, FolderLibraryIcon, RefreshIcon, Scissor01Icon } from "@hugeicons/core-free-icons"
 import { useMutation, useQuery } from "@tanstack/react-query"
+import type { CSSProperties } from "react"
 import { Link } from "react-router"
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, XAxis, YAxis } from "recharts"
 import { toast } from "sonner"
+import { AnimatedNumber } from "@/components/animated-number"
 import { DubplateMark, VuMeter } from "@/components/brand"
 import { PageHeader } from "@/components/app-shell"
 import { StatusBadge } from "@/components/confidence"
@@ -29,16 +31,16 @@ const BUCKET_COLOR: Record<string, string> = {
 
 const chartConfig = { count: { label: "Tracks" } } satisfies ChartConfig
 
-function Stat({ label, value, tone, hint, to }: { label: string; value: number | undefined; tone: string; hint: string; to: string }) {
+function Stat({ label, value, tone, hint, to, index }: { label: string; value: number | undefined; tone: string; hint: string; to: string; index: number }) {
   return (
-    <Link to={to} className="group">
-      <Card className="h-full transition-colors group-hover:border-foreground/20">
+    <Link to={to} className="group animate-rise-in" style={{ "--stagger": index } as CSSProperties}>
+      <Card className="group-hover:border-foreground/20 h-full transition-[border-color,translate,box-shadow] duration-300 group-hover:-translate-y-0.5 group-hover:shadow-lg">
         <CardContent className="space-y-1">
           <div className="text-muted-foreground flex items-center gap-2 text-xs font-medium tracking-wide uppercase">
             <span className={cn("size-2 rounded-full", tone)} />
             {label}
           </div>
-          <div className="font-heading text-3xl font-extrabold tabular-nums">{value ?? <Skeleton className="h-9 w-16" />}</div>
+          <div className="font-heading text-3xl font-extrabold tabular-nums">{value === undefined ? <Skeleton className="h-9 w-16" /> : <AnimatedNumber value={value} from={0} />}</div>
           <div className="text-muted-foreground text-xs">{hint}</div>
         </CardContent>
       </Card>
@@ -89,11 +91,11 @@ export default function DashboardPage() {
           for consensus, and only renames what it's sure of — everything else waits for your ear.
         </p>
         <div className="mt-6 flex gap-2">
-          <Button render={<Link to="/libraries" />} size="lg">
+          <Button nativeButton={false} render={<Link to="/libraries" />} size="lg">
             <HugeiconsIcon icon={FolderLibraryIcon} strokeWidth={2} data-icon="inline-start" />
             Add your first library
           </Button>
-          <Button variant="outline" size="lg" render={<Link to="/untangler" />}>
+          <Button variant="outline" size="lg" nativeButton={false} render={<Link to="/untangler" />}>
             Try the Untangler
           </Button>
         </div>
@@ -124,10 +126,10 @@ export default function DashboardPage() {
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="In staging" value={stats?.total} tone="bg-muted-foreground" hint={`${stats?.libraries ?? 0} libraries`} to="/tracks" />
-        <Stat label="Matched" value={s?.matched} tone="bg-rasta-green" hint="High-confidence consensus" to="/tracks?status=matched" />
-        <Stat label="Needs your ear" value={s ? s.review + s.conflict : undefined} tone="bg-rasta-gold" hint={`${s?.conflict ?? 0} conflicts`} to="/review" />
-        <Stat label="Cut" value={s?.done} tone="bg-rasta-red" hint={`${s?.approved ?? 0} approved & waiting`} to="/execute" />
+        <Stat index={0} label="In staging" value={stats?.total} tone="bg-muted-foreground" hint={`${stats?.libraries ?? 0} libraries`} to="/tracks" />
+        <Stat index={1} label="Matched" value={s?.matched} tone="bg-rasta-green" hint="High-confidence consensus" to="/tracks?status=matched" />
+        <Stat index={2} label="Needs your ear" value={s ? s.review + s.conflict : undefined} tone="bg-rasta-gold" hint={`${s?.conflict ?? 0} conflicts`} to="/review" />
+        <Stat index={3} label="Cut" value={s?.done} tone="bg-rasta-red" hint={`${s?.approved ?? 0} approved & waiting`} to="/execute" />
       </div>
 
       <Card className="mt-4">
@@ -141,7 +143,15 @@ export default function DashboardPage() {
               const n = f.status.reduce((a, st) => a + (s?.[st] ?? 0), 0)
               if (!n) return null
               const colors = ["bg-muted-foreground/35", "bg-muted-foreground/65", "bg-chart-3/55", "bg-chart-2", "bg-chart-1", "bg-foreground/85", "bg-chart-3"]
-              return <div key={f.label} className={colors[i]} style={{ width: `${(n / pipelineTotal) * 100}%` }} title={`${f.label}: ${n}`} />
+              // Segments grow from nothing and glide as tracks move through the pipeline.
+              return (
+                <div
+                  key={f.label}
+                  className={cn(colors[i], "w-(--w) transition-[width] duration-700 ease-(--ease-out) starting:w-0")}
+                  style={{ "--w": `${(n / pipelineTotal) * 100}%` } as CSSProperties}
+                  title={`${f.label}: ${n}`}
+                />
+              )
             })}
           </div>
           <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4 lg:grid-cols-7">
@@ -152,7 +162,9 @@ export default function DashboardPage() {
                     <StatusBadge key={st} status={st} />
                   ))}
                 </div>
-                <div className="mt-1 font-mono text-lg tabular-nums">{f.status.reduce((a, st) => a + (s?.[st] ?? 0), 0)}</div>
+                <div className="mt-1 font-mono text-lg tabular-nums">
+                  <AnimatedNumber value={f.status.reduce((a, st) => a + (s?.[st] ?? 0), 0)} />
+                </div>
               </div>
             ))}
           </div>
@@ -173,7 +185,7 @@ export default function DashboardPage() {
                   <XAxis dataKey="bucket" tickLine={false} axisLine={false} tickMargin={8} />
                   <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={40} />
                   <ChartTooltip cursor={{ fillOpacity: 0.06 }} content={<ChartTooltipContent hideIndicator />} />
-                  <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={56} stroke="var(--card)" strokeWidth={2}>
+                  <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={56} stroke="var(--card)" strokeWidth={2} animationDuration={600} animationEasing="ease-out">
                     {stats.confidenceBuckets.map((b) => (
                       <Cell key={b.bucket} fill={BUCKET_COLOR[b.bucket]} />
                     ))}
@@ -225,7 +237,10 @@ export default function DashboardPage() {
                     <div key={src.source} className="flex items-center gap-2 text-xs">
                       <span className="w-28 truncate">{src.source.replace(/^scraper:/, "")}</span>
                       <div className="bg-muted h-1.5 flex-1 overflow-hidden rounded-full">
-                        <div className="bg-foreground/50 h-full rounded-full" style={{ width: `${(src.hits / stats.sources[0].hits) * 100}%` }} />
+                        <div
+                          className="bg-foreground/50 h-full w-(--w) rounded-full transition-[width] duration-700 ease-(--ease-out) starting:w-0"
+                          style={{ "--w": `${(src.hits / stats.sources[0].hits) * 100}%` } as CSSProperties}
+                        />
                       </div>
                       <span className="text-muted-foreground w-8 text-right font-mono">{src.hits}</span>
                     </div>
@@ -245,15 +260,15 @@ export default function DashboardPage() {
             <CardTitle>Next moves</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-2">
-            <Button variant="outline" className="justify-start" render={<Link to="/review" />}>
+            <Button variant="outline" className="justify-start" nativeButton={false} render={<Link to="/review" />}>
               <HugeiconsIcon icon={CheckListIcon} strokeWidth={2} data-icon="inline-start" />
               Review {s ? s.review + s.conflict : 0} tracks that need a human ear
             </Button>
-            <Button variant="outline" className="justify-start" render={<Link to="/tracks?status=matched" />}>
+            <Button variant="outline" className="justify-start" nativeButton={false} render={<Link to="/tracks?status=matched" />}>
               <HugeiconsIcon icon={AiMagicIcon} strokeWidth={2} data-icon="inline-start" />
               Approve {s?.matched ?? 0} high-confidence matches
             </Button>
-            <Button variant="outline" className="justify-start" render={<Link to="/execute" />}>
+            <Button variant="outline" className="justify-start" nativeButton={false} render={<Link to="/execute" />}>
               <HugeiconsIcon icon={Scissor01Icon} strokeWidth={2} data-icon="inline-start" />
               Cut & tag {s?.approved ?? 0} approved files
             </Button>
@@ -265,7 +280,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             {active.map((j) => (
-              <div key={j.id} className="space-y-1">
+              <div key={j.id} className="animate-in fade-in slide-in-from-top-1 space-y-1 duration-300">
                 <div className="flex items-center gap-2 text-sm">
                   <VuMeter className="h-3" />
                   <span className="flex-1 truncate">{j.label}</span>
@@ -280,7 +295,7 @@ export default function DashboardPage() {
               .filter((j) => !active.some((a) => a.id === j.id))
               .slice(0, 6)
               .map((j) => (
-                <div key={j.id} className="flex items-center gap-2 text-sm">
+                <div key={j.id} className="animate-in fade-in flex items-center gap-2 text-sm duration-300">
                   <span className={cn("size-2 rounded-full", j.status === "done" ? "bg-rasta-green" : j.status === "failed" ? "bg-rasta-red" : "bg-muted-foreground")} />
                   <span className="flex-1 truncate">{j.label}</span>
                   <span className="text-muted-foreground text-xs">{fmtAgo(j.finishedAt ?? j.createdAt)}</span>

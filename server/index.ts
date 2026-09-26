@@ -49,9 +49,22 @@ const app = createApp()
 const distDir = path.resolve(import.meta.dirname, "../dist")
 if (fs.existsSync(path.join(distDir, "index.html"))) {
   const root = path.relative(process.cwd(), distDir) || "."
-  app.use("/*", serveStatic({ root }))
+  app.use(
+    "/*",
+    serveStatic({
+      root,
+      // Hashed build output never changes; index.html must always be revalidated.
+      onFound: (file, c) => c.header("cache-control", file.includes(`${path.sep}assets${path.sep}`) || file.includes("/assets/") ? "public, max-age=31536000, immutable" : "no-cache"),
+    })
+  )
   const indexHtml = fs.readFileSync(path.join(distDir, "index.html"), "utf8")
-  app.get("*", (c) => c.html(indexHtml))
+  app.get("*", (c) => {
+    // A missing asset or API route is a 404, not the app shell — otherwise a stale
+    // tab asking for an old chunk after an upgrade gets HTML back and breaks.
+    if (c.req.path.startsWith("/api/") || c.req.path.startsWith("/assets/") || /\.[a-z0-9]+$/i.test(c.req.path)) return c.notFound()
+    c.header("cache-control", "no-cache")
+    return c.html(indexHtml)
+  })
 }
 
 serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {

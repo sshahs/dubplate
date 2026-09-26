@@ -15,7 +15,8 @@ import {
   Sun03Icon,
 } from "@hugeicons/core-free-icons"
 import { useQuery } from "@tanstack/react-query"
-import { useState, type ReactNode } from "react"
+import { useState, ViewTransition, type MouseEvent, type ReactNode } from "react"
+import { flushSync } from "react-dom"
 import { NavLink, useLocation } from "react-router"
 import { CommandPalette } from "@/components/command-palette"
 import { DubplateMark, RastaStripe } from "@/components/brand"
@@ -38,10 +39,12 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { api } from "@/lib/api"
 import { useLive } from "@/lib/events"
+import { cn } from "@/lib/utils"
 
 export const NAV = [
   { to: "/", label: "Dashboard", icon: DashboardSquare01Icon, group: "Selector" },
@@ -57,13 +60,33 @@ export const NAV = [
 
 function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme()
+  const toggle = (e: MouseEvent<HTMLButtonElement>) => {
+    const next = resolvedTheme === "dark" ? "light" : "dark"
+    const root = document.documentElement
+    if (!document.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches) return setTheme(next)
+    // Wipe the new theme in as a circle growing out of the button.
+    const { left, top, width, height } = e.currentTarget.getBoundingClientRect()
+    const x = left + width / 2
+    const y = top + height / 2
+    const radius = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y))
+    root.classList.add("theme-reveal")
+    const vt = document.startViewTransition(() => {
+      root.classList.toggle("dark", next === "dark")
+      flushSync(() => setTheme(next))
+    })
+    vt.ready
+      .then(() =>
+        root.animate(
+          { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`] },
+          { duration: 550, easing: "cubic-bezier(0.22, 1, 0.36, 1)", pseudoElement: "::view-transition-new(root)" }
+        )
+      )
+      .catch(() => {})
+    void vt.finished.finally(() => root.classList.remove("theme-reveal"))
+  }
   return (
     <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button variant="ghost" size="icon-sm" onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")} aria-label="Toggle theme" />
-        }
-      >
+      <TooltipTrigger render={<Button variant="ghost" size="icon-sm" onClick={toggle} aria-label="Toggle theme" />}>
         <HugeiconsIcon icon={resolvedTheme === "dark" ? Sun03Icon : Moon02Icon} strokeWidth={2} />
       </TooltipTrigger>
       <TooltipContent>{resolvedTheme === "dark" ? "Daytime" : "Night session"}</TooltipContent>
@@ -75,6 +98,7 @@ function AppSidebar() {
   const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: api.stats })
   const { connected } = useLive()
   const location = useLocation()
+  const { isMobile, setOpenMobile } = useSidebar()
   const groups = [...new Set(NAV.map((n) => n.group))]
   const badgeFor = (b?: "review" | "approved") => {
     if (!b || !stats) return 0
@@ -102,11 +126,30 @@ function AppSidebar() {
                   const count = badgeFor(n.badge)
                   return (
                     <SidebarMenuItem key={n.to}>
-                      <SidebarMenuButton isActive={active} tooltip={n.label} render={<NavLink to={n.to} />}>
+                      {active && (
+                        // Shared name: on navigation the marker glides to the new item.
+                        <ViewTransition name="nav-indicator">
+                          <span
+                            aria-hidden
+                            className="from-rasta-red via-rasta-gold to-rasta-green pointer-events-none absolute top-1.5 bottom-1.5 -left-1 z-10 w-1 rounded-full bg-linear-to-b group-data-[collapsible=icon]:-left-2"
+                          />
+                        </ViewTransition>
+                      )}
+                      <SidebarMenuButton
+                        isActive={active}
+                        tooltip={n.label}
+                        // On phones the sidebar is a sheet: put it away once a page is picked.
+                        render={<NavLink to={n.to} onClick={() => isMobile && setOpenMobile(false)} />}
+                      >
                         <HugeiconsIcon icon={n.icon} strokeWidth={2} />
                         <span>{n.label}</span>
                       </SidebarMenuButton>
-                      {count > 0 && <SidebarMenuBadge className={n.badge === "review" ? "text-rasta-gold" : "text-primary"}>{count}</SidebarMenuBadge>}
+                      {count > 0 && (
+                        // Pops in when work appears; no re-pop on every tick so a running job stays calm.
+                        <SidebarMenuBadge className={cn("animate-in zoom-in-50 fade-in tabular-nums duration-300", n.badge === "review" ? "text-rasta-gold" : "text-primary")}>
+                          {count}
+                        </SidebarMenuBadge>
+                      )}
                     </SidebarMenuItem>
                   )
                 })}
@@ -127,7 +170,8 @@ function AppSidebar() {
 
 function ReadOnlyPill() {
   const { data } = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000 })
-  if (!data) return null
+  // Hold the pill's space while loading so the header doesn't shuffle.
+  if (!data) return <span aria-hidden className="bg-input/40 inline-block h-7 w-7 animate-pulse rounded-full sm:w-24" />
   return (
     <Tooltip>
       <TooltipTrigger
