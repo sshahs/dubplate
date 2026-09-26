@@ -5,7 +5,9 @@ import { addTransitionType, startTransition, useEffect, useMemo, useRef, useStat
 import { Link } from "react-router"
 import type { TrackStatus } from "@shared/types"
 import { PageHeader } from "@/components/app-shell"
+import { QueryError } from "@/components/query-error"
 import { ConfidenceMeter, StatusBadge } from "@/components/confidence"
+import { Cover } from "@/components/cover"
 import { TrackDetail } from "@/components/track-detail"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -16,6 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { api } from "@/lib/api"
 import { usePrefetchTracks } from "@/lib/prefetch"
+import { undoLast } from "@/lib/undo"
 import { cn } from "@/lib/utils"
 
 const QUEUES: Record<string, { label: string; status: TrackStatus[] }> = {
@@ -29,7 +32,7 @@ export default function ReviewPage() {
   const [queue, setQueue] = useState("review")
   const [currentId, setCurrentId] = useState<number | null>(null)
   const filter = useMemo(() => ({ status: QUEUES[queue].status, sort: "confidence" as const, dir: "desc" as const, limit: 200 }), [queue])
-  const { data, isPlaceholderData } = useQuery({ queryKey: ["tracks", "review", filter], queryFn: () => api.tracks(filter), placeholderData: keepPreviousData })
+  const { data, isPlaceholderData, error, refetch } = useQuery({ queryKey: ["tracks", "review", filter], queryFn: () => api.tracks(filter), placeholderData: keepPreviousData })
   const items = useMemo(() => data?.items ?? [], [data])
   const index = Math.max(0, items.findIndex((t) => t.id === currentId))
   const current = items[index]
@@ -49,7 +52,15 @@ export default function ReviewPage() {
     })
   }
 
+  // After an undo, the track comes back into the queue once the list refreshes: go back to it then.
+  const returnTo = useRef<number | null>(null)
   useEffect(() => {
+    const want = returnTo.current
+    if (want !== null && items.some((t) => t.id === want)) {
+      returnTo.current = null
+      go(want, "back")
+      return
+    }
     if (items.length && (currentId === null || !items.some((t) => t.id === currentId))) setCurrentId(items[Math.min(index, items.length - 1)]?.id ?? null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items])
@@ -69,6 +80,8 @@ export default function ReviewPage() {
         document.querySelector<HTMLButtonElement>("[data-review-action=approve]")?.click()
       } else if (e.key === "x") {
         document.querySelector<HTMLButtonElement>("[data-review-action=reject]")?.click()
+      } else if (e.key === "z") {
+        undoLast()
       }
     }
     window.addEventListener("keydown", onKey)
@@ -83,7 +96,7 @@ export default function ReviewPage() {
         description="The tracks the engine wasn't sure about. Have a listen, check the evidence, and make the call — every approval teaches the AI your style."
         actions={
           <div className="text-muted-foreground hidden items-center gap-1.5 text-xs md:flex">
-            <Kbd>J</Kbd>/<Kbd>K</Kbd> move · <Kbd>A</Kbd> approve · <Kbd>X</Kbd> leave as-is
+            <Kbd>J</Kbd>/<Kbd>K</Kbd> move · <Kbd>A</Kbd> approve · <Kbd>X</Kbd> leave as-is · <Kbd>Z</Kbd> undo
           </div>
         }
       />
@@ -97,7 +110,9 @@ export default function ReviewPage() {
         </TabsList>
       </Tabs>
 
-      {!data ? (
+      {error && !data ? (
+        <QueryError error={error} onRetry={() => void refetch()} />
+      ) : !data ? (
         <div className="grid gap-4 lg:grid-cols-[20rem_1fr]">
           <Skeleton className="h-[40vh] rounded-4xl lg:h-[calc(100vh-14rem)]" />
           <Skeleton className="h-[60vh] rounded-4xl" />
@@ -128,10 +143,15 @@ export default function ReviewPage() {
                     onClick={() => go(t.id, i < index ? "back" : "forward")}
                     className={cn("w-full rounded-2xl p-2.5 text-left transition-colors duration-200", i === index ? "bg-muted" : "hover:bg-muted/50")}
                   >
-                    <div className="truncate font-mono text-xs">{t.filename}</div>
-                    <div className="mt-1.5 flex items-center justify-between gap-2">
-                      <StatusBadge status={t.status} />
-                      <ConfidenceMeter value={t.confidence} />
+                    <div className="flex items-center gap-2.5">
+                      <Cover track={t} size={36} />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-mono text-xs">{t.filename}</div>
+                        <div className="mt-1.5 flex items-center justify-between gap-2">
+                          <StatusBadge status={t.status} />
+                          <ConfidenceMeter value={t.confidence} />
+                        </div>
+                      </div>
                     </div>
                   </button>
                 ))}
@@ -154,6 +174,7 @@ export default function ReviewPage() {
                     <TrackDetail
                       trackId={current.id}
                       compact
+                      onUndone={() => (returnTo.current = current.id)}
                       onAdvance={() => {
                         const next = items[index + 1] ?? items[index - 1]
                         go(next ? next.id : null, "forward")

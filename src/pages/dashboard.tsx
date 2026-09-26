@@ -8,6 +8,7 @@ import { toast } from "sonner"
 import { AnimatedNumber } from "@/components/animated-number"
 import { DubplateMark, VuMeter } from "@/components/brand"
 import { PageHeader } from "@/components/app-shell"
+import { QueryError } from "@/components/query-error"
 import { StatusBadge } from "@/components/confidence"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -59,7 +60,7 @@ const FLOW: { status: TrackStatus[]; label: string }[] = [
 ]
 
 export default function DashboardPage() {
-  const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: api.stats })
+  const { data: stats, error: statsError, refetch: refetchStats } = useQuery({ queryKey: ["stats"], queryFn: api.stats })
   const { data: libraries } = useQuery({ queryKey: ["libraries"], queryFn: api.libraries })
   const { data: health } = useQuery({ queryKey: ["health"], queryFn: api.health })
   const { data: jobs } = useQuery({ queryKey: ["jobs"], queryFn: api.jobs })
@@ -104,6 +105,15 @@ export default function DashboardPage() {
         </div>
         <p className="text-muted-foreground mt-6 text-xs">Scanning is read-only. Nothing on disk changes until you approve it and switch off read-only mode.</p>
       </div>
+    )
+  }
+
+  if (statsError && !stats) {
+    return (
+      <>
+        <PageHeader eyebrow="The yard" title="Dashboard" description="Where your crates stand — from raw rips to properly credited tunes." />
+        <QueryError error={statsError} onRetry={() => void refetchStats()} />
+      </>
     )
   }
 

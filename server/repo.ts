@@ -4,6 +4,7 @@ import fs from "node:fs"
 import type { SQLInputValue } from "node:sqlite"
 import type {
   Alias,
+  ArtRef,
   Correction,
   ExistingTags,
   Library,
@@ -14,9 +15,11 @@ import type {
   TrackStatus,
   TrackSummary,
 } from "../shared/types"
+import { parseKey } from "../shared/keys"
 import { TRACK_STATUSES } from "../shared/types"
 import { normArtist } from "./core/normalize"
 import { getDb, parseJson } from "./db"
+import { watchState } from "./watch-state"
 
 type Row = Record<string, unknown>
 
@@ -31,6 +34,8 @@ function rowToLibrary(r: Row): Library {
     lastScanAt: (r.last_scan_at as string) ?? null,
     fileCount: r.file_count as number,
     exists: fs.existsSync(r.path as string),
+    watch: !!r.watch,
+    watchState: r.watch ? watchState(r.id as number) : "off",
   }
 }
 
@@ -46,6 +51,11 @@ export function getLibrary(id: number): Library | null {
 export function addLibrary(p: string, name: string): Library {
   const r = getDb().prepare("INSERT INTO libraries (path, name) VALUES (?, ?) RETURNING *").get(p, name) as Row
   return rowToLibrary(r)
+}
+
+export function updateLibrary(id: number, patch: { name?: string; watch?: boolean }) {
+  if (patch.name !== undefined) getDb().prepare("UPDATE libraries SET name = ? WHERE id = ?").run(patch.name, id)
+  if (patch.watch !== undefined) getDb().prepare("UPDATE libraries SET watch = ? WHERE id = ?").run(patch.watch ? 1 : 0, id)
 }
 
 export function removeLibrary(id: number) {
@@ -87,6 +97,11 @@ export function rowToTrack(r: Row): Track {
     proposedName: (r.proposed_name as string) ?? null,
     note: (r.note as string) ?? null,
     missing: !!r.missing,
+    bpm: (r.bpm as number) ?? null,
+    key: parseKey(r.musical_key as string | null),
+    analysis: parseJson(r.analysis_json, null),
+    art: parseJson<ArtRef | null>(r.art_json, null),
+    artFound: parseJson<ArtRef | null>(r.art_found_json, null),
     createdAt: r.created_at as string,
     updatedAt: r.updated_at as string,
   }
@@ -104,21 +119,26 @@ export function toSummary(t: Track): TrackSummary {
   }
 }
 
+/** A full track: its row plus the bulky readings/hits/decision kept in track_data. */
+const FULL_TRACK = "SELECT t.*, d.heuristic_json, d.ai_json, d.candidates_json, d.decision_json FROM tracks t LEFT JOIN track_data d ON d.track_id = t.id"
+
 export function getTrack(id: number): Track | null {
-  const r = getDb().prepare("SELECT * FROM tracks WHERE id = ?").get(id) as Row | undefined
+  const r = getDb().prepare(`${FULL_TRACK} WHERE t.id = ?`).get(id) as Row | undefined
   return r ? rowToTrack(r) : null
 }
 
 export function getTracks(ids: number[]): Track[] {
   if (!ids.length) return []
   const out: Track[] = []
-  const stmt = getDb().prepare("SELECT * FROM tracks WHERE id = ?")
+  const stmt = getDb().prepare(`${FULL_TRACK} WHERE t.id = ?`)
   for (const id of ids) {
     const r = stmt.get(id) as Row | undefined
     if (r) out.push(rowToTrack(r))
   }
   return out
 }
+
+export type TrackSort = "filename" | "confidence" | "status" | "updated" | "path" | "bpm" | "key"
 
 export interface TrackQuery {
   status?: TrackStatus[]
@@ -127,7 +147,7 @@ export interface TrackQuery {
   minConfidence?: number
   maxConfidence?: number
   includeMissing?: boolean
-  sort?: "filename" | "confidence" | "status" | "updated" | "path"
+  sort?: TrackSort
   dir?: "asc" | "desc"
   limit?: number
   offset?: number
@@ -161,16 +181,70 @@ function whereFor(q: TrackQuery): { sql: string; params: SQLInputValue[] } {
   return { sql: where.length ? `WHERE ${where.join(" AND ")}` : "", params }
 }
 
+/**
+ * What a list row needs: the track row plus a few fields picked out of the
+ * bulky JSON by SQLite, so a page never parses whole decisions in JS.
+ */
+const SUMMARY = `SELECT t.*,
+  d.decision_json IS NOT NULL AS has_decision,
+  json_extract(d.decision_json, '$.artists') AS d_artists, json_extract(d.decision_json, '$.title') AS d_title,
+  json_extract(d.decision_json, '$.status') AS d_status, json_array_length(d.decision_json, '$.clusters[0].sources') AS d_sources,
+  json_extract(d.ai_json, '$.artists') AS ai_artists, json_extract(d.ai_json, '$.title') AS ai_title,
+  json_extract(d.heuristic_json, '$.artists') AS h_artists, json_extract(d.heuristic_json, '$.title') AS h_title
+  FROM tracks t LEFT JOIN track_data d ON d.track_id = t.id`
+
+function rowToSummary(r: Row): TrackSummary {
+  const t = rowToTrack(r)
+  const { candidates: _c, decision: _d, heuristic: _h, ai: _a, ...rest } = t
+  // Same precedence as toSummary: approved → decision → AI → rule-based parser.
+  const reading = t.final
+    ? { artists: t.final.artists, title: t.final.title }
+    : r.has_decision
+      ? { artists: parseJson<string[]>(r.d_artists, []), title: r.d_title as string | undefined }
+      : r.ai_title !== null || r.ai_artists !== null
+        ? { artists: parseJson<string[]>(r.ai_artists, []), title: r.ai_title as string | undefined }
+        : r.h_title !== null || r.h_artists !== null
+          ? { artists: parseJson<string[]>(r.h_artists, []), title: r.h_title as string | undefined }
+          : null
+  return {
+    ...rest,
+    proposedArtist: reading ? reading.artists.join(", ") || null : null,
+    proposedTitle: reading?.title ?? null,
+    sourceCount: (r.d_sources as number) ?? 0,
+    conflict: r.d_status === "conflict",
+  }
+}
+
+function summariesById(ids: number[]): TrackSummary[] {
+  if (!ids.length) return []
+  const rows = getDb().prepare(`${SUMMARY} WHERE t.id IN (${ids.map(() => "?").join(",")})`).all(...ids) as Row[]
+  const byId = new Map(rows.map((r) => [r.id as number, r]))
+  return ids.flatMap((id) => (byId.has(id) ? [rowToSummary(byId.get(id)!)] : []))
+}
+
+const SORT_COLUMNS: Record<TrackSort, string> = {
+  filename: "filename COLLATE NOCASE",
+  confidence: "confidence",
+  status: "status",
+  updated: "updated_at",
+  path: "path",
+  bpm: "bpm",
+  key: "musical_key",
+}
+
 export function queryTracks(q: TrackQuery): { items: TrackSummary[]; total: number } {
   const db = getDb()
   const { sql, params } = whereFor(q)
-  const sortCol = { filename: "filename COLLATE NOCASE", confidence: "confidence", status: "status", updated: "updated_at", path: "path" }[q.sort ?? "filename"]
+  const sortCol = SORT_COLUMNS[q.sort ?? "filename"] ?? SORT_COLUMNS.filename
   const dir = q.dir === "desc" ? "DESC" : "ASC"
   const limit = Math.min(q.limit ?? 100, 1000)
   const offset = q.offset ?? 0
-  const rows = db.prepare(`SELECT * FROM tracks ${sql} ORDER BY ${sortCol} ${dir} NULLS LAST, id LIMIT ? OFFSET ?`).all(...params, limit, offset) as Row[]
+  // Page the ids first (small rows, indexes), then fetch just that page in full.
+  // Only nullable columns need NULLS LAST; leaving it off the rest lets SQLite walk the index in order.
+  const nulls = q.sort === "confidence" || q.sort === "bpm" || q.sort === "key" ? " NULLS LAST" : ""
+  const ids = (db.prepare(`SELECT id FROM tracks ${sql} ORDER BY ${sortCol} ${dir}${nulls}, id ${dir} LIMIT ? OFFSET ?`).all(...params, limit, offset) as { id: number }[]).map((r) => r.id)
   const total = (db.prepare(`SELECT COUNT(*) AS n FROM tracks ${sql}`).get(...params) as { n: number }).n
-  return { items: rows.map((r) => toSummary(rowToTrack(r))), total }
+  return { items: summariesById(ids), total }
 }
 
 export function queryTrackIds(q: TrackQuery): number[] {
@@ -178,7 +252,14 @@ export function queryTrackIds(q: TrackQuery): number[] {
   return (getDb().prepare(`SELECT id FROM tracks ${sql} ORDER BY id`).all(...params) as { id: number }[]).map((r) => r.id)
 }
 
-const JSON_COLS = new Set(["tags", "heuristic", "ai", "candidates", "decision", "final"])
+const JSON_COLS = new Set(["tags", "heuristic", "ai", "candidates", "decision", "final", "analysis", "art", "artFound"])
+/** Kept in track_data rather than on the track row. */
+const DATA_COLS: Record<string, string> = {
+  heuristic: "heuristic_json",
+  ai: "ai_json",
+  candidates: "candidates_json",
+  decision: "decision_json",
+}
 const COLS: Record<string, string> = {
   path: "path",
   filename: "filename",
@@ -192,30 +273,49 @@ const COLS: Record<string, string> = {
   sampleRate: "sample_rate",
   codec: "codec",
   tags: "tags_json",
-  heuristic: "heuristic_json",
-  ai: "ai_json",
-  candidates: "candidates_json",
-  decision: "decision_json",
   final: "final_json",
   confidence: "confidence",
   status: "status",
   proposedName: "proposed_name",
   note: "note",
   missing: "missing",
+  bpm: "bpm",
+  key: "musical_key",
+  analysis: "analysis_json",
+  art: "art_json",
+  artFound: "art_found_json",
 }
 
 export function updateTrack(id: number, patch: Partial<Track>) {
   const sets: string[] = []
   const params: SQLInputValue[] = []
+  const dataCols: string[] = []
+  const dataParams: SQLInputValue[] = []
   for (const [k, v] of Object.entries(patch)) {
+    const value = JSON_COLS.has(k) ? (v === null || v === undefined ? null : JSON.stringify(v)) : typeof v === "boolean" ? (v ? 1 : 0) : ((v ?? null) as SQLInputValue)
+    if (DATA_COLS[k]) {
+      dataCols.push(DATA_COLS[k])
+      dataParams.push(value)
+      continue
+    }
     const col = COLS[k]
     if (!col) continue
     sets.push(`${col} = ?`)
-    if (JSON_COLS.has(k)) params.push(v === null || v === undefined ? null : JSON.stringify(v))
-    else if (typeof v === "boolean") params.push(v ? 1 : 0)
-    else params.push((v ?? null) as SQLInputValue)
+    params.push(value)
   }
-  if (!sets.length) return
+  if (dataCols.length) {
+    getDb()
+      .prepare(
+        `INSERT INTO track_data (track_id, ${dataCols.join(", ")}) VALUES (?, ${dataCols.map(() => "?").join(", ")})
+         ON CONFLICT(track_id) DO UPDATE SET ${dataCols.map((c) => `${c} = excluded.${c}`).join(", ")}`
+      )
+      .run(id, ...dataParams)
+  }
+  if (!sets.length && !dataCols.length) return
+  if ("decision" in patch) {
+    sets.push("top_sources = ?")
+    params.push(patch.decision?.clusters[0]?.sources.join(" ") || null)
+  }
   sets.push("updated_at = datetime('now')")
   getDb().prepare(`UPDATE tracks SET ${sets.join(", ")} WHERE id = ?`).run(...params, id)
 }
@@ -384,9 +484,8 @@ export function stats(): Stats {
     db.prepare("SELECT COUNT(*) AS n FROM (SELECT hash FROM tracks WHERE hash IS NOT NULL AND missing = 0 GROUP BY hash HAVING COUNT(*) > 1)").get() as { n: number }
   ).n
   const sourceCounts = new Map<string, number>()
-  for (const r of db.prepare("SELECT decision_json FROM tracks WHERE decision_json IS NOT NULL AND missing = 0").all() as { decision_json: string }[]) {
-    const d = parseJson<{ clusters?: { sources: string[] }[] }>(r.decision_json, {})
-    for (const s of d.clusters?.[0]?.sources ?? []) sourceCounts.set(s, (sourceCounts.get(s) ?? 0) + 1)
+  for (const r of db.prepare("SELECT top_sources, COUNT(*) AS n FROM tracks WHERE top_sources IS NOT NULL AND missing = 0 GROUP BY top_sources").all() as { top_sources: string; n: number }[]) {
+    for (const s of r.top_sources.split(" ")) sourceCounts.set(s, (sourceCounts.get(s) ?? 0) + r.n)
   }
   return {
     total,
@@ -404,15 +503,15 @@ export function duplicateGroups(): { key: string; kind: "hash" | "name"; tracks:
   const out: { key: string; kind: "hash" | "name"; tracks: TrackSummary[] }[] = []
   const hashes = db.prepare("SELECT hash FROM tracks WHERE hash IS NOT NULL AND missing = 0 GROUP BY hash HAVING COUNT(*) > 1 LIMIT 200").all() as { hash: string }[]
   for (const { hash } of hashes) {
-    const rows = db.prepare("SELECT * FROM tracks WHERE hash = ? AND missing = 0").all(hash) as Row[]
-    out.push({ key: hash, kind: "hash", tracks: rows.map((r) => toSummary(rowToTrack(r))) })
+    const rows = db.prepare(`${SUMMARY} WHERE t.hash = ? AND t.missing = 0 LIMIT 50`).all(hash) as Row[]
+    out.push({ key: hash, kind: "hash", tracks: rows.map(rowToSummary) })
   }
   const names = db
     .prepare("SELECT proposed_name FROM tracks WHERE proposed_name IS NOT NULL AND missing = 0 GROUP BY lower(proposed_name) HAVING COUNT(*) > 1 LIMIT 200")
     .all() as { proposed_name: string }[]
   for (const { proposed_name } of names) {
-    const rows = db.prepare("SELECT * FROM tracks WHERE lower(proposed_name) = lower(?) AND missing = 0").all(proposed_name) as Row[]
-    const tracks = rows.map((r) => toSummary(rowToTrack(r)))
+    const rows = db.prepare(`${SUMMARY} WHERE lower(t.proposed_name) = lower(?) AND t.missing = 0 LIMIT 50`).all(proposed_name) as Row[]
+    const tracks = rows.map(rowToSummary)
     // skip groups that are already covered by an identical-hash group
     if (new Set(tracks.map((t) => t.hash)).size > 1) out.push({ key: proposed_name, kind: "name", tracks })
   }

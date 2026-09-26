@@ -8,7 +8,7 @@ import { ensureDataDir } from "../config"
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite")
 type DatabaseSync = DatabaseSyncType
 
-const MIGRATIONS: string[] = [
+export const MIGRATIONS: string[] = [
   `
   CREATE TABLE libraries (
     id INTEGER PRIMARY KEY,
@@ -110,6 +110,54 @@ const MIGRATIONS: string[] = [
     canonical TEXT NOT NULL
   );
   `,
+  // 2: BPM & key, artwork, watched libraries — and big libraries: the bulky per-track JSON
+  // (parser readings, source hits, decision) moves to its own table so track rows stay
+  // small and lists, counts and stats never have to wade through it.
+  `
+  ALTER TABLE tracks ADD COLUMN bpm REAL;
+  ALTER TABLE tracks ADD COLUMN musical_key TEXT;
+  ALTER TABLE tracks ADD COLUMN analysis_json TEXT;
+  ALTER TABLE tracks ADD COLUMN art_json TEXT;
+  ALTER TABLE tracks ADD COLUMN art_found_json TEXT;
+  -- The winning cluster's sources, space-separated, so stats don't parse every decision.
+  ALTER TABLE tracks ADD COLUMN top_sources TEXT;
+  -- Which scanner version last read the file's tags: files read before covers, BPM and key
+  -- were collected get re-read once, even if they haven't changed on disk.
+  ALTER TABLE tracks ADD COLUMN tags_version INTEGER NOT NULL DEFAULT 0;
+  UPDATE tracks SET top_sources = (SELECT group_concat(value, ' ') FROM json_each(tracks.decision_json, '$.clusters[0].sources'))
+    WHERE decision_json IS NOT NULL AND json_valid(decision_json);
+  UPDATE tracks SET bpm = json_extract(tags_json, '$.bpm'), musical_key = json_extract(tags_json, '$.key')
+    WHERE json_valid(tags_json);
+
+  CREATE TABLE track_data (
+    track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    heuristic_json TEXT,
+    ai_json TEXT,
+    candidates_json TEXT,
+    decision_json TEXT
+  );
+  INSERT INTO track_data (track_id, heuristic_json, ai_json, candidates_json, decision_json)
+    SELECT id, heuristic_json, ai_json, candidates_json, decision_json FROM tracks;
+  ALTER TABLE tracks DROP COLUMN heuristic_json;
+  ALTER TABLE tracks DROP COLUMN ai_json;
+  ALTER TABLE tracks DROP COLUMN candidates_json;
+  ALTER TABLE tracks DROP COLUMN decision_json;
+
+  -- Lists always filter on missing = 0, so each sortable column is indexed behind it:
+  -- a page is then read straight off the index in order instead of sorting every track.
+  DROP INDEX idx_tracks_status;
+  DROP INDEX idx_tracks_confidence;
+  DROP INDEX idx_tracks_hash;
+  CREATE INDEX idx_tracks_missing_filename ON tracks(missing, filename COLLATE NOCASE);
+  CREATE INDEX idx_tracks_missing_status ON tracks(missing, status);
+  CREATE INDEX idx_tracks_missing_confidence ON tracks(missing, confidence);
+  CREATE INDEX idx_tracks_missing_updated ON tracks(missing, updated_at);
+  CREATE INDEX idx_tracks_missing_bpm ON tracks(missing, bpm);
+  CREATE INDEX idx_tracks_hash ON tracks(hash, missing);
+  CREATE INDEX idx_tracks_proposed ON tracks(lower(proposed_name));
+
+  ALTER TABLE libraries ADD COLUMN watch INTEGER NOT NULL DEFAULT 0;
+  `,
 ]
 
 export type Db = DatabaseSync
@@ -126,6 +174,7 @@ export function openDb(file?: string): DatabaseSync {
 function migrate(db: DatabaseSync) {
   const row = db.prepare("PRAGMA user_version").get() as { user_version: number }
   let version = row.user_version
+  const from = version
   while (version < MIGRATIONS.length) {
     db.exec("BEGIN")
     try {
@@ -138,6 +187,8 @@ function migrate(db: DatabaseSync) {
       throw err
     }
   }
+  // Migration 2 moves the bulky JSON out of the tracks table; hand the freed space back once.
+  if (from >= 1 && from < 2 && version >= 2) db.exec("VACUUM")
 }
 
 export function getDb(): DatabaseSync {

@@ -38,6 +38,41 @@ export interface ExistingTags {
   track?: number
   label?: string
   comment?: string
+  bpm?: number
+  /** musical key, e.g. "Am" or "F#" */
+  key?: string
+  /** content hash of the embedded front cover (the key into Dubplate's artwork cache) */
+  cover?: string
+}
+
+/** A picture Dubplate knows about: embedded in a file, or found online to embed on cut. */
+export interface ArtRef {
+  /** sha1 of the image bytes */
+  hash: string
+  mime: string
+  bytes: number
+  width?: number
+  height?: number
+  source: "embedded" | SourceId
+  /** the source's display name, e.g. "Apple Music" */
+  sourceLabel?: string
+  /** where it was downloaded from */
+  url?: string
+}
+
+/** What listening to the audio said about tempo and key. */
+export interface TrackAnalysis {
+  bpm: number | null
+  /** 0..1, how clear the pulse was */
+  bpmConfidence: number
+  /** musical notation, e.g. "Am" */
+  key: string | null
+  /** 0..1, how far the best key stood out from the rest */
+  keyConfidence: number
+  /** seconds of audio listened to */
+  seconds: number
+  analyzedAt: string
+  error?: string
 }
 
 /** A reading of "who and what" a file is, from any parser. */
@@ -104,6 +139,8 @@ export interface Candidate {
   sourceScore?: number
   /** audio fingerprint match rather than a text search */
   fingerprint?: boolean
+  /** cover art URL (the largest the source offers) */
+  artwork?: string
 }
 
 export interface ConfidenceFactor {
@@ -181,6 +218,15 @@ export interface Track {
   proposedName: string | null
   note: string | null
   missing: boolean
+  /** tempo in beats per minute (from the file's tags, the analyser or you) */
+  bpm: number | null
+  /** musical key in musical notation, e.g. "Am" */
+  key: string | null
+  analysis: TrackAnalysis | null
+  /** the picture embedded in the file now */
+  art: ArtRef | null
+  /** artwork found online, embedded when the track is cut */
+  artFound: ArtRef | null
   createdAt: string
   updatedAt: string
 }
@@ -200,9 +246,13 @@ export interface Library {
   lastScanAt: string | null
   fileCount: number
   exists: boolean
+  /** pick up new files automatically */
+  watch: boolean
+  /** "watching": live file events; "polling": checked every few minutes (events unavailable) */
+  watchState: "watching" | "polling" | "off"
 }
 
-export type JobKind = "scan" | "interpret" | "scour" | "score" | "process" | "execute" | "rewind"
+export type JobKind = "scan" | "interpret" | "scour" | "score" | "process" | "execute" | "rewind" | "analyze" | "artwork"
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled"
 
 export interface Job {
@@ -307,6 +357,8 @@ export interface ScraperField {
   year?: string
   label?: string
   album?: string
+  /** cover image URL, e.g. `img.cover@src` */
+  artwork?: string
 }
 
 export interface ScraperDefinition {
@@ -360,6 +412,34 @@ export interface Settings {
   safety: {
     readOnly: boolean
   }
+  artwork: {
+    /** look for cover art when identifying tracks */
+    fetch: boolean
+    /** embed found artwork when cutting */
+    embed: boolean
+    /** replace artwork a file already has */
+    replaceExisting: boolean
+  }
+  analysis: {
+    /** analyse BPM and key as part of identifying tracks */
+    onProcess: boolean
+    /** write BPM and key to the file's tags when cutting */
+    writeTags: boolean
+    /** how the key is written to tags */
+    keyNotation: "musical" | "camelot"
+    /** BPMs are folded into [bpmMin, 2 × bpmMin) */
+    bpmMin: number
+  }
+  automation: {
+    /** identify files that watched folders or the nightly scan pick up */
+    autoProcess: boolean
+    /** re-check watched folders this often (minutes; 0 = only on file events) */
+    pollMinutes: number
+    /** rescan every library once a night */
+    nightly: boolean
+    /** "HH:MM", server time */
+    nightlyAt: string
+  }
   contact: string
 }
 
@@ -384,4 +464,6 @@ export interface HealthInfo {
   readOnly: boolean
   fpcalc: boolean
   llm: { id: string; label: string; model: string; kind: LlmProviderKind } | null
+  /** the server's time zone, for scheduled scans */
+  timeZone: string
 }

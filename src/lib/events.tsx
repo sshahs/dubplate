@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { toast } from "sonner"
 import type { Job, ServerEvent } from "@shared/types"
+import { jobFinished } from "@/lib/notify"
 
 type LogEvent = Extract<ServerEvent, { type: "log" }>
 
@@ -34,10 +35,17 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       pending.current = { tracks: false, stats: false }
     }, 1200)
 
+    let dropped = false
     const connect = () => {
       es = new EventSource("/api/events")
-      es.onopen = () => setConnected(true)
+      es.onopen = () => {
+        setConnected(true)
+        // Back after an outage: anything on screen may be stale (and error screens can clear).
+        if (dropped) void qc.invalidateQueries()
+        dropped = false
+      }
       es.onerror = () => {
+        dropped = true
         setConnected(false)
         es?.close()
         retry = setTimeout(connect, 3000)
@@ -58,6 +66,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
             void qc.invalidateQueries({ queryKey: ["batches"] })
             if (e.job.status === "done") toast.success(e.job.label, { description: `${e.job.done} done${e.job.failed ? ` · ${e.job.failed} failed` : ""}` })
             if (e.job.status === "failed") toast.error(e.job.label, { description: e.job.message ?? "Failed" })
+            // In another tab? Flag it in the title (and a system notification, if allowed).
+            jobFinished(e.job)
           }
         } else if (e.type === "log") {
           setLogs((prev) => [...prev.slice(-199), e])

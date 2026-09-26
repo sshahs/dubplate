@@ -2,11 +2,12 @@ import { HugeiconsIcon } from "@hugeicons/react"
 import { Delete02Icon, RefreshIcon, TestTube01Icon } from "@hugeicons/core-free-icons"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
-import { useLocation } from "react-router"
+import { Link, useLocation } from "react-router"
 import { toast } from "sonner"
 import { renderTemplate } from "@core/naming"
 import type { LlmProviderConfig, Settings } from "@shared/types"
 import { PageHeader } from "@/components/app-shell"
+import { QueryError } from "@/components/query-error"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -19,6 +20,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { api, type PublicSettings } from "@/lib/api"
+import { disableNotify, enableNotify, notifyEnabled, notifySupport } from "@/lib/notify"
 import { cn } from "@/lib/utils"
 
 function ProviderRow({
@@ -185,6 +187,66 @@ function Learning() {
   )
 }
 
+const KEY_NOTATIONS = [
+  { value: "musical", label: "Musical — Am, F#" },
+  { value: "camelot", label: "Camelot — 8A, 2B" },
+]
+
+const BPM_RANGES = [
+  { value: "60", label: "60–119 (half-time)" },
+  { value: "70", label: "70–139" },
+  { value: "78", label: "78–155" },
+  { value: "88", label: "88–175 (Traktor-style)" },
+  { value: "100", label: "100–199" },
+]
+
+const POLL_OPTIONS = [
+  { value: "0", label: "Only when files change" },
+  { value: "5", label: "Every 5 minutes" },
+  { value: "15", label: "Every 15 minutes" },
+  { value: "30", label: "Every 30 minutes" },
+  { value: "60", label: "Every hour" },
+]
+
+/** Per-browser: whether this browser shows a system notification when a long job finishes. */
+function NotificationsCard() {
+  const support = notifySupport()
+  const [on, setOn] = useState(notifyEnabled)
+  const [denied, setDenied] = useState(support === "ok" && Notification.permission === "denied")
+  const toggle = async (want: boolean) => {
+    if (!want) {
+      disableNotify()
+      setOn(false)
+      return
+    }
+    const result = await enableNotify()
+    setOn(result === "granted")
+    setDenied(result === "denied")
+    if (result === "granted") new Notification("Dubplate notifications are on", { body: "You'll hear when long jobs finish.", icon: "/favicon.svg" })
+  }
+  return (
+    <Card id="notifications">
+      <CardHeader>
+        <CardTitle>Notifications</CardTitle>
+        <CardDescription>When a long scan, identify or cut finishes while you're in another tab, the tab title shows it. This browser can also pop up a notification.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <label className="flex items-center gap-2 text-sm">
+          <Switch checked={on} disabled={support !== "ok"} onCheckedChange={(v) => void toggle(v)} />
+          Notify me in this browser when long jobs finish
+        </label>
+        {support === "insecure" && (
+          <p className="text-muted-foreground text-xs">
+            Browsers only allow notifications on HTTPS or localhost. Open Dubplate through an HTTPS reverse proxy to use them — the tab title still flags finished jobs.
+          </p>
+        )}
+        {support === "unsupported" && <p className="text-muted-foreground text-xs">This browser doesn't support notifications; the tab title still flags finished jobs.</p>}
+        {denied && <p className="text-rasta-gold text-xs">Notifications are blocked for this site — allow them in the browser's site settings, then switch this on.</p>}
+      </CardContent>
+    </Card>
+  )
+}
+
 const FEATURING = [
   { value: "artist", label: "Artist feat. Guest - Title" },
   { value: "title", label: "Artist - Title (feat. Guest)" },
@@ -194,7 +256,8 @@ const FEATURING = [
 export default function SettingsPage() {
   const qc = useQueryClient()
   const location = useLocation()
-  const { data } = useQuery({ queryKey: ["settings"], queryFn: api.settings })
+  const { data, error, refetch } = useQuery({ queryKey: ["settings"], queryFn: api.settings })
+  const { data: health } = useQuery({ queryKey: ["health"], queryFn: api.health })
   // Unsaved edits sit on top of the loaded settings; derived in render so the form never flashes empty.
   const [edit, setEdit] = useState<PublicSettings | null>(null)
   const draft = edit ?? data ?? null
@@ -227,10 +290,14 @@ export default function SettingsPage() {
     return (
       <>
         <PageHeader eyebrow="Mixing desk" title="Settings" description="AI providers, confidence thresholds, naming and safety." />
-        <div className="space-y-4">
-          <Skeleton className="h-96 rounded-4xl" />
-          <Skeleton className="h-56 rounded-4xl" />
-        </div>
+        {error ? (
+          <QueryError error={error} onRetry={() => void refetch()} />
+        ) : (
+          <div className="space-y-4">
+            <Skeleton className="h-96 rounded-4xl" />
+            <Skeleton className="h-56 rounded-4xl" />
+          </div>
+        )}
       </>
     )
   }
@@ -384,6 +451,123 @@ export default function SettingsPage() {
             </FieldGroup>
           </CardContent>
         </Card>
+
+        <Card id="extras">
+          <CardHeader>
+            <CardTitle>Artwork, tempo & key</CardTitle>
+            <CardDescription>Covers come from the sources that identified a track; tempo and key are worked out by listening to it.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <FieldGroup className="grid gap-4 sm:grid-cols-2">
+              <label className="flex items-center gap-2 text-sm">
+                <Switch checked={draft.artwork.fetch} onCheckedChange={(v) => set((d) => void (d.artwork.fetch = v))} />
+                Look for cover art when identifying
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <Switch checked={draft.artwork.embed} onCheckedChange={(v) => set((d) => void (d.artwork.embed = v))} />
+                Embed found artwork when cutting
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <Switch checked={draft.artwork.replaceExisting} onCheckedChange={(v) => set((d) => void (d.artwork.replaceExisting = v))} />
+                Replace artwork a file already has
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <Switch checked={draft.analysis.onProcess} onCheckedChange={(v) => set((d) => void (d.analysis.onProcess = v))} />
+                Analyse BPM & key when identifying
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <Switch checked={draft.analysis.writeTags} onCheckedChange={(v) => set((d) => void (d.analysis.writeTags = v))} />
+                Write BPM & key to tags when cutting
+              </label>
+              <div />
+              <Field>
+                <FieldLabel>Key notation</FieldLabel>
+                <Select items={KEY_NOTATIONS} value={draft.analysis.keyNotation} onValueChange={(v) => set((d) => void (d.analysis.keyNotation = v as Settings["analysis"]["keyNotation"]))}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {KEY_NOTATIONS.map((k) => (
+                      <SelectItem key={k.value} value={k.value}>
+                        {k.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FieldDescription>How keys are shown and written to tags.</FieldDescription>
+              </Field>
+              <Field>
+                <FieldLabel>BPM range</FieldLabel>
+                <Select items={BPM_RANGES} value={String(draft.analysis.bpmMin)} onValueChange={(v) => set((d) => void (d.analysis.bpmMin = Number(v)))}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {BPM_RANGES.map((r) => (
+                      <SelectItem key={r.value} value={r.value}>
+                        {r.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FieldDescription>Detected tempos are doubled or halved into this range. In 88–175 a one-drop at 75 reads 150 and jungle stays at 170.</FieldDescription>
+              </Field>
+            </FieldGroup>
+          </CardContent>
+        </Card>
+
+        <Card id="automation">
+          <CardHeader>
+            <CardTitle>Automation</CardTitle>
+            <CardDescription>
+              Turn on watching per folder in{" "}
+              <Link to="/libraries" className="underline underline-offset-2">
+                Libraries
+              </Link>
+              . Times are the server's clock{health?.timeZone ? ` (${health.timeZone})` : ""}.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <FieldGroup className="grid gap-4 sm:grid-cols-2">
+              <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                <Switch checked={draft.automation.autoProcess} onCheckedChange={(v) => set((d) => void (d.automation.autoProcess = v))} />
+                Identify new files that watching or the nightly scan picks up
+              </label>
+              <Field>
+                <FieldLabel>Re-check watched folders</FieldLabel>
+                <Select items={POLL_OPTIONS} value={String(draft.automation.pollMinutes)} onValueChange={(v) => set((d) => void (d.automation.pollMinutes = Number(v)))}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {POLL_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FieldDescription>A safety net for network shares and Docker mounts that don't report new files. Folders that can't report changes are checked every 15 minutes regardless.</FieldDescription>
+              </Field>
+              <Field>
+                <FieldLabel>Nightly scan</FieldLabel>
+                <div className="flex items-center gap-3">
+                  <Switch checked={draft.automation.nightly} onCheckedChange={(v) => set((d) => void (d.automation.nightly = v))} aria-label="Nightly scan" />
+                  <Input
+                    type="time"
+                    className="w-32"
+                    disabled={!draft.automation.nightly}
+                    value={draft.automation.nightlyAt}
+                    onChange={(e) => set((d) => void (d.automation.nightlyAt = e.target.value || "03:00"))}
+                  />
+                </div>
+                <FieldDescription>Rescans every library once a night, watched or not.</FieldDescription>
+              </Field>
+            </FieldGroup>
+          </CardContent>
+        </Card>
+
+        <NotificationsCard />
 
         <Card id="safety">
           <CardHeader>

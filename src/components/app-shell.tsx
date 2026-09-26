@@ -21,6 +21,7 @@ import { NavLink, useLocation } from "react-router"
 import { CommandPalette } from "@/components/command-palette"
 import { DubplateMark, RastaStripe } from "@/components/brand"
 import { JobDock } from "@/components/job-dock"
+import { ConnectionBanner } from "@/components/query-error"
 import { useTheme } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
 import { Kbd } from "@/components/ui/kbd"
@@ -233,7 +234,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             <ThemeToggle />
           </div>
         </header>
-        <main className="mx-auto w-full max-w-7xl flex-1 px-3 py-5 md:px-6 md:py-7">{children}</main>
+        <ConnectionBanner />
+        {/* The inset is already the page's <main> landmark. */}
+        <div className="mx-auto w-full max-w-7xl flex-1 px-3 py-5 md:px-6 md:py-7">{children}</div>
       </SidebarInset>
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </SidebarProvider>

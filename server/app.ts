@@ -3,24 +3,30 @@ import os from "node:os"
 import path from "node:path"
 import { Readable } from "node:stream"
 import { Hono, type Context } from "hono"
+import { compress } from "hono/compress"
 import { streamSSE } from "hono/streaming"
-import type { FinalMeta, ScraperDefinition, ServerEvent, Settings, TrackStatus } from "../shared/types"
+import { parseKey } from "../shared/keys"
+import type { FinalMeta, ScraperDefinition, ServerEvent, Settings, Track, TrackStatus } from "../shared/types"
 import { TRACK_STATUSES } from "../shared/types"
 import { activeProvider, interpretTrack } from "./ai/interpreter"
 import { listModels, testProvider } from "./ai/providers"
+import { analyzeTracks } from "./analysis"
+import { findArtwork, thumbnail } from "./art"
 import { config, VERSION } from "./config"
 import { parseFilename } from "./core/filename-parser"
 import { normArtist } from "./core/normalize"
-import { buildPlan, executePlan, proposedFilename, rewind } from "./executor"
-import { activeJobs, cancelJob, enqueueJob, listJobs, recentLogEvents, subscribe } from "./jobs"
-import { processTracks, rescoreTracks, scoreAndSave } from "./pipeline"
+import { buildPlan, executePlan, metaFor, proposedFilename, rewind } from "./executor"
+import { activeJobs, cancelJob, emit, enqueueJob, listJobs, recentLogEvents, subscribe } from "./jobs"
+import { artworkTracks, processTracks, rescoreTracks, scoreAndSave } from "./pipeline"
 import * as repo from "./repo"
 import { scanLibrary } from "./scanner"
-import { effectiveSettings, publicSettings, saveSettings } from "./settings"
+import { publicSettings, saveSettings, settingsNow } from "./settings"
 import { findFpcalc } from "./sources/acoustid"
-import { clearHttpCache, setContact } from "./sources/http"
+import { clearHttpCache } from "./sources/http"
 import { allAdapters, buildQuery, sourceStatus } from "./sources"
 import { runScraper } from "./sources/scraper"
+import { restore, snapshot } from "./undo"
+import { syncWatchers } from "./watcher"
 
 const AUDIO_MIME: Record<string, string> = {
   mp3: "audio/mpeg",
@@ -45,12 +51,6 @@ function resolveIds(sel: Selection, fallback?: repo.TrackQuery): number[] {
   return fallback ? repo.queryTrackIds(fallback) : []
 }
 
-function settingsNow(): Settings {
-  const s = effectiveSettings()
-  setContact(s.contact)
-  return s
-}
-
 function parseQuery(c: Context): repo.TrackQuery {
   const q = c.req.query()
   const status = q.status
@@ -69,6 +69,30 @@ function parseQuery(c: Context): repo.TrackQuery {
     limit: q.limit ? Number(q.limit) : undefined,
     offset: q.offset ? Number(q.offset) : undefined,
   }
+}
+
+/** Fields bulk edit can set; null or "" clears one. */
+type BulkChanges = {
+  artists?: string[]
+  featuring?: string[]
+  version?: string | null
+  album?: string | null
+  year?: number | null
+  label?: string | null
+  genre?: string | null
+  bpm?: number | null
+  key?: string | null
+}
+const META_FIELDS = ["artists", "featuring", "version", "album", "year", "label", "genre"] as const
+
+/** The metadata a track would be tagged with right now, however far it's got. */
+function currentMeta(t: Track): Partial<FinalMeta> | null {
+  return metaFor(t) ?? (t.ai?.title ? t.ai : null) ?? (t.heuristic?.title ? t.heuristic : null)
+}
+
+function sanitizeBpm(v: unknown): number | null {
+  const n = Number(v)
+  return Number.isFinite(n) && n >= 30 && n <= 300 ? Math.round(n * 10) / 10 : null
 }
 
 function sanitizeFinal(input: Partial<FinalMeta>): FinalMeta {
@@ -105,6 +129,10 @@ export function createApp() {
     await next()
   })
 
+  // Gzip JSON (a page of tracks shrinks ~8×) — but never the event stream, audio or images.
+  const gzip = compress()
+  app.use("*", (c, next) => (c.req.path === "/api/events" || /\/(audio|art)$/.test(c.req.path) ? next() : gzip(c, next)))
+
   app.onError((err, c) => {
     console.error(err)
     return c.json({ error: err.message }, 500)
@@ -120,6 +148,7 @@ export function createApp() {
       readOnly: s.safety.readOnly,
       fpcalc: !!findFpcalc(),
       llm: p ? { id: p.id, label: p.label, model: p.model, kind: p.kind } : null,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     })
   })
 
@@ -165,15 +194,27 @@ export function createApp() {
     return c.json(lib)
   })
 
+  app.patch("/api/libraries/:id", async (c) => {
+    const id = Number(c.req.param("id"))
+    if (!repo.getLibrary(id)) return c.json({ error: "Library not found" }, 404)
+    const body = await c.req.json<{ name?: string; watch?: boolean }>()
+    repo.updateLibrary(id, { name: body.name?.trim() || undefined, watch: typeof body.watch === "boolean" ? body.watch : undefined })
+    syncWatchers()
+    return c.json(repo.getLibrary(id))
+  })
+
   app.delete("/api/libraries/:id", (c) => {
     repo.removeLibrary(Number(c.req.param("id")))
+    syncWatchers()
     return c.json({ ok: true })
   })
 
   function enqueueScan(id: number) {
     const lib = repo.getLibrary(id)
     if (!lib) throw new Error("Library not found")
-    return enqueueJob("scan", `Scan ${lib.name}`, (ctx) => scanLibrary(lib, settingsNow(), ctx))
+    return enqueueJob("scan", `Scan ${lib.name}`, async (ctx) => {
+      await scanLibrary(lib, settingsNow(), ctx)
+    })
   }
 
   app.post("/api/libraries/:id/scan", (c) => c.json(enqueueScan(Number(c.req.param("id")))))
@@ -213,11 +254,14 @@ export function createApp() {
     const id = Number(c.req.param("id"))
     const t = repo.getTrack(id)
     if (!t) return c.json({ error: "Not found" }, 404)
-    const body = await c.req.json<{ final?: Partial<FinalMeta>; note?: string }>()
+    const body = await c.req.json<{ final?: Partial<FinalMeta>; note?: string; bpm?: number | null; key?: string | null }>()
     const s = settingsNow()
     const final = body.final ? sanitizeFinal(body.final) : t.final
     const next = { ...t, final }
-    repo.updateTrack(id, { final, note: body.note ?? t.note, proposedName: proposedFilename(next, s) })
+    const extras: Partial<Track> = {}
+    if ("bpm" in body) extras.bpm = sanitizeBpm(body.bpm)
+    if ("key" in body) extras.key = parseKey(body.key)
+    repo.updateTrack(id, { final, note: body.note ?? t.note, proposedName: proposedFilename(next, s), ...extras })
     return c.json(repo.getTrack(id))
   })
 
@@ -229,17 +273,20 @@ export function createApp() {
     const s = settingsNow()
     const final = body.final ? sanitizeFinal(body.final) : t.final ?? (t.decision ? sanitizeFinal(t.decision) : null)
     if (!final?.title || !final.artists.length) return c.json({ error: "Need at least an artist and a title" }, 400)
+    const learn = body.learn !== false
+    const undoId = snapshot("Approve", [id], learn ? [t.filename] : [])
     const next = { ...t, final }
     repo.updateTrack(id, { final, status: "approved", proposedName: proposedFilename(next, s) })
     // Learn from the human: store as a few-shot example for the AI and as a known artist.
-    if (body.learn !== false) repo.addCorrection(t.filename, final.artists, final.title, final.version)
-    return c.json(repo.getTrack(id))
+    if (learn) repo.addCorrection(t.filename, final.artists, final.title, final.version)
+    return c.json({ ...repo.getTrack(id), undoId })
   })
 
   app.post("/api/tracks/bulk", async (c) => {
     const body = await c.req.json<Selection & { action: "approve" | "reject" | "reset" | "unapprove" }>()
     const ids = resolveIds(body)
     const s = settingsNow()
+    const undoId = snapshot(body.action, ids)
     let changed = 0
     for (const id of ids) {
       const t = repo.getTrack(id)
@@ -257,7 +304,55 @@ export function createApp() {
       }
       changed++
     }
-    return c.json({ changed })
+    return c.json({ changed, undoId })
+  })
+
+  // Set the same fields on many tracks at once (album, label, genre, BPM…).
+  app.post("/api/tracks/bulk-edit", async (c) => {
+    const body = await c.req.json<Selection & { changes: BulkChanges }>()
+    const ids = resolveIds(body)
+    const changes = body.changes ?? {}
+    const metaKeys = META_FIELDS.filter((k) => k in changes)
+    if (!ids.length) return c.json({ error: "Nothing selected" }, 400)
+    if (!metaKeys.length && !("bpm" in changes) && !("key" in changes)) return c.json({ error: "Nothing to change" }, 400)
+    if (metaKeys.includes("artists") && !changes.artists?.length) return c.json({ error: "Artists can't be blank" }, 400)
+    const s = settingsNow()
+    const undoId = snapshot("Edit", ids)
+    let changed = 0
+    let skipped = 0
+    for (const id of ids) {
+      const t = repo.getTrack(id)
+      if (!t) continue
+      const patch: Partial<Track> = {}
+      if (metaKeys.length) {
+        const base = currentMeta(t)
+        if (!base?.title || !(base.artists?.length || changes.artists?.length)) {
+          skipped++
+        } else {
+          const merged: Partial<FinalMeta> = { ...base }
+          for (const k of metaKeys) (merged as Record<string, unknown>)[k] = changes[k] ?? undefined
+          const final = sanitizeFinal(merged)
+          patch.final = final
+          patch.proposedName = proposedFilename({ ...t, final }, s)
+        }
+      }
+      if ("bpm" in changes) patch.bpm = sanitizeBpm(changes.bpm)
+      if ("key" in changes) patch.key = parseKey(changes.key)
+      if (Object.keys(patch).length) {
+        repo.updateTrack(id, patch)
+        changed++
+      }
+    }
+    emit({ type: "tracks", ids })
+    return c.json({ changed, skipped, undoId })
+  })
+
+  app.post("/api/undo/:id", (c) => {
+    const done = restore(c.req.param("id"))
+    if (!done) return c.json({ error: "That can't be undone any more" }, 410)
+    emit({ type: "tracks", ids: done.ids })
+    emit({ type: "stats" })
+    return c.json({ restored: done.ids.length, label: done.label })
   })
 
   app.post("/api/tracks/:id/rescore", (c) => {
@@ -286,6 +381,48 @@ export function createApp() {
     }
     const stream = Readable.toWeb(fs.createReadStream(t.path)) as ReadableStream
     return c.body(stream, 200, { "content-type": type, "content-length": String(size), "accept-ranges": "bytes" })
+  })
+
+  // ---- artwork ----
+  app.get("/api/tracks/:id/art", async (c) => {
+    const t = repo.getTrack(Number(c.req.param("id")))
+    const ref = c.req.query("which") === "found" ? t?.artFound : t?.art
+    if (!t || !ref) return c.json({ error: "No artwork" }, 404)
+    const img = await thumbnail(t, ref, Number(c.req.query("size")) || 160)
+    if (!img) return c.json({ error: "Artwork unavailable" }, 404)
+    // The URL carries the picture's hash, so a cached copy never goes stale.
+    return c.body(img.body as Uint8Array<ArrayBuffer>, 200, { "content-type": img.mime, "cache-control": "private, max-age=31536000, immutable" })
+  })
+
+  app.post("/api/tracks/:id/artwork/find", async (c) => {
+    const t = repo.getTrack(Number(c.req.param("id")))
+    if (!t) return c.json({ error: "Not found" }, 404)
+    const art = await findArtwork(t, settingsNow())
+    if (!art) return c.json({ error: "No artwork found for this track" }, 404)
+    repo.updateTrack(t.id, { artFound: art.hash === t.art?.hash ? null : art })
+    return c.json(repo.getTrack(t.id))
+  })
+
+  app.delete("/api/tracks/:id/artwork/found", (c) => {
+    const id = Number(c.req.param("id"))
+    if (!repo.getTrack(id)) return c.json({ error: "Not found" }, 404)
+    repo.updateTrack(id, { artFound: null })
+    return c.json(repo.getTrack(id))
+  })
+
+  app.post("/api/artwork", async (c) => {
+    const body = await c.req.json<Selection & { force?: boolean }>()
+    const ids = resolveIds(body, { status: ["matched", "review", "conflict", "approved"] })
+    if (!ids.length) return c.json({ error: "Nothing to look up" }, 400)
+    return c.json(enqueueJob("artwork", `Find artwork for ${ids.length} track${ids.length === 1 ? "" : "s"}`, (ctx) => artworkTracks(ids, settingsNow(), { force: !!body.force }, ctx)))
+  })
+
+  // ---- BPM & key ----
+  app.post("/api/analyze", async (c) => {
+    const body = await c.req.json<Selection & { force?: boolean }>()
+    const ids = resolveIds(body)
+    if (!ids.length) return c.json({ error: "Nothing to analyse" }, 400)
+    return c.json(enqueueJob("analyze", `Analyse BPM & key of ${ids.length} track${ids.length === 1 ? "" : "s"}`, (ctx) => analyzeTracks(ids, settingsNow(), { force: !!body.force }, ctx)))
   })
 
   // ---- pipeline ----

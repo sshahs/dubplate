@@ -91,11 +91,12 @@ flowchart TB
 
 | Stage | What happens |
 | --- | --- |
-| **📂 Scanner** | Walks your folders and reads existing tags, duration and a content fingerprint into a SQLite staging database. **It never opens a music file for writing.** It follows files you've moved and flags exact duplicates. |
+| **📂 Scanner** | Walks your folders and reads existing tags (including BPM, key and cover art), duration and a content fingerprint into a SQLite staging database. **It never opens a music file for writing.** It follows files you've moved and flags exact duplicates. Watched folders are picked up as files land. |
 | **⚡ Rule-based parser** | A fast first pass. It strips rip-site names, bitrates, *(Official Video)*, and track and vinyl-side numbers. It splits `Artist - Title`, `Title by Artist` and `A vs B` clashes, and spots hints like *dubplate*, *special*, *live '93*, *riddim* and *VIP*. |
 | **🧠 AI interpreter** | Reads the filename, folder, tags and first-pass result, and returns structured JSON: artists, `&` or `vs`, title, version, year, riddim, event, alternatives and search queries. Your approvals are shown to it as examples, so it learns your style. |
 | **🔎 Metadata scourer** | Asks every enabled source at once, with polite per-host rate limits and a 7-day response cache. |
 | **📊 Confidence engine** | Groups the hits by recording, then weighs consensus across independent sources, agreement between readings, duration, fingerprint matches and conflicts. The result is an explainable 0–100 score. |
+| **🎨 Artwork, tempo & key** | Fetches a cover from the sources that confirmed the track (Cover Art Archive, Discogs, Bandcamp, Apple Music, Deezer…), and listens to the audio for BPM and musical key. |
 | **✂️ Verify & execute** | Bulk-approve the matches, review the rest, then rename and tag in place. Every operation is logged so any batch can be put back. |
 
 ### 📊 Reading the meter
@@ -219,7 +220,7 @@ npm run dev
 
 **First session**
 
-1. **Libraries**: add a folder. It's scanned read-only.
+1. **Libraries**: add a folder. It's scanned read-only. Switch on **Watch for new files** to have new rips picked up and identified as they land.
 2. **Settings → AI interpreter**: pick a provider and model, then hit **Test**.
 3. **Dashboard → Process new**: interpret → scour → score.
 4. **Review**: listen, check the evidence, fix anything that's off and approve.
@@ -234,6 +235,8 @@ npm run dev
 | <kbd>J</kbd> / <kbd>K</kbd> | Review | Next / previous track |
 | <kbd>A</kbd> | Review | Approve (and learn) |
 | <kbd>X</kbd> | Review | Leave as-is |
+| <kbd>Z</kbd> | Review | Undo the last approve / leave-as-is |
+| <kbd>Shift</kbd>-click | Tracks | Tick every row between two checkboxes |
 
 <a id="docker"></a>
 
@@ -331,6 +334,7 @@ secrets, and keys entered in the UI take precedence.
 | `CMD_ZDR` | – | `1` or `true` forces Command Code's Zero Data Retention on (the Settings switch is locked) |
 | `DISCOGS_TOKEN`, `LASTFM_API_KEY`, `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `YOUTUBE_API_KEY`, `ACOUSTID_API_KEY` | – | |
 | `FPCALC_PATH` | `fpcalc` on `PATH` | |
+| `TZ` | `UTC` | The clock the nightly scan runs by, e.g. `Europe/London` |
 
 </details>
 
@@ -349,7 +353,10 @@ Tags are written with
 [node-taglib-sharp](https://github.com/benrr101/node-taglib-sharp), so MP3,
 FLAC, M4A, OGG/Opus, WAV, AIFF, WMA and APE are all supported. Artist and
 title are always written. Album, year, genre and label only fill fields that
-are empty.
+are empty. BPM and key are written too (key as `Am` or Camelot `8A`, your
+choice), and a found cover becomes the front cover — other pictures in the
+file are left alone, and a file's existing cover is only replaced if you
+allow it.
 
 </details>
 
@@ -359,12 +366,19 @@ are empty.
 - 👀 Scans only stat, list and read.
 - 🧾 Before writing, Dubplate checks that each file still has the size and mtime from the scan.
 - 🚫 Renames stay in the same folder and never overwrite another file.
-- ⏪ Every rename and tag write is logged with the old name and tag values, so **Rewind** restores both.
+- ⏪ Every rename and tag write is logged with the old name and tag values (and any cover it replaced), so **Rewind** restores them all.
+- ↩️ Review decisions and bulk edits come with **Undo** for a few moments afterwards.
 - 🏠 The server binds to localhost, rejects unknown `Host` headers (DNS rebinding) and needs an `X-Dubplate` header on every write request (CSRF).
 
 ## 🎁 Extra riddims
 
 - 🧠 **Learning**: approvals become examples for the AI, and an alias table maps shorthand to credited names (`buju` → Buju Banton, `kartel` → Vybz Kartel).
+- 🎨 **Cover art**: found from the sources that identified a track, shown as thumbnails everywhere, and embedded when you cut.
+- 🥁 **BPM & key**: worked out by listening (pure JS/WASM decoders, no ffmpeg), folded into a DJ-style range (88–175 by default, so a one-drop at 75 reads 150). Tags from the file and your own edits always win.
+- 👀 **Watch folders**: new files are scanned and identified as they land, with a periodic re-check for network shares and an optional nightly rescan.
+- ✏️ **Bulk edit**: set album, label, genre, year, artists, BPM or key across a selection — with Undo.
+- 🗄️ **Big libraries**: the Tracks list only draws what's on screen and loads rows in blocks as you scroll, so tens of thousands of tracks stay quick.
+- 🔔 **Job notifications**: a long job finishing in a background tab flags the tab title, and can pop a browser notification (needs HTTPS or localhost).
 - 🎧 **Audio preview** in the review screen, with streaming and seeking.
 - 👯 **Duplicates**: identical audio by fingerprint, plus different files that would get the same name.
 - 📟 **Live console**: job progress and logs streamed over server-sent events.
@@ -394,7 +408,7 @@ in the dance and in Dubplate:
 ## 🔧 Development
 
 ```bash
-npm test            # vitest: parser, confidence engine, naming, sources, scan→cut→rewind on real files
+npm test            # vitest: parser, confidence engine, naming, sources, BPM/key, artwork, undo, scan→cut→rewind on real files
 npm run typecheck
 npm run lint
 ```
@@ -404,9 +418,14 @@ server/
   core/          filename parser, normaliser, confidence engine, naming (pure, shared with the UI)
   ai/            LLM providers + interpreter prompt
   sources/       MusicBrainz, Discogs, … + declarative scrapers, rate-limited cached HTTP
+  analysis/      BPM & key: decoding, onset/tempo and chroma/key estimation
   scanner.ts     read-only library walker
-  pipeline.ts    interpret → scour → score
+  watcher.ts     watched folders, periodic re-checks, nightly scan
+  pipeline.ts    interpret → scour → score (→ artwork, BPM & key)
+  art.ts         cover-art cache, downloads, thumbnails
+  worker-pool.ts CPU-heavy work (decoding, thumbnails) off the main thread
   executor.ts    plan / rename + tag / rewind
+  undo.ts        short-lived undo for review decisions and bulk edits
   app.ts         Hono API + SSE
 shared/types.ts  types used by server and UI
 src/             React + Vite UI (shadcn/ui, Base UI)

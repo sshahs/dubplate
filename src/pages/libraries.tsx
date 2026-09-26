@@ -5,6 +5,7 @@ import { useState } from "react"
 import { Link } from "react-router"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/app-shell"
+import { QueryError } from "@/components/query-error"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -13,9 +14,12 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Switch } from "@/components/ui/switch"
+import type { Library } from "@shared/types"
 import { api } from "@/lib/api"
 import { useActiveJobs } from "@/lib/events"
 import { fmtAgo } from "@/lib/format"
+import { cn } from "@/lib/utils"
 
 function FolderPicker({ onPick }: { onPick: (path: string) => void }) {
   const [path, setPath] = useState<string | undefined>()
@@ -124,9 +128,21 @@ function AddLibraryDialog() {
 
 export default function LibrariesPage() {
   const qc = useQueryClient()
-  const { data: libraries } = useQuery({ queryKey: ["libraries"], queryFn: api.libraries })
+  const { data: libraries, error, refetch } = useQuery({ queryKey: ["libraries"], queryFn: api.libraries })
   const active = useActiveJobs()
+  const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: api.settings })
   const scan = useMutation({ mutationFn: api.scanLibrary, onSuccess: (j) => toast(j.label), onError: (e) => toast.error(e.message) })
+  const watch = useMutation({
+    mutationFn: ({ id, on }: { id: number; on: boolean }) => api.updateLibrary(id, { watch: on }),
+    onSuccess: (lib) => {
+      qc.setQueryData<Library[]>(["libraries"], (prev) => prev?.map((l) => (l.id === lib.id ? lib : l)))
+      toast(lib.watch ? `Watching ${lib.name}` : `Stopped watching ${lib.name}`, {
+        description: lib.watch ? (settings?.automation.autoProcess ? "New files will be scanned and identified." : "New files will be scanned.") : undefined,
+      })
+    },
+    onError: (e) => toast.error(e.message),
+  })
+  const pollMinutes = settings?.automation.pollMinutes ?? 15
   const remove = useMutation({
     mutationFn: api.removeLibrary,
     onSuccess: () => {
@@ -143,6 +159,7 @@ export default function LibrariesPage() {
         description="Folders Dubplate watches. Scans only ever read — they never modify, move or tag anything."
         actions={<AddLibraryDialog />}
       />
+      {error && !libraries && <QueryError error={error} onRetry={() => void refetch()} />}
       {libraries?.length === 0 && (
         <Empty className="border">
           <EmptyHeader>
@@ -159,7 +176,7 @@ export default function LibrariesPage() {
       )}
       <div className="grid gap-3 md:grid-cols-2">
         {libraries?.map((lib) => {
-          const scanning = active.find((j) => j.kind === "scan" && j.label.endsWith(lib.name))
+          const scanning = active.find((j) => j.kind === "scan" && j.label.endsWith(lib.name) && j.status === "running")
           return (
             <Card key={lib.id}>
               <CardContent className="space-y-3">
@@ -181,6 +198,22 @@ export default function LibrariesPage() {
                   </Link>
                   <span className="text-muted-foreground">scanned {fmtAgo(lib.lastScanAt)}</span>
                 </div>
+                <label className="bg-muted/40 flex items-center gap-3 rounded-2xl px-3 py-2">
+                  <Switch checked={lib.watch} disabled={!lib.exists || watch.isPending} onCheckedChange={(on) => watch.mutate({ id: lib.id, on })} />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2 text-sm font-medium">
+                      Watch for new files
+                      {lib.watchState !== "off" && <span className={cn("size-1.5 rounded-full", lib.watchState === "watching" ? "bg-rasta-green animate-pulse" : "bg-rasta-gold")} />}
+                    </span>
+                    <span className="text-muted-foreground block text-xs">
+                      {lib.watchState === "watching"
+                        ? `Picked up as they land${pollMinutes ? `, and re-checked every ${pollMinutes} min` : ""}.`
+                        : lib.watchState === "polling"
+                          ? `This folder doesn't report changes (network share?), so it's checked every ${pollMinutes || 15} min.`
+                          : "Off — rescan by hand, or turn on the nightly scan in Settings."}
+                    </span>
+                  </span>
+                </label>
                 <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => scan.mutate(lib.id)} disabled={!!scanning || !lib.exists}>
                     <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} data-icon="inline-start" className={scanning ? "animate-spin" : ""} />

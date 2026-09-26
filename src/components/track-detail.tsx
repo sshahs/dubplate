@@ -17,12 +17,15 @@ import type { Candidate, FinalMeta, Track } from "@shared/types"
 import { AudioPlayer } from "@/components/audio-player"
 import { ConfidenceDial, StatusBadge } from "@/components/confidence"
 import { fromDraft, MetaEditor, toDraft, type MetaDraft } from "@/components/meta-editor"
+import { QueryError } from "@/components/query-error"
+import { ArtworkPanel, TempoKeyPanel } from "@/components/track-extras"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { api } from "@/lib/api"
 import { fmtBytes, fmtDuration } from "@/lib/format"
+import { toastUndoable } from "@/lib/undo"
 import { cn } from "@/lib/utils"
 
 function initialMeta(t: Track): Partial<FinalMeta> | null {
@@ -40,9 +43,20 @@ function candidateToMeta(c: Candidate, base: MetaDraft): MetaDraft {
   }
 }
 
-export function TrackDetail({ trackId, onAdvance, compact = false }: { trackId: number; onAdvance?: () => void; compact?: boolean }) {
+export function TrackDetail({
+  trackId,
+  onAdvance,
+  onUndone,
+  compact = false,
+}: {
+  trackId: number
+  onAdvance?: () => void
+  /** after an approve / leave-as-is is undone, e.g. to bring this track back into view */
+  onUndone?: () => void
+  compact?: boolean
+}) {
   const qc = useQueryClient()
-  const { data: track, isLoading } = useQuery({ queryKey: ["track", trackId], queryFn: () => api.track(trackId) })
+  const { data: track, isLoading, error, refetch } = useQuery({ queryKey: ["track", trackId], queryFn: () => api.track(trackId) })
   const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: api.settings })
   // The form follows the saved track until you edit it; edits are tied to the track they were made on.
   // Derived during render (not in an effect) so a cached track appears without a skeleton frame.
@@ -66,8 +80,8 @@ export function TrackDetail({ trackId, onAdvance, compact = false }: { trackId: 
 
   const approve = useMutation({
     mutationFn: () => api.approve(trackId, draft ? fromDraft(draft) : undefined, true),
-    onSuccess: (updated) => {
-      toast.success("Approved — big up!", { description: preview ?? undefined })
+    onSuccess: ({ undoId, ...updated }) => {
+      toastUndoable(qc, "Approved — big up!", undoId, { description: preview ?? undefined, onUndone })
       qc.setQueryData(["track", trackId], updated)
       setEdit(null)
       refresh()
@@ -88,11 +102,12 @@ export function TrackDetail({ trackId, onAdvance, compact = false }: { trackId: 
   })
   const reject = useMutation({
     mutationFn: () => api.bulk({ ids: [trackId] }, "reject"),
-    onSuccess: () => {
-      toast("Left as-is")
+    onSuccess: (r) => {
+      toastUndoable(qc, "Left as-is", r.undoId, { description: track?.filename, onUndone })
       refresh()
       onAdvance?.()
     },
+    onError: (e) => toast.error(e.message),
   })
   const rerun = useMutation({
     mutationFn: () => api.process({ ids: [trackId] }, { force: true }),
@@ -100,6 +115,7 @@ export function TrackDetail({ trackId, onAdvance, compact = false }: { trackId: 
     onError: (e) => toast.error(e.message),
   })
 
+  if (error && !track) return <QueryError compact error={error} onRetry={() => void refetch()} />
   if (isLoading || !track || !draft) {
     // Mirrors the real layout so the panel doesn't collapse and re-expand while loading.
     return (
@@ -143,6 +159,11 @@ export function TrackDetail({ trackId, onAdvance, compact = false }: { trackId: 
       </div>
 
       <AudioPlayer src={api.audioUrl(track.id)} />
+
+      <div className={cn("grid gap-3", !compact && "sm:grid-cols-2")}>
+        <ArtworkPanel track={track} embed={settings?.artwork.embed ?? true} replace={settings?.artwork.replaceExisting ?? false} />
+        <TempoKeyPanel track={track} notation={settings?.analysis.keyNotation ?? "musical"} />
+      </div>
 
       {!!d?.warnings.length && (
         <div className="border-rasta-gold/30 bg-rasta-gold/8 space-y-1 rounded-2xl border p-3 text-sm">
@@ -313,8 +334,8 @@ export function TrackDetail({ trackId, onAdvance, compact = false }: { trackId: 
               <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1 text-xs">
                 {Object.entries(track.tags).map(([k, v]) => (
                   <div key={k} className="contents">
-                    <dt className="text-muted-foreground">{k}</dt>
-                    <dd className="break-all">{Array.isArray(v) ? v.join(", ") : String(v)}</dd>
+                    <dt className="text-muted-foreground">{k === "cover" ? "picture" : k}</dt>
+                    <dd className="break-all">{k === "cover" ? "front cover" : Array.isArray(v) ? v.join(", ") : String(v)}</dd>
                   </div>
                 ))}
               </dl>

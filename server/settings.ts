@@ -1,5 +1,6 @@
 import type { LlmProviderConfig, ScraperDefinition, Settings, SourceConfig } from "../shared/types"
 import { getDb } from "./db"
+import { setContact } from "./sources/http"
 
 export const SOURCE_META: Record<
   string,
@@ -138,6 +139,9 @@ export const DEFAULT_SETTINGS: Settings = {
     ignore: [".AppleDouble", "@eaDir", ".Trash*", "$RECYCLE.BIN"],
   },
   safety: { readOnly: true },
+  artwork: { fetch: true, embed: true, replaceExisting: false },
+  analysis: { onProcess: true, writeTags: true, keyNotation: "musical", bpmMin: 88 },
+  automation: { autoProcess: true, pollMinutes: 15, nightly: false, nightlyAt: "03:00" },
   contact: "",
 }
 
@@ -189,6 +193,13 @@ export function effectiveSettings(): Settings {
     if (!cfg.apiKey && process.env[keyEnv]) cfg.apiKey = process.env[keyEnv]
     if (secretEnv && !cfg.apiSecret && process.env[secretEnv]) cfg.apiSecret = process.env[secretEnv]
   }
+  return s
+}
+
+/** Effective settings for a job or request, with the contact address applied to outgoing requests. */
+export function settingsNow(): Settings {
+  const s = effectiveSettings()
+  setContact(s.contact)
   return s
 }
 

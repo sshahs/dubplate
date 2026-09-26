@@ -82,8 +82,20 @@ export function decisionToFinal(d: Decision): FinalMeta {
   }
 }
 
-/** Tags to write. Artist and title are always set; album/year/genre/label only fill gaps. */
-export function tagsFor(meta: FinalMeta, current: ExistingTags, naming: Naming): ExistingTags {
+/** Values that live on the track rather than in the approved metadata. */
+export interface TagExtras {
+  bpm?: number | null
+  /** already in the notation to write */
+  key?: string | null
+  /** artwork cache hash of a cover to embed */
+  cover?: string | null
+}
+
+/**
+ * Tags to write. Artist and title are always set; album/year/genre/label only
+ * fill gaps. BPM, key and cover come from `extras` when there's something to say.
+ */
+export function tagsFor(meta: FinalMeta, current: ExistingTags, naming: Naming, extras: TagExtras = {}): ExistingTags {
   const out: ExistingTags = {
     artist: formatArtist(meta, naming),
     title: formatTitle(meta, naming),
@@ -93,6 +105,9 @@ export function tagsFor(meta: FinalMeta, current: ExistingTags, naming: Naming):
   if (!current.genre?.length && meta.genre) out.genre = [meta.genre]
   if (!current.label && meta.label) out.label = meta.label
   if (naming.tagComment) out.comment = "Identified by Dubplate"
+  if (extras.bpm && Math.round(extras.bpm) !== Math.round(current.bpm ?? 0)) out.bpm = Math.round(extras.bpm)
+  if (extras.key && extras.key !== current.key) out.key = extras.key
+  if (extras.cover && extras.cover !== current.cover) out.cover = extras.cover
   return out
 }
 

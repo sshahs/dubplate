@@ -2,8 +2,10 @@
 // so it covers MP3, FLAC, M4A, OGG/Opus, WAV, AIFF, WMA and APE alike).
 
 import path from "node:path"
-import { File as TagFile, TagTypes } from "node-taglib-sharp"
+import { ByteVector, Picture, PictureType, File as TagFile, TagTypes, type IPicture } from "node-taglib-sharp"
 import type { ExistingTags } from "../shared/types"
+import { cachedArt, storeArt } from "./art"
+import { sniffImage } from "./art-image"
 
 const TAG_TYPE_BY_EXT: Record<string, TagTypes> = {
   mp3: TagTypes.Id3v2,
@@ -25,11 +27,19 @@ const TAG_TYPE_BY_EXT: Record<string, TagTypes> = {
   mpc: TagTypes.Ape,
 }
 
-/** Read back exactly the fields Dubplate manages, straight from the tag. */
+function frontCover(pictures: IPicture[]): IPicture | undefined {
+  return pictures.find((p) => p.type === PictureType.FrontCover) ?? pictures.find((p) => p.type === PictureType.Other) ?? pictures[0]
+}
+
+/**
+ * Read back exactly the fields Dubplate manages, straight from the tag. The
+ * front cover is copied into the artwork cache so a rewind can put it back.
+ */
 export function readManagedTags(file: string): ExistingTags {
   const f = TagFile.createFromPath(file)
   try {
     const t = f.tag
+    const cover = frontCover(t.pictures ?? [])
     return {
       artist: t.performers?.length ? t.performers.join("; ") : undefined,
       title: t.title || undefined,
@@ -38,6 +48,9 @@ export function readManagedTags(file: string): ExistingTags {
       genre: t.genres?.length ? [...t.genres] : undefined,
       label: t.publisher || undefined,
       comment: t.comment || undefined,
+      bpm: t.beatsPerMinute || undefined,
+      key: t.initialKey || undefined,
+      cover: cover ? storeArt(cover.data.toByteArray(), "embedded")?.hash : undefined,
     }
   } finally {
     f.dispose()
@@ -65,6 +78,16 @@ export function writeTags(file: string, changes: Partial<Record<keyof ExistingTa
     if ("genre" in changes) t.genres = Array.isArray(changes.genre) ? (changes.genre as string[]) : str(changes.genre) ? [String(changes.genre)] : []
     if ("label" in changes) t.publisher = str(changes.label)
     if ("comment" in changes) t.comment = str(changes.comment)
+    if ("bpm" in changes) t.beatsPerMinute = Math.round(Number(changes.bpm)) || 0
+    if ("key" in changes) t.initialKey = str(changes.key)
+    if ("cover" in changes) {
+      // Only the front cover is Dubplate's; back covers, artist photos etc. stay put.
+      const others = (t.pictures ?? []).filter((p) => p !== frontCover(t.pictures ?? []))
+      const hash = str(changes.cover)
+      const bytes = hash ? cachedArt(hash) : null
+      if (hash && !bytes) throw new Error("Artwork is missing from the cache — find it again")
+      t.pictures = bytes ? [Picture.fromFullData(ByteVector.fromByteArray(bytes), PictureType.FrontCover, sniffImage(bytes)?.mime ?? "image/jpeg", ""), ...others] : others
+    }
     f.save()
   } finally {
     f.dispose()

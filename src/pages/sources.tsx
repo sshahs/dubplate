@@ -5,6 +5,7 @@ import { useState } from "react"
 import { toast } from "sonner"
 import type { Candidate, ScraperDefinition, SourceConfig } from "@shared/types"
 import { PageHeader } from "@/components/app-shell"
+import { QueryError } from "@/components/query-error"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -186,7 +187,7 @@ function ScraperDialog({ value, onClose, onSave }: { value: ScraperDefinition | 
             <FieldLabel>{d.kind === "html" ? "Result selector" : "Results array path"}</FieldLabel>
             <Input value={d.items} onChange={(e) => setD({ ...d, items: e.target.value })} className="font-mono text-xs" placeholder={d.kind === "json" ? "(empty = root array)" : ".search-result"} />
           </Field>
-          {(["artist", "title", "combined", "url", "year", "label", "album"] as const).map((k) => (
+          {(["artist", "title", "combined", "url", "year", "label", "album", "artwork"] as const).map((k) => (
             <Field key={k}>
               <FieldLabel className="capitalize">{k === "combined" ? '"Artist - Title" text' : k}</FieldLabel>
               <Input value={d.fields[k] ?? ""} onChange={(e) => setField(k, e.target.value)} className="font-mono text-xs" />
@@ -237,8 +238,9 @@ function ScraperDialog({ value, onClose, onSave }: { value: ScraperDefinition | 
 
 export default function SourcesPage() {
   const qc = useQueryClient()
-  const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: api.settings })
-  const { data: sources } = useQuery({ queryKey: ["sources"], queryFn: api.sources })
+  const { data: settings, error: settingsError, refetch: refetchSettings } = useQuery({ queryKey: ["settings"], queryFn: api.settings })
+  const { data: sources, error: sourcesError, refetch: refetchSources } = useQuery({ queryKey: ["sources"], queryFn: api.sources })
+  const loadError = (!settings && settingsError) || (!sources && sourcesError)
   const [probe, setProbe] = useState({ artist: "Buju Banton", title: "Murderer" })
   const [editing, setEditing] = useState<ScraperDefinition | null>(null)
 
@@ -281,7 +283,17 @@ export default function SourcesPage() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {loadError && (
+        <QueryError
+          className="mb-4"
+          error={loadError}
+          onRetry={() => {
+            void refetchSettings()
+            void refetchSources()
+          }}
+        />
+      )}
+      <div className={cn("grid gap-3 md:grid-cols-2 xl:grid-cols-3", loadError && "hidden")}>
         {settings && sources
           ? builtIn.map((s) => <SourceCard key={s.id} s={s} cfg={settings.sources[s.id] ?? { enabled: false, weight: 0.5 }} probe={probe} />)
           : Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-56 rounded-4xl" />)}

@@ -19,7 +19,7 @@ interface MbRecording {
   length?: number
   "first-release-date"?: string
   "artist-credit"?: { name: string; joinphrase?: string; artist?: { name: string } }[]
-  releases?: { title: string; date?: string }[]
+  releases?: { id?: string; title: string; date?: string }[]
 }
 
 export const musicbrainz: SourceAdapter = {
@@ -46,6 +46,8 @@ export const musicbrainz: SourceAdapter = {
         url: `https://musicbrainz.org/recording/${r.id}`,
         externalId: r.id,
         sourceScore: r.score !== undefined ? r.score / 100 : undefined,
+        // Cover Art Archive answers 404 when a release has no front cover; the fetcher moves on.
+        artwork: r.releases?.[0]?.id ? `https://coverartarchive.org/release/${r.releases[0].id}/front-1200` : undefined,
       }
     })
   },
@@ -65,6 +67,7 @@ interface DiscogsRelease {
   labels?: { name: string }[]
   genres?: string[]
   styles?: string[]
+  images?: { type?: string; uri?: string }[]
   tracklist?: { title: string; duration?: string; type_?: string; artists?: { name: string; join?: string }[] }[]
 }
 
@@ -115,6 +118,7 @@ export const discogs: SourceAdapter = {
         duration: discogsDuration(best.t.duration),
         url: rel.uri ?? `https://www.discogs.com/release/${rel.id}`,
         externalId: String(rel.id),
+        artwork: (rel.images?.find((i) => i.type === "primary") ?? rel.images?.[0])?.uri || undefined,
       })
     }
     return out
@@ -178,7 +182,7 @@ export const spotify: SourceAdapter = {
     const token = await spotifyAuth(cfg.apiKey!, cfg.apiSecret!, signal)
     const query = q.artist ? `track:${q.title} artist:${q.artists[0] ?? q.artist}` : q.title
     const j = await httpJson<{
-      tracks?: { items?: { id: string; name: string; popularity?: number; duration_ms: number; artists: { name: string }[]; album: { name: string; release_date?: string }; external_urls?: { spotify?: string } }[] }
+      tracks?: { items?: { id: string; name: string; popularity?: number; duration_ms: number; artists: { name: string }[]; album: { name: string; release_date?: string; images?: { url: string; width?: number }[] }; external_urls?: { spotify?: string } }[] }
     }>(`https://api.spotify.com/v1/search?type=track&limit=8&q=${enc(query)}`, { headers: { authorization: `Bearer ${token}` }, signal })
     return (j?.tracks?.items ?? []).map((t) => ({
       source: "spotify" as const,
@@ -192,6 +196,7 @@ export const spotify: SourceAdapter = {
       url: t.external_urls?.spotify,
       externalId: t.id,
       sourceScore: t.popularity !== undefined ? t.popularity / 100 : undefined,
+      artwork: t.album.images?.[0]?.url,
     }))
   },
 }
@@ -206,7 +211,7 @@ export const itunes: SourceAdapter = {
     if (q.descriptiveTitle && !q.artist) return []
     const term = q.descriptiveTitle ? q.artist : q.query
     const j = await httpJson<{
-      results?: { trackId: number; trackName: string; artistName: string; collectionName?: string; releaseDate?: string; trackTimeMillis?: number; trackViewUrl?: string; primaryGenreName?: string }[]
+      results?: { trackId: number; trackName: string; artistName: string; collectionName?: string; releaseDate?: string; trackTimeMillis?: number; trackViewUrl?: string; primaryGenreName?: string; artworkUrl100?: string }[]
     }>(`https://itunes.apple.com/search?media=music&entity=song&limit=10&term=${enc(term)}`, { signal })
     return (j?.results ?? []).map((r) => ({
       source: "itunes" as const,
@@ -219,6 +224,8 @@ export const itunes: SourceAdapter = {
       duration: r.trackTimeMillis ? r.trackTimeMillis / 1000 : undefined,
       url: r.trackViewUrl,
       externalId: String(r.trackId),
+      // The search returns a 100px thumbnail; the same path serves any size.
+      artwork: r.artworkUrl100?.replace(/\/\d+x\d+bb\./, "/1000x1000bb."),
     }))
   },
 }
@@ -233,7 +240,7 @@ interface DeezerTrack {
   link?: string
   rank?: number
   artist: { name: string }
-  album?: { title: string }
+  album?: { title: string; cover_xl?: string; cover_big?: string }
 }
 
 export const deezer: SourceAdapter = {
@@ -256,6 +263,7 @@ export const deezer: SourceAdapter = {
       duration: t.duration,
       url: t.link,
       externalId: String(t.id),
+      artwork: t.album?.cover_xl ?? t.album?.cover_big,
     }))
   },
 }
