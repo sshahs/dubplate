@@ -26,12 +26,14 @@ function ProviderRow({
   onActivate,
   onChange,
   fromEnv,
+  zdrFromEnv,
 }: {
   p: LlmProviderConfig
   active: boolean
   onActivate: () => void
   onChange: (p: LlmProviderConfig) => void
   fromEnv: boolean
+  zdrFromEnv: boolean
 }) {
   const [models, setModels] = useState<string[] | null>(null)
   const fetchModels = useMutation({
@@ -58,6 +60,7 @@ function ProviderRow({
         </button>
         {active && <Badge>active</Badge>}
         {fromEnv && <Badge variant="outline">key from env</Badge>}
+        {p.kind === "commandcode" && (p.zdr || zdrFromEnv) && <Badge variant="secondary">ZDR</Badge>}
         <label className="text-muted-foreground ml-auto flex items-center gap-2 text-xs">
           <Switch checked={p.enabled} onCheckedChange={(v) => onChange({ ...p, enabled: v })} size="sm" />
           enabled
@@ -86,6 +89,18 @@ function ProviderRow({
           </Field>
         )}
       </div>
+      {p.kind === "commandcode" && (
+        <label className="mt-3 flex items-start gap-3 rounded-xl border border-dashed p-3 text-sm">
+          <Switch checked={zdrFromEnv || !!p.zdr} disabled={zdrFromEnv} onCheckedChange={(v) => onChange({ ...p, zdr: v })} className="mt-0.5" />
+          <span>
+            <span className="font-medium">Zero Data Retention</span>
+            <span className="text-muted-foreground block text-xs">
+              Asks Command Code not to store your prompts or responses by sending <code>x-cmd-zdr: 1</code> with every request.
+              {zdrFromEnv && " Forced on by the CMD_ZDR environment variable."}
+            </span>
+          </span>
+        </label>
+      )}
       <div className="mt-3 flex items-center gap-2">
         <Button size="sm" variant="outline" onClick={() => test.mutate()} disabled={test.isPending}>
           {test.isPending ? <Spinner data-icon="inline-start" /> : <HugeiconsIcon icon={TestTube01Icon} strokeWidth={2} data-icon="inline-start" />}
@@ -230,6 +245,7 @@ export default function SettingsPage() {
                 p={p}
                 active={draft.llm.activeProvider === p.id}
                 fromEnv={draft.secretsFromEnv.includes(`llm:${p.id}`)}
+                zdrFromEnv={draft.zdrFromEnv}
                 onActivate={() => set((d) => void (d.llm.activeProvider = p.id))}
                 onChange={(np) => set((d) => void (d.llm.providers[i] = np))}
               />
@@ -427,7 +443,7 @@ export default function SettingsPage() {
         <Button
           size="sm"
           onClick={() => {
-            const { secretsFromEnv: _env, ...rest } = draft
+            const { secretsFromEnv: _env, zdrFromEnv: _zdr, ...rest } = draft
             save.mutate(rest)
           }}
           disabled={save.isPending}

@@ -1,17 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { extractJson } from "../ai/providers"
+import { completeJson, extractJson } from "../ai/providers"
 import { sanitizeAi, similarCorrections } from "../ai/interpreter"
 import { openDb, setDb } from "../db"
 import { runScraper } from "../sources/scraper"
 import { readCombined } from "../sources/underground"
 import { musicbrainz } from "../sources/catalog"
 import type { ScraperDefinition } from "../../shared/types"
-import { DEFAULT_SETTINGS } from "../settings"
+import { DEFAULT_SETTINGS, effectiveSettings, loadSettings, publicSettings, saveSettings } from "../settings"
 
 const provider = { id: "t", kind: "ollama" as const, label: "Test", baseUrl: "", model: "m", enabled: true }
 
 beforeEach(() => setDb(openDb(":memory:")))
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
+})
 
 function mockFetch(body: unknown, status = 200) {
   const fn = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(typeof body === "string" ? body : JSON.stringify(body), { status }))
@@ -100,5 +103,63 @@ describe("source adapters", () => {
 
   it("reads 'Artist - Title (Official Video)' upload titles", () => {
     expect(readCombined("Kano - P's and Q's (Official Video)")).toMatchObject({ artist: "Kano", title: "P's and Q's" })
+  })
+})
+
+describe("Command Code Zero Data Retention", () => {
+  const commandcode = { id: "commandcode", kind: "commandcode" as const, label: "Command Code", baseUrl: "https://cc.test/v1", model: "m", apiKey: "k", enabled: true }
+  const req = { system: "s", user: "u", schema: { type: "object" }, schemaName: "x", temperature: 0 }
+  const reply = { choices: [{ message: { content: '{"ok":true}' } }] }
+  const sentHeaders = (fn: ReturnType<typeof mockFetch>) => fn.mock.calls[0][1]?.headers as Record<string, string>
+
+  it("sends x-cmd-zdr: 1 only when the toggle is on", async () => {
+    let fn = mockFetch(reply)
+    await completeJson({ ...commandcode, zdr: true }, req)
+    expect(sentHeaders(fn)["x-cmd-zdr"]).toBe("1")
+    expect(sentHeaders(fn).authorization).toBe("Bearer k")
+
+    fn = mockFetch(reply)
+    await completeJson({ ...commandcode, zdr: false }, req)
+    expect(sentHeaders(fn)).not.toHaveProperty("x-cmd-zdr")
+  })
+
+  it("never sends the header to other providers", async () => {
+    const fn = mockFetch(reply)
+    await completeJson({ ...commandcode, id: "custom", kind: "openai-compatible", zdr: true }, req)
+    expect(sentHeaders(fn)).not.toHaveProperty("x-cmd-zdr")
+  })
+
+  it("is off by default, saved from the UI, and forced on by CMD_ZDR", () => {
+    const cc = () => effectiveSettings().llm.providers.find((p) => p.id === "commandcode")!
+    expect(cc().zdr).toBe(false)
+    expect(publicSettings().zdrFromEnv).toBe(false)
+
+    saveSettings({ llm: { ...loadSettings().llm, providers: loadSettings().llm.providers.map((p) => (p.id === "commandcode" ? { ...p, zdr: true } : p)) } })
+    expect(cc().zdr).toBe(true)
+
+    saveSettings({ llm: { ...loadSettings().llm, providers: loadSettings().llm.providers.map((p) => (p.id === "commandcode" ? { ...p, zdr: false } : p)) } })
+    vi.stubEnv("CMD_ZDR", "true")
+    expect(cc().zdr).toBe(true)
+    expect(publicSettings().zdrFromEnv).toBe(true)
+    // The UI sees the saved choice, so saving never bakes the env override in.
+    expect(publicSettings().llm.providers.find((p) => p.id === "commandcode")?.zdr).toBe(false)
+    expect(effectiveSettings().llm.providers.find((p) => p.id === "custom")?.zdr).toBeUndefined()
+  })
+})
+
+describe("environment credentials", () => {
+  it("are flagged as from env and never written to the database", () => {
+    vi.stubEnv("COMMANDCODE_API_KEY", "cc-env-key")
+    vi.stubEnv("DISCOGS_TOKEN", "discogs-env-token")
+    expect(effectiveSettings().sources.discogs.apiKey).toBe("discogs-env-token")
+    const pub = publicSettings()
+    expect(pub.secretsFromEnv).toEqual(expect.arrayContaining(["llm:commandcode", "source:discogs"]))
+
+    const { secretsFromEnv: _s, zdrFromEnv: _z, ...rest } = pub
+    saveSettings(rest)
+    const saved = loadSettings()
+    expect(saved.sources.discogs.apiKey).toBeUndefined()
+    expect(saved.llm.providers.find((p) => p.id === "commandcode")?.apiKey).toBeUndefined()
+    expect(publicSettings().secretsFromEnv).toEqual(expect.arrayContaining(["llm:commandcode", "source:discogs"]))
   })
 })

@@ -93,6 +93,11 @@ function authHeaders(p: LlmProviderConfig): Record<string, string> {
   return p.apiKey ? { authorization: `Bearer ${p.apiKey}` } : {}
 }
 
+/** Headers for an inference call: auth plus Command Code's Zero Data Retention opt-in. */
+function inferenceHeaders(p: LlmProviderConfig): Record<string, string> {
+  return p.kind === "commandcode" && p.zdr ? { ...authHeaders(p), "x-cmd-zdr": "1" } : authHeaders(p)
+}
+
 // ---------- Ollama (local + cloud) ----------
 
 async function ollamaJson(p: LlmProviderConfig, req: JsonRequest) {
@@ -152,7 +157,7 @@ async function openAiJson(p: LlmProviderConfig, req: JsonRequest) {
           ...openAiTemperature(p, req.temperature),
           ...(response_format ? { response_format } : {}),
         },
-        authHeaders(p),
+        inferenceHeaders(p),
         req.signal,
         req.timeoutMs
       )

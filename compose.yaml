@@ -29,6 +29,8 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       COMMANDCODE_API_KEY: ${COMMANDCODE_API_KEY:-}
+      # 1 = always send Command Code's Zero Data Retention header.
+      CMD_ZDR: ${CMD_ZDR:-}
       DISCOGS_TOKEN: ${DISCOGS_TOKEN:-}
       LASTFM_API_KEY: ${LASTFM_API_KEY:-}
       SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
