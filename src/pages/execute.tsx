@@ -24,12 +24,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Switch } from "@/components/ui/switch"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api } from "@/lib/api"
+import { useActiveJobs } from "@/lib/events"
 import { fmtAgo } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
-function BatchRow({ batch }: { batch: OperationBatch }) {
+function BatchRow({ batch, busy }: { batch: OperationBatch; busy: boolean }) {
   const [open, setOpen] = useState(false)
   const { data: ops } = useQuery({ queryKey: ["ops", batch.batchId], queryFn: () => api.operations(batch.batchId), enabled: open })
   const rewind = useMutation({
@@ -39,7 +42,7 @@ function BatchRow({ batch }: { batch: OperationBatch }) {
   })
   const canRewind = !batch.dryRun && batch.done > 0
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="rounded-2xl border">
+    <Collapsible open={open} onOpenChange={setOpen} className="animate-in fade-in slide-in-from-top-1 rounded-2xl border duration-300">
       <div className="flex flex-wrap items-center gap-3 p-3">
         <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-3 text-left">
           <span className={cn("size-2 rounded-full", batch.dryRun ? "bg-muted-foreground" : batch.failed ? "bg-rasta-gold" : batch.reverted === batch.count ? "bg-muted-foreground" : "bg-rasta-green")} />
@@ -56,7 +59,7 @@ function BatchRow({ batch }: { batch: OperationBatch }) {
           <AlertDialog>
             <AlertDialogTrigger
               render={
-                <Button size="sm" variant="outline" disabled={rewind.isPending}>
+                <Button size="sm" variant="outline" disabled={rewind.isPending || busy}>
                   <HugeiconsIcon icon={Backward01Icon} strokeWidth={2} data-icon="inline-start" />
                   Rewind
                 </Button>
@@ -108,9 +111,11 @@ function BatchRow({ batch }: { batch: OperationBatch }) {
 export default function ExecutePage() {
   const qc = useQueryClient()
   const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: api.settings })
-  const { data: plan, isFetching } = useQuery({ queryKey: ["tracks", "plan"], queryFn: () => api.plan() })
+  const { data: plan, isLoading: planLoading } = useQuery({ queryKey: ["tracks", "plan"], queryFn: () => api.plan() })
   const { data: batches } = useQuery({ queryKey: ["batches"], queryFn: api.batches })
   const [excluded, setExcluded] = useState<Set<number>>(new Set())
+  // A cut or rewind in flight: lock the controls and show its progress.
+  const writing = useActiveJobs().find((j) => j.kind === "execute" || j.kind === "rewind")
 
   const readOnly = settings?.safety.readOnly ?? true
   const setReadOnly = useMutation({
@@ -172,9 +177,16 @@ export default function ExecutePage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {!plan?.length && !isFetching && (
+          {planLoading && (
+            <div className="space-y-3">
+              <Skeleton className="h-8 w-64" />
+              <Skeleton className="h-40 w-full" />
+            </div>
+          )}
+          {!plan?.length && !planLoading && (
             <div className="text-muted-foreground text-sm">
-              No approved tracks yet. Approve matches in{" "}
+              {batches?.some((b) => !b.dryRun && b.done > 0) ? "Every approved track has been cut. " : "No approved tracks yet. "}
+              Approve matches in{" "}
               <Link to="/review" className="underline">
                 Review
               </Link>{" "}
@@ -191,16 +203,16 @@ export default function ExecutePage() {
                 <Badge variant="secondary">{runnable.length} ready</Badge>
                 {blocked.length > 0 && <Badge variant="outline">{blocked.length} blocked or already clean</Badge>}
                 <div className="ml-auto flex gap-2">
-                  <Button variant="outline" onClick={() => execute.mutate(true)} disabled={!runnable.length || execute.isPending}>
+                  <Button variant="outline" onClick={() => execute.mutate(true)} disabled={!runnable.length || execute.isPending || !!writing}>
                     <HugeiconsIcon icon={TestTube01Icon} strokeWidth={2} data-icon="inline-start" />
                     Dry run
                   </Button>
                   <AlertDialog>
                     <AlertDialogTrigger
                       render={
-                        <Button disabled={!runnable.length || readOnly || execute.isPending}>
-                          <HugeiconsIcon icon={Scissor01Icon} strokeWidth={2} data-icon="inline-start" />
-                          Rename & tag {runnable.length}
+                        <Button disabled={!runnable.length || readOnly || execute.isPending || !!writing}>
+                          {writing ? <Spinner data-icon="inline-start" /> : <HugeiconsIcon icon={Scissor01Icon} strokeWidth={2} data-icon="inline-start" />}
+                          {writing ? `Cutting ${writing.done + writing.failed}/${writing.total || "?"}` : `Rename & tag ${runnable.length}`}
                         </Button>
                       }
                     />
@@ -286,7 +298,7 @@ export default function ExecutePage() {
         <CardContent className="space-y-2">
           {!batches?.length && <div className="text-muted-foreground text-sm">Nothing cut yet.</div>}
           {batches?.map((b) => (
-            <BatchRow key={b.batchId} batch={b} />
+            <BatchRow key={b.batchId} batch={b} busy={!!writing} />
           ))}
         </CardContent>
       </Card>

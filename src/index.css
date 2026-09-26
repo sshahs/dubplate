@@ -165,6 +165,8 @@
   }
   html {
     color-scheme: light;
+    /* Keep the layout from jumping sideways when a page grows a scrollbar. */
+    scrollbar-gutter: stable;
   }
   html.dark {
     color-scheme: dark;
@@ -234,9 +236,117 @@
   }
 }
 
+/* ---------- Motion ----------
+   Page and panel changes run as view transitions (React <ViewTransition> +
+   the router's startTransition). Everything here collapses to an instant
+   swap under prefers-reduced-motion. */
+:root {
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.5, 0, 0.75, 0);
+  --ease-spring: cubic-bezier(0.34, 1.36, 0.64, 1);
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.995);
+  }
+}
+@keyframes page-out {
+  to {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+@keyframes slide-from-right {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+}
+@keyframes slide-to-left {
+  to {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+}
+@keyframes slide-from-left {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+}
+@keyframes slide-to-right {
+  to {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+}
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* Whole-page swap: the old page lifts away, the new one settles in. */
+::view-transition-old(.page-exit) {
+  animation: page-out 120ms var(--ease-in) both;
+}
+::view-transition-new(.page-enter) {
+  animation: page-in 300ms var(--ease-out) 40ms both;
+}
+/* Sidebar/header barely change, so keep their cross-fade quick. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 180ms;
+}
+/* The rasta marker glides between sidebar items. */
+::view-transition-group(nav-indicator) {
+  animation-duration: 340ms;
+  animation-timing-function: var(--ease-spring);
+}
+
+/* Review / track sheet: step through tracks sideways. */
+::view-transition-old(.detail-exit-forward) {
+  animation: slide-to-left 140ms var(--ease-in) both;
+}
+::view-transition-new(.detail-enter-forward) {
+  animation: slide-from-right 260ms var(--ease-out) both;
+}
+::view-transition-old(.detail-exit-back) {
+  animation: slide-to-right 140ms var(--ease-in) both;
+}
+::view-transition-new(.detail-enter-back) {
+  animation: slide-from-left 260ms var(--ease-out) both;
+}
+
+/* Theme switch: a circular reveal from the toggle (driven from JS). */
+html.theme-reveal::view-transition-old(root),
+html.theme-reveal::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+@utility animate-rise-in {
+  animation: rise-in 380ms var(--ease-out) both;
+  animation-delay: calc(var(--stagger, 0) * 45ms);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-spin-slow,
-  .animate-vu {
+  .animate-vu,
+  .animate-rise-in {
     animation: none;
+  }
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
   }
 }

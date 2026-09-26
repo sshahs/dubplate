@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Spinner } from "@/components/ui/spinner"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { api, type SourceStatus } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -281,8 +282,9 @@ export default function SourcesPage() {
       </Card>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {settings &&
-          builtIn.map((s) => <SourceCard key={s.id} s={s} cfg={settings.sources[s.id] ?? { enabled: false, weight: 0.5 }} probe={probe} />)}
+        {settings && sources
+          ? builtIn.map((s) => <SourceCard key={s.id} s={s} cfg={settings.sources[s.id] ?? { enabled: false, weight: 0.5 }} probe={probe} />)
+          : Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-56 rounded-4xl" />)}
       </div>
 
       <div className="mt-8 mb-3 flex items-end justify-between gap-2">

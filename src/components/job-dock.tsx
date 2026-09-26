@@ -26,10 +26,11 @@ export function JobDock() {
     <Popover>
       <PopoverTrigger
         render={
-          <Button variant="outline" size="sm" className={cn("gap-2", running && "border-rasta-gold/40")}>
+          // Fixed width on desktop so the header doesn't shuffle as jobs start, tick and finish.
+          <Button variant="outline" size="sm" className={cn("gap-2 transition-colors duration-300 md:w-48 md:justify-start", running && "border-rasta-gold/40")}>
             {running ? <VuMeter /> : <HugeiconsIcon icon={ComputerTerminal01Icon} strokeWidth={2} />}
-            <span className="hidden max-w-40 truncate md:inline">{running ? running.label : "Console"}</span>
-            {pct !== null && <span className="text-rasta-gold font-mono text-xs">{pct}%</span>}
+            <span className="hidden min-w-0 flex-1 truncate text-left md:inline">{running ? running.label : "Console"}</span>
+            {pct !== null && <span className="text-rasta-gold font-mono text-xs tabular-nums">{pct}%</span>}
             {active.length > 1 && <span className="text-muted-foreground text-xs">+{active.length - 1}</span>}
           </Button>
         }

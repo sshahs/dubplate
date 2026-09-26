@@ -423,6 +423,12 @@ as first-class tokens. The chart colours are validated for colour-blind
 separation in both themes. `components.json` is set up for the preset, so
 `npx shadcn@latest add <component>` works as normal.
 
+Motion uses the browser's View Transitions through React's
+`<ViewTransition>`. Pages lift out and settle in, a red-gold-green marker
+glides between sidebar items, Review slides tracks in the direction you're
+moving, and the theme switch sweeps across as a circle. All of it turns off
+when your system asks for reduced motion.
+
 <br>
 
 <img src="docs/stripe.svg" width="100%" height="6" alt="">

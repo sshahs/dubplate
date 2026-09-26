@@ -11,7 +11,7 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useMemo, useState } from "react"
+import { addTransitionType, startTransition, useEffect, useMemo, useState, ViewTransition } from "react"
 import { useSearchParams } from "react-router"
 import { toast } from "sonner"
 import type { TrackStatus } from "@shared/types"
@@ -34,12 +34,17 @@ import {
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { Spinner } from "@/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api, type Selection, type TrackFilter } from "@/lib/api"
+import { useActiveJobs } from "@/lib/events"
 import { fmtDuration, STATUS_META } from "@/lib/format"
+import { usePrefetchTracks } from "@/lib/prefetch"
 import { cn } from "@/lib/utils"
 
 const PAGE = 50
+/** Statuses a track only passes through mid-job; their chips would blink in and out while processing. */
+const TRANSIENT: TrackStatus[] = ["interpreted", "scoured"]
 
 function useDebounced<T>(value: T, ms = 300) {
   const [v, setV] = useState(value)
@@ -75,9 +80,10 @@ export default function TracksPage() {
     setAllMatching(false)
   }, [debouncedQ, params, sort, dir])
 
-  const { data, isFetching } = useQuery({ queryKey: ["tracks", filter], queryFn: () => api.tracks(filter), placeholderData: keepPreviousData })
+  const { data, isFetching, isPlaceholderData } = useQuery({ queryKey: ["tracks", filter], queryFn: () => api.tracks(filter), placeholderData: keepPreviousData })
   const { data: libraries } = useQuery({ queryKey: ["libraries"], queryFn: api.libraries })
   const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: api.stats })
+  const busy = useActiveJobs().length > 0
 
   const selection: Selection | null = allMatching
     ? { filter: { ...filter, limit: undefined, offset: undefined } }
@@ -135,6 +141,7 @@ export default function TracksPage() {
   }
   const pages = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE))
   const openIndex = items.findIndex((t) => t.id === openId)
+  usePrefetchTracks(openId === null ? [] : [items[openIndex + 1]?.id])
 
   const libItems = [{ value: "all", label: "All libraries" }, ...(libraries ?? []).map((l) => ({ value: String(l.id), label: l.name }))]
 
@@ -168,20 +175,20 @@ export default function TracksPage() {
           onClick={() => setStatusFilter("all")}
           className={cn("h-7 rounded-full px-3 text-xs font-medium transition-colors", !status.length ? "bg-foreground text-background" : "bg-muted hover:bg-muted/70")}
         >
-          All {stats ? stats.total : ""}
+          All <span className="tabular-nums">{stats ? stats.total : ""}</span>
         </button>
-        {TRACK_STATUSES.filter((s) => (stats?.byStatus[s] ?? 0) > 0 || status.includes(s)).map((s) => (
+        {TRACK_STATUSES.filter((s) => status.includes(s) || ((stats?.byStatus[s] ?? 0) > 0 && !(busy && TRANSIENT.includes(s)))).map((s) => (
           <button
             key={s}
             type="button"
             onClick={() => setStatusFilter(s)}
             className={cn(
-              "h-7 rounded-full px-3 text-xs font-medium transition-colors",
+              "animate-in fade-in zoom-in-95 h-7 rounded-full px-3 text-xs font-medium transition-colors duration-200",
               status.includes(s) ? "bg-foreground text-background" : "bg-muted hover:bg-muted/70"
             )}
             title={STATUS_META[s].hint}
           >
-            {STATUS_META[s].label} <span className="opacity-60">{stats?.byStatus[s] ?? 0}</span>
+            {STATUS_META[s].label} <span className="tabular-nums opacity-60">{stats?.byStatus[s] ?? 0}</span>
           </button>
         ))}
       </div>
@@ -207,99 +214,117 @@ export default function TracksPage() {
             </SelectContent>
           </Select>
         )}
-        <span className="text-muted-foreground ml-auto text-xs">{isFetching ? "Loading…" : `${data?.total ?? 0} tracks`}</span>
+        <span className="text-muted-foreground ml-auto flex items-center gap-1.5 text-xs tabular-nums">
+          <Spinner className={cn("size-3 transition-opacity", isFetching ? "opacity-100" : "opacity-0")} />
+          {data ? `${data.total} tracks` : ""}
+        </span>
       </div>
 
-      {selectionCount > 0 && (
-        <div className="bg-card sticky top-16 z-10 mb-3 flex flex-wrap items-center gap-2 rounded-3xl border p-2 pl-4 shadow-lg">
-          <span className="text-sm font-medium">{selectionCount} selected</span>
-          {!allMatching && allOnPageSelected && (data?.total ?? 0) > items.length && (
-            <Button variant="link" size="sm" onClick={() => setAllMatching(true)}>
-              Select all {data?.total} matching
-            </Button>
-          )}
-          <div className="ml-auto flex flex-wrap gap-1.5">
-            <Button size="sm" onClick={() => process.mutate({})} disabled={process.isPending}>
-              <HugeiconsIcon icon={AiMagicIcon} strokeWidth={2} data-icon="inline-start" />
-              Identify
-            </Button>
-            <Button size="sm" variant="secondary" onClick={() => bulk.mutate("approve")}>
-              <HugeiconsIcon icon={Tick02Icon} strokeWidth={2} data-icon="inline-start" />
-              Approve
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => bulk.mutate("reject")}>
-              <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} data-icon="inline-start" />
-              Leave as-is
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label="More actions" />}>
-                <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel>Pipeline</DropdownMenuLabel>
-                  <DropdownMenuItem onClick={() => process.mutate({ force: true })}>
-                    <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} />
-                    Re-identify (ignore cache of results)
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => process.mutate({ interpret: false })}>Scour sources only (no AI)</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => process.mutate({ scour: false })}>AI interpret only</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => api.rescore(selection!).then((j) => done(j.label))}>Re-score (offline)</DropdownMenuItem>
-                </DropdownMenuGroup>
-                <DropdownMenuSeparator />
-                <DropdownMenuGroup>
-                  <DropdownMenuItem onClick={() => bulk.mutate("unapprove")}>Unapprove</DropdownMenuItem>
-                  <DropdownMenuItem variant="destructive" onClick={() => bulk.mutate("reset")}>
-                    Reset to new
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label="Clear selection"
-              onClick={() => {
-                setSelected(new Set())
-                setAllMatching(false)
-              }}
-            >
-              <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
-            </Button>
+      {/* Always holds its slot, so ticking a box never pushes the table down. */}
+      <div
+        className={cn(
+          "mb-3 flex min-h-[3.125rem] flex-wrap items-center gap-2 rounded-3xl border p-2 pl-4 transition-[background-color,box-shadow,border-color] duration-300",
+          selectionCount > 0 ? "bg-card sticky top-16 z-10 shadow-lg" : "text-muted-foreground border-dashed"
+        )}
+      >
+        {selectionCount === 0 && <span className="animate-in fade-in text-xs duration-300">Tick tracks to identify, approve or leave them as they are.</span>}
+        {selectionCount > 0 && (
+          <div className="animate-in fade-in slide-in-from-bottom-1 flex flex-1 flex-wrap items-center gap-2 duration-300">
+            <span className="text-sm font-medium tabular-nums">{selectionCount} selected</span>
+            {!allMatching && allOnPageSelected && (data?.total ?? 0) > items.length && (
+              <Button variant="link" size="sm" onClick={() => setAllMatching(true)}>
+                Select all {data?.total} matching
+              </Button>
+            )}
+            <div className="ml-auto flex flex-wrap gap-1.5">
+              <Button size="sm" onClick={() => process.mutate({})} disabled={process.isPending}>
+                <HugeiconsIcon icon={AiMagicIcon} strokeWidth={2} data-icon="inline-start" />
+                Identify
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => bulk.mutate("approve")}>
+                <HugeiconsIcon icon={Tick02Icon} strokeWidth={2} data-icon="inline-start" />
+                Approve
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => bulk.mutate("reject")}>
+                <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} data-icon="inline-start" />
+                Leave as-is
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label="More actions" />}>
+                  <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>Pipeline</DropdownMenuLabel>
+                    <DropdownMenuItem onClick={() => process.mutate({ force: true })}>
+                      <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} />
+                      Re-identify (ignore cache of results)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => process.mutate({ interpret: false })}>Scour sources only (no AI)</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => process.mutate({ scour: false })}>AI interpret only</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => api.rescore(selection!).then((j) => done(j.label))}>Re-score (offline)</DropdownMenuItem>
+                  </DropdownMenuGroup>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuGroup>
+                    <DropdownMenuItem onClick={() => bulk.mutate("unapprove")}>Unapprove</DropdownMenuItem>
+                    <DropdownMenuItem variant="destructive" onClick={() => bulk.mutate("reset")}>
+                      Reset to new
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Clear selection"
+                onClick={() => {
+                  setSelected(new Set())
+                  setAllMatching(false)
+                }}
+              >
+                <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
+              </Button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      <Card className="overflow-hidden py-0">
-        <Table>
+      <Card className={cn("overflow-hidden py-0 transition-opacity duration-200", isPlaceholderData && "opacity-60")}>
+        {/* Fixed layout: column widths don't jump around as rows refresh during a job. */}
+        <Table className="min-w-[42rem] table-fixed">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-10 pl-4">
+              <TableHead className="w-12 pl-4">
                 <Checkbox checked={allOnPageSelected} onCheckedChange={toggleAll} aria-label="Select page" />
               </TableHead>
               <TableHead className="cursor-pointer" onClick={() => sortBy("filename")}>
                 Original file {sort === "filename" && (dir === "asc" ? "↑" : "↓")}
               </TableHead>
               <TableHead>Becomes</TableHead>
-              <TableHead className="cursor-pointer" onClick={() => sortBy("confidence")}>
+              <TableHead className="w-36 cursor-pointer" onClick={() => sortBy("confidence")}>
                 Confidence {sort === "confidence" && (dir === "asc" ? "↑" : "↓")}
               </TableHead>
-              <TableHead className="cursor-pointer" onClick={() => sortBy("status")}>
+              <TableHead className="w-32 cursor-pointer" onClick={() => sortBy("status")}>
                 Status {sort === "status" && (dir === "asc" ? "↑" : "↓")}
               </TableHead>
-              <TableHead className="hidden text-right lg:table-cell">Length</TableHead>
+              <TableHead className="hidden w-20 text-right lg:table-cell">Length</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {items.length === 0 && (
               <TableRow>
                 <TableCell colSpan={6} className="text-muted-foreground py-12 text-center">
-                  {isFetching ? "Loading…" : "No tracks match."}
+                  {data ? "No tracks match." : "Loading…"}
                 </TableCell>
               </TableRow>
             )}
             {items.map((t) => (
-              <TableRow key={t.id} data-state={selected.has(t.id) || allMatching ? "selected" : undefined} className="cursor-pointer" onClick={() => setOpenId(t.id)}>
+              <TableRow
+                key={t.id}
+                data-state={selected.has(t.id) || allMatching ? "selected" : undefined}
+                className="animate-in fade-in cursor-pointer duration-300"
+                onClick={() => setOpenId(t.id)}
+              >
                 <TableCell className="pl-4" onClick={(e) => e.stopPropagation()}>
                   <Checkbox
                     checked={allMatching || selected.has(t.id)}
@@ -313,13 +338,13 @@ export default function TracksPage() {
                     aria-label={`Select ${t.filename}`}
                   />
                 </TableCell>
-                <TableCell className="max-w-[18rem]">
+                <TableCell>
                   <div className="truncate font-mono text-xs" title={t.filename}>
                     {t.filename}
                   </div>
                   {t.relDir && <div className="text-muted-foreground truncate text-[11px]">{t.relDir}</div>}
                 </TableCell>
-                <TableCell className="max-w-[20rem]">
+                <TableCell>
                   {t.proposedName && t.proposedName !== t.filename ? (
                     <div className="truncate text-sm" title={t.proposedName}>
                       {t.proposedName}
@@ -365,13 +390,21 @@ export default function TracksPage() {
           </SheetHeader>
           <div className="px-4 pb-6">
             {openId !== null && (
-              <TrackDetail
-                trackId={openId}
-                onAdvance={() => {
-                  const next = items[openIndex + 1]
-                  setOpenId(next ? next.id : null)
-                }}
-              />
+              <ViewTransition key={openId} enter={{ forward: "detail-enter-forward", default: "none" }} exit={{ forward: "detail-exit-forward", default: "none" }} default="none">
+                <div>
+                  <TrackDetail
+                    trackId={openId}
+                    onAdvance={() => {
+                      const next = items[openIndex + 1]
+                      if (!next) return setOpenId(null)
+                      startTransition(() => {
+                        addTransitionType("forward")
+                        setOpenId(next.id)
+                      })
+                    }}
+                  />
+                </div>
+              </ViewTransition>
             )}
           </div>
         </SheetContent>

@@ -10,7 +10,7 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { toast } from "sonner"
 import { renderTemplate } from "@core/naming"
 import type { Candidate, FinalMeta, Track } from "@shared/types"
@@ -44,13 +44,12 @@ export function TrackDetail({ trackId, onAdvance, compact = false }: { trackId: 
   const qc = useQueryClient()
   const { data: track, isLoading } = useQuery({ queryKey: ["track", trackId], queryFn: () => api.track(trackId) })
   const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: api.settings })
-  const [draft, setDraft] = useState<MetaDraft | null>(null)
-  const [dirty, setDirty] = useState(false)
-
-  useEffect(() => {
-    if (track && !dirty) setDraft(toDraft(initialMeta(track)))
-  }, [track, dirty])
-  useEffect(() => setDirty(false), [trackId])
+  // The form follows the saved track until you edit it; edits are tied to the track they were made on.
+  // Derived during render (not in an effect) so a cached track appears without a skeleton frame.
+  const [edit, setEdit] = useState<{ trackId: number; draft: MetaDraft } | null>(null)
+  const saved = useMemo(() => (track ? toDraft(initialMeta(track)) : null), [track])
+  const dirty = edit?.trackId === trackId
+  const draft = dirty ? edit.draft : saved
 
   const preview = useMemo(() => {
     if (!draft || !settings || !track) return null
@@ -67,9 +66,10 @@ export function TrackDetail({ trackId, onAdvance, compact = false }: { trackId: 
 
   const approve = useMutation({
     mutationFn: () => api.approve(trackId, draft ? fromDraft(draft) : undefined, true),
-    onSuccess: () => {
+    onSuccess: (updated) => {
       toast.success("Approved — big up!", { description: preview ?? undefined })
-      setDirty(false)
+      qc.setQueryData(["track", trackId], updated)
+      setEdit(null)
       refresh()
       onAdvance?.()
     },
@@ -77,9 +77,11 @@ export function TrackDetail({ trackId, onAdvance, compact = false }: { trackId: 
   })
   const save = useMutation({
     mutationFn: () => api.updateTrack(trackId, { final: draft ? fromDraft(draft) : undefined }),
-    onSuccess: () => {
+    onSuccess: (updated) => {
       toast("Saved")
-      setDirty(false)
+      // Show the saved values straight away rather than flashing back until the refetch lands.
+      qc.setQueryData(["track", trackId], updated)
+      setEdit(null)
       refresh()
     },
     onError: (e) => toast.error(e.message),
@@ -99,20 +101,27 @@ export function TrackDetail({ trackId, onAdvance, compact = false }: { trackId: 
   })
 
   if (isLoading || !track || !draft) {
+    // Mirrors the real layout so the panel doesn't collapse and re-expand while loading.
     return (
-      <div className="space-y-4 p-1">
-        <Skeleton className="h-8 w-2/3" />
-        <Skeleton className="h-24 w-full" />
-        <Skeleton className="h-64 w-full" />
+      <div className="space-y-5" aria-busy>
+        <div className="flex items-start gap-4">
+          <Skeleton className={cn("shrink-0 rounded-full", compact ? "size-20" : "size-24")} />
+          <div className="flex-1 space-y-2 pt-1">
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-7 w-3/4" />
+            <Skeleton className="h-4 w-1/2" />
+          </div>
+        </div>
+        <Skeleton className="h-12 w-full" />
+        <Skeleton className="h-56 w-full" />
+        <Skeleton className="h-9 w-2/3" />
+        <Skeleton className="h-48 w-full" />
       </div>
     )
   }
 
   const d = track.decision
-  const editDraft = (next: MetaDraft) => {
-    setDraft(next)
-    setDirty(true)
-  }
+  const editDraft = (next: MetaDraft) => setEdit({ trackId, draft: next })
 
   return (
     <div className="space-y-5">
