@@ -15,32 +15,48 @@ export function ConfidenceMeter({ value, className, showValue = true }: { value:
   )
 }
 
-/** Big circular gauge for the detail view. */
+/**
+ * Circular gauge for the detail view. The label sits under the ring, not inside it,
+ * so it stays legible at every size and never runs into the arc.
+ */
 export function ConfidenceDial({ value, size = 96 }: { value: number | null | undefined; size?: number }) {
   const tone = confidenceTone(value)
-  const r = 40
+  const stroke = 7
+  const r = 50 - stroke / 2 - 0.5
   const circ = 2 * Math.PI * r
   const v = Math.max(0, Math.min(100, value ?? 0))
+  const arc = tone === "red" ? "stroke-rasta-red" : tone === "gold" ? "stroke-rasta-gold" : tone === "green" ? "stroke-rasta-green" : "stroke-muted-foreground"
   return (
-    <div className="relative" style={{ width: size, height: size }}>
-      <svg viewBox="0 0 100 100" className="size-full -rotate-90">
-        <circle cx="50" cy="50" r={r} fill="none" stroke="currentColor" strokeWidth="9" className="text-muted" />
-        <circle
-          cx="50"
-          cy="50"
-          r={r}
-          fill="none"
-          strokeWidth="9"
-          strokeLinecap="round"
-          strokeDasharray={circ}
-          strokeDashoffset={circ * (1 - v / 100)}
-          className={cn("transition-[stroke-dashoffset] duration-700", tone === "red" ? "stroke-rasta-red" : tone === "gold" ? "stroke-rasta-gold" : tone === "green" ? "stroke-rasta-green" : "stroke-muted-foreground")}
-        />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className={cn("font-heading text-2xl font-bold tabular-nums", TONE_TEXT[tone])}>{value ?? "–"}</span>
-        <span className="text-muted-foreground text-[8px] tracking-[0.14em] uppercase">confidence</span>
+    <div className="flex shrink-0 flex-col items-center gap-1.5" style={{ width: size }} role="img" aria-label={value === null || value === undefined ? "Not scored yet" : `Confidence ${value} out of 100`}>
+      <div className="relative" style={{ width: size, height: size }}>
+        <svg viewBox="0 0 100 100" className="size-full -rotate-90" aria-hidden>
+          <circle cx="50" cy="50" r={r} fill="none" strokeWidth={stroke} className="stroke-muted" />
+          {/* A zero-length arc would still draw its round cap as a stray dot. */}
+          {v > 0 && (
+            <circle
+              cx="50"
+              cy="50"
+              r={r}
+              fill="none"
+              strokeWidth={stroke}
+              strokeLinecap={v >= 100 ? "butt" : "round"}
+              strokeDasharray={circ}
+              strokeDashoffset={circ * (1 - v / 100)}
+              className={cn("transition-[stroke-dashoffset] duration-700 ease-(--ease-out)", arc)}
+            />
+          )}
+        </svg>
+        <span
+          aria-hidden
+          className={cn("font-heading absolute inset-0 flex items-center justify-center leading-none font-extrabold tracking-tight tabular-nums", TONE_TEXT[tone])}
+          style={{ fontSize: Math.round(size * (value !== null && value !== undefined && value >= 100 ? 0.27 : 0.32)) }}
+        >
+          {value ?? "–"}
+        </span>
       </div>
+      <span aria-hidden className="text-muted-foreground text-[11px] leading-none font-medium tracking-wide">
+        Confidence
+      </span>
     </div>
   )
 }

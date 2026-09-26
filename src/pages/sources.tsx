@@ -1,15 +1,32 @@
 import { HugeiconsIcon } from "@hugeicons/react"
-import { Add01Icon, Copy01Icon, Delete02Icon, Edit02Icon, LinkSquare02Icon, TestTube01Icon } from "@hugeicons/core-free-icons"
+import {
+  Add01Icon,
+  ArrowDown01Icon,
+  Copy01Icon,
+  Database01Icon,
+  Delete02Icon,
+  Edit02Icon,
+  FingerPrintIcon,
+  LinkSquare02Icon,
+  MoreHorizontalIcon,
+  SourceCodeIcon,
+  TestTube01Icon,
+  Vynil01Icon,
+} from "@hugeicons/core-free-icons"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
+import { useLocation, useNavigate } from "react-router"
 import { toast } from "sonner"
 import type { Candidate, ScraperDefinition, SourceConfig } from "@shared/types"
 import { PageHeader } from "@/components/app-shell"
 import { QueryError } from "@/components/query-error"
+import { SectionNav, SettingRow, SettingRows, type SectionItem } from "@/components/settings-layout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -17,8 +34,45 @@ import { Slider } from "@/components/ui/slider"
 import { Spinner } from "@/components/ui/spinner"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
-import { api, type SourceStatus } from "@/lib/api"
+import { api, type PublicSettings, type SourceStatus } from "@/lib/api"
 import { cn } from "@/lib/utils"
+
+type GroupId = "catalogues" | "underground" | "fingerprint" | "scrapers"
+
+/** Built-in sources by where they look; anything not listed is a catalogue. */
+const GROUPS: { id: GroupId; label: string; icon: SectionItem["icon"]; title: string; description: string; ids?: string[] }[] = [
+  { id: "catalogues", label: "Catalogues", icon: Database01Icon, title: "Catalogues", description: "The big databases and stores. Best for anything that was properly released." },
+  {
+    id: "underground",
+    label: "Underground",
+    icon: Vynil01Icon,
+    title: "Underground",
+    description: "Where specials, clash tapes, radio sets and white labels actually turn up.",
+    ids: ["bandcamp", "archive", "mixcloud", "youtube"],
+  },
+  {
+    id: "fingerprint",
+    label: "Fingerprint",
+    icon: FingerPrintIcon,
+    title: "Audio fingerprint",
+    description: "Recognises the recording itself, so it still works when the filename is nonsense.",
+    ids: ["acoustid"],
+  },
+  { id: "scrapers", label: "Custom scrapers", icon: SourceCodeIcon, title: "Custom scrapers", description: "Grime archives, clash databases, label shops — anything with a search page." },
+]
+
+const groupOf = (id: string): GroupId => (id.startsWith("scraper:") ? "scrapers" : (GROUPS.find((g) => g.ids?.includes(id))?.id ?? "catalogues"))
+
+const MAX_WEIGHT = 1.5
+const one = (v: number | readonly number[]) => (Array.isArray(v) ? v[0] : (v as number))
+
+function hostOf(url: string) {
+  try {
+    return new URL(url.replace(/\{[^}]+\}/g, "x")).host
+  } catch {
+    return url
+  }
+}
 
 function CandidateList({ items }: { items: Candidate[] }) {
   if (!items.length) return <div className="text-muted-foreground text-xs">No results.</div>
@@ -32,7 +86,7 @@ function CandidateList({ items }: { items: Candidate[] }) {
             {c.album ? ` · ${c.album}` : ""}
           </span>
           {c.url && (
-            <a href={c.url} target="_blank" rel="noreferrer noopener" className="text-muted-foreground hover:text-foreground">
+            <a href={c.url} target="_blank" rel="noreferrer noopener" className="text-muted-foreground hover:text-foreground" aria-label="Open result">
               <HugeiconsIcon icon={LinkSquare02Icon} strokeWidth={2} className="size-3.5" />
             </a>
           )}
@@ -42,16 +96,69 @@ function CandidateList({ items }: { items: Candidate[] }) {
   )
 }
 
-function SourceCard({ s, cfg, probe }: { s: SourceStatus; cfg: SourceConfig; probe: { artist: string; title: string } }) {
+/** Trust weight as a short bar, so sources compare at a glance down the list. */
+function WeightMeter({ value, dim }: { value: number; dim?: boolean }) {
+  return (
+    <span className="hidden shrink-0 items-center gap-2 sm:flex" title={`Trust weight ${value.toFixed(2)}`}>
+      <span className="bg-muted h-1.5 w-14 overflow-hidden rounded-full">
+        <span className={cn("block h-full rounded-full transition-[width] duration-200", dim ? "bg-muted-foreground/30" : "bg-foreground/60")} style={{ width: `${Math.min(100, (value / MAX_WEIGHT) * 100)}%` }} />
+      </span>
+      <span className="text-muted-foreground w-8 text-right font-mono text-xs tabular-nums">
+        <span className="sr-only">trust weight </span>
+        {value.toFixed(2)}
+      </span>
+    </span>
+  )
+}
+
+function Chevron() {
+  return <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} className="text-muted-foreground size-4 shrink-0 transition-transform duration-200 group-data-[panel-open]/trigger:rotate-180" />
+}
+
+type TestResult = { candidates?: Candidate[]; error?: string; ms: number }
+
+function TestOutput({ result }: { result: TestResult }) {
+  const n = result.candidates?.length ?? 0
+  return (
+    <div className="bg-muted/40 mt-3 space-y-2 rounded-2xl p-3">
+      <div className="text-muted-foreground flex justify-between text-xs">
+        <span>{result.error ? "Failed" : `${n} result${n === 1 ? "" : "s"}`}</span>
+        <span className="tabular-nums">{result.ms} ms</span>
+      </div>
+      {result.error ? <div className="text-rasta-red text-xs">{result.error}</div> : <CandidateList items={result.candidates ?? []} />}
+    </div>
+  )
+}
+
+/** One built-in source: a single line until opened, then its key, weight and a test. */
+function SourceRow({
+  s,
+  cfg,
+  keyFromEnv,
+  probe,
+  open,
+  onOpenChange,
+}: {
+  s: SourceStatus
+  cfg: SourceConfig
+  keyFromEnv: boolean
+  probe: { artist: string; title: string }
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
   const qc = useQueryClient()
   const [key, setKey] = useState(cfg.apiKey ?? "")
   const [secret, setSecret] = useState(cfg.apiSecret ?? "")
-  const [result, setResult] = useState<{ candidates?: Candidate[]; error?: string; ms: number } | null>(null)
+  const [weight, setWeight] = useState(cfg.weight)
+  const [result, setResult] = useState<TestResult | null>(null)
   const save = useMutation({
     mutationFn: (patch: Partial<SourceConfig>) => api.saveSettings({ sources: { [s.id]: { ...cfg, apiKey: key, apiSecret: secret, ...patch } } }),
     onSuccess: (next) => {
       qc.setQueryData(["settings"], next)
       void qc.invalidateQueries({ queryKey: ["sources"] })
+      // The server hands keys back masked; hold those so the form reads as saved.
+      setKey(next.sources[s.id]?.apiKey ?? "")
+      setSecret(next.sources[s.id]?.apiSecret ?? "")
     },
     onError: (e) => toast.error(e.message),
   })
@@ -61,68 +168,188 @@ function SourceCard({ s, cfg, probe }: { s: SourceStatus; cfg: SourceConfig; pro
     onError: (e) => setResult({ error: e.message, ms: 0 }),
   })
   const meta = s.meta
+  const needs = meta?.needs ?? []
+  const keysChanged = key !== (cfg.apiKey ?? "") || secret !== (cfg.apiSecret ?? "")
   return (
-    <Card size="sm" className={cn(!cfg.enabled && "opacity-70")}>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          {s.label}
-          {s.unavailable && cfg.enabled && (
-            <Badge variant="outline" className="text-rasta-gold font-normal">
-              {s.unavailable}
-            </Badge>
-          )}
-        </CardTitle>
-        <CardDescription>{meta?.about}</CardDescription>
-        <div className="col-start-2 row-span-2 row-start-1 self-start justify-self-end">
-          <Switch checked={cfg.enabled} onCheckedChange={(v) => save.mutate({ enabled: v })} aria-label={`Enable ${s.label}`} />
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {meta?.needs.includes("apiKey") && (
-          <Field>
-            <FieldLabel>{meta.keyLabel ?? "API key"}</FieldLabel>
-            <div className="flex gap-2">
-              <Input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder="not set" autoComplete="off" />
-              {meta.needs.includes("apiSecret") || (
-                <Button variant="secondary" onClick={() => save.mutate({})} disabled={save.isPending}>
-                  Save
-                </Button>
+    <Collapsible open={open} onOpenChange={onOpenChange}>
+      <div className="flex items-center gap-3 px-4 py-3">
+        <CollapsibleTrigger className="group/trigger flex min-w-0 flex-1 items-center gap-3 text-left outline-none">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={cn("font-medium", !cfg.enabled && "text-muted-foreground")}>{s.label}</span>
+              {keyFromEnv && <Badge variant="outline">key from env</Badge>}
+              {s.unavailable && cfg.enabled && (
+                <Badge variant="outline" className="text-rasta-gold font-normal">
+                  {s.unavailable}
+                </Badge>
               )}
             </div>
-          </Field>
-        )}
-        {meta?.needs.includes("apiSecret") && (
-          <Field>
-            <FieldLabel>{meta.secretLabel ?? "Secret"}</FieldLabel>
-            <div className="flex gap-2">
-              <Input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="not set" autoComplete="off" />
-              <Button variant="secondary" onClick={() => save.mutate({})} disabled={save.isPending}>
-                Save
+            <p className="text-muted-foreground truncate text-xs group-data-[panel-open]/trigger:whitespace-normal">{meta?.about}</p>
+          </div>
+          <WeightMeter value={weight} dim={!cfg.enabled} />
+          <Chevron />
+        </CollapsibleTrigger>
+        <Switch checked={cfg.enabled} onCheckedChange={(v) => save.mutate({ enabled: v })} size="sm" aria-label={`Use ${s.label}`} />
+      </div>
+      <CollapsibleContent className="h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-200 ease-(--ease-out) data-ending-style:h-0 data-starting-style:h-0">
+        <div className="px-4 pt-1 pb-4">
+          <SettingRows>
+            {needs.length > 0 && (
+              <SettingRow
+                stack
+                title={needs.length > 1 ? "Credentials" : (meta?.keyLabel ?? "API key")}
+                description={
+                  meta?.signup ? (
+                    <>
+                      Free to get:{" "}
+                      <a href={meta.signup} target="_blank" rel="noreferrer noopener" className="text-foreground underline underline-offset-2">
+                        {hostOf(meta.signup)}
+                      </a>
+                      {keyFromEnv && " — currently read from the environment."}
+                    </>
+                  ) : undefined
+                }
+              >
+                <form
+                  className="flex flex-col gap-2 sm:flex-row"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    save.mutate({}, { onSuccess: () => toast.success(`${s.label} key saved`) })
+                  }}
+                >
+                  <Input
+                    type="password"
+                    value={key}
+                    onChange={(e) => setKey(e.target.value)}
+                    placeholder={needs.length > 1 ? (meta?.keyLabel ?? "Key") : "not set"}
+                    aria-label={meta?.keyLabel ?? "API key"}
+                    autoComplete="off"
+                  />
+                  {needs.includes("apiSecret") && (
+                    <Input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={meta?.secretLabel ?? "Secret"} aria-label={meta?.secretLabel ?? "Secret"} autoComplete="off" />
+                  )}
+                  <Button type="submit" variant="secondary" disabled={save.isPending || !keysChanged}>
+                    Save
+                  </Button>
+                </form>
+              </SettingRow>
+            )}
+            <SettingRow title="Trust weight" description="How much a hit here counts towards the consensus. 1 is a solid source; above 1 is near-certain.">
+              <div className="flex w-full items-center gap-3 sm:w-64">
+                <Slider
+                  min={0}
+                  max={MAX_WEIGHT}
+                  step={0.05}
+                  value={[weight]}
+                  onValueChange={(v) => setWeight(one(v))}
+                  onValueCommitted={(v) => save.mutate({ weight: one(v) })}
+                  className="flex-1"
+                  aria-label={`${s.label} trust weight`}
+                />
+                <span className="w-10 text-right font-mono text-sm tabular-nums">{weight.toFixed(2)}</span>
+              </div>
+            </SettingRow>
+            <SettingRow
+              title="Try it"
+              description={
+                <>
+                  Searches for the test track, <span className="text-foreground">{[probe.artist, probe.title].filter(Boolean).join(" – ") || "nothing yet"}</span>.
+                </>
+              }
+            >
+              <Button size="sm" variant="outline" onClick={() => test.mutate()} disabled={test.isPending || !probe.title}>
+                {test.isPending ? <Spinner data-icon="inline-start" /> : <HugeiconsIcon icon={TestTube01Icon} strokeWidth={2} data-icon="inline-start" />}
+                Test
               </Button>
-            </div>
-          </Field>
-        )}
-        <Field>
-          <FieldLabel>
-            Trust weight <span className="text-muted-foreground font-mono">{cfg.weight.toFixed(2)}</span>
-          </FieldLabel>
-          <Slider min={0} max={1.5} step={0.05} value={[cfg.weight]} onValueCommitted={(v) => save.mutate({ weight: Array.isArray(v) ? v[0] : v })} />
-        </Field>
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={() => test.mutate()} disabled={test.isPending || !probe.title}>
-            {test.isPending ? <Spinner data-icon="inline-start" /> : <HugeiconsIcon icon={TestTube01Icon} strokeWidth={2} data-icon="inline-start" />}
-            Test
-          </Button>
-          {meta?.signup && (
-            <a href={meta.signup} target="_blank" rel="noreferrer noopener" className="text-muted-foreground hover:text-foreground text-xs underline underline-offset-2">
-              get a key
-            </a>
-          )}
-          {result && <span className="text-muted-foreground ml-auto text-xs">{result.ms} ms</span>}
+            </SettingRow>
+          </SettingRows>
+          {result && <TestOutput result={result} />}
         </div>
-        {result && (result.error ? <div className="text-rasta-red text-xs">{result.error}</div> : <CandidateList items={result.candidates ?? []} />)}
-      </CardContent>
-    </Card>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+/** One custom scraper: its switch, weight and actions; editing happens in the dialog. */
+function ScraperRow({
+  sc,
+  unavailable,
+  onToggle,
+  onEdit,
+  onDuplicate,
+  onDelete,
+}: {
+  sc: ScraperDefinition
+  unavailable: string | null
+  onToggle: (enabled: boolean) => void
+  onEdit: () => void
+  onDuplicate: () => void
+  onDelete: () => void
+}) {
+  return (
+    <div className="flex items-center gap-3 px-4 py-3">
+      <button type="button" onClick={onEdit} className="min-w-0 flex-1 text-left outline-none" aria-label={`Edit ${sc.name}`}>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={cn("font-medium", !sc.enabled && "text-muted-foreground")}>{sc.name}</span>
+          <Badge variant="outline" className="font-mono font-normal uppercase">
+            {sc.kind}
+          </Badge>
+          {unavailable ? (
+            <Badge variant="outline" className="text-rasta-gold font-normal">
+              {unavailable}
+            </Badge>
+          ) : (
+            !sc.verified && (
+              <Badge variant="outline" className="text-rasta-gold font-normal">
+                unverified
+              </Badge>
+            )
+          )}
+        </div>
+        <p className="text-muted-foreground truncate text-xs">
+          {sc.scene || sc.notes || "No notes"} · <span className="font-mono">{hostOf(sc.searchUrl)}</span>
+        </p>
+      </button>
+      <WeightMeter value={sc.weight} dim={!sc.enabled} />
+      <DropdownMenu>
+        <DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`${sc.name} actions`} />}>
+          <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={onEdit}>
+            <HugeiconsIcon icon={Edit02Icon} strokeWidth={2} />
+            Edit & test
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onDuplicate}>
+            <HugeiconsIcon icon={Copy01Icon} strokeWidth={2} />
+            Duplicate
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem variant="destructive" onClick={onDelete}>
+            <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Switch checked={sc.enabled} onCheckedChange={onToggle} size="sm" aria-label={`Use ${sc.name}`} />
+    </div>
+  )
+}
+
+/** The artist and title every Test button searches for. */
+function TestTrack({ value, onChange }: { value: { artist: string; title: string }; onChange: (v: { artist: string; title: string }) => void }) {
+  return (
+    <div className="bg-muted/40 space-y-2.5 rounded-2xl p-3">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <HugeiconsIcon icon={TestTube01Icon} strokeWidth={2} className="text-primary size-4" />
+        Test track
+      </div>
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-1">
+        <Input value={value.artist} onChange={(e) => onChange({ ...value, artist: e.target.value })} placeholder="Artist" aria-label="Test artist" />
+        <Input value={value.title} onChange={(e) => onChange({ ...value, title: e.target.value })} placeholder="Title" aria-label="Test title" />
+      </div>
+      <p className="text-muted-foreground text-xs text-pretty">What each source's Test searches for. Answers are cached for a week to go easy on rate limits.</p>
+    </div>
   )
 }
 
@@ -201,7 +428,7 @@ function ScraperDialog({ value, onClose, onSave }: { value: ScraperDefinition | 
             <FieldLabel>
               Trust weight <span className="text-muted-foreground font-mono">{d.weight.toFixed(2)}</span>
             </FieldLabel>
-            <Slider min={0} max={1.5} step={0.05} value={[d.weight]} onValueChange={(v) => setD({ ...d, weight: Array.isArray(v) ? v[0] : v })} />
+            <Slider min={0} max={MAX_WEIGHT} step={0.05} value={[d.weight]} onValueChange={(v) => setD({ ...d, weight: one(v) })} aria-label="Trust weight" />
             <FieldDescription>How much a hit here counts towards consensus.</FieldDescription>
           </Field>
         </div>
@@ -236,127 +463,158 @@ function ScraperDialog({ value, onClose, onSave }: { value: ScraperDefinition | 
   )
 }
 
+function SourceList({ items, settings, probe }: { items: SourceStatus[]; settings: PublicSettings; probe: { artist: string; title: string } }) {
+  const [openId, setOpenId] = useState<string | null>(null)
+  return (
+    <div className="divide-border/70 divide-y overflow-hidden rounded-2xl border">
+      {items.map((s) => (
+        <SourceRow
+          key={s.id}
+          s={s}
+          cfg={settings.sources[s.id] ?? { enabled: false, weight: 0.5 }}
+          keyFromEnv={settings.secretsFromEnv.includes(`source:${s.id}`)}
+          probe={probe}
+          open={openId === s.id}
+          onOpenChange={(o) => setOpenId(o ? s.id : null)}
+        />
+      ))}
+    </div>
+  )
+}
+
 export default function SourcesPage() {
   const qc = useQueryClient()
+  const location = useLocation()
+  const navigate = useNavigate()
   const { data: settings, error: settingsError, refetch: refetchSettings } = useQuery({ queryKey: ["settings"], queryFn: api.settings })
   const { data: sources, error: sourcesError, refetch: refetchSources } = useQuery({ queryKey: ["sources"], queryFn: api.sources })
   const loadError = (!settings && settingsError) || (!sources && sourcesError)
   const [probe, setProbe] = useState({ artist: "Buju Banton", title: "Murderer" })
   const [editing, setEditing] = useState<ScraperDefinition | null>(null)
 
+  const hash = location.hash.slice(1)
+  const section: GroupId = GROUPS.find((g) => g.id === hash)?.id ?? "catalogues"
+  const go = (id: string) => {
+    navigate({ hash: id }, { replace: true })
+    const top = document.getElementById("sources-top")
+    if (top && top.getBoundingClientRect().top < 0) top.scrollIntoView({ block: "start" })
+  }
+
   const saveScrapers = useMutation({
     mutationFn: (scrapers: ScraperDefinition[]) => api.saveSettings({ scrapers }),
     onSuccess: (next) => {
       qc.setQueryData(["settings"], next)
       void qc.invalidateQueries({ queryKey: ["sources"] })
-      toast("Scrapers saved")
     },
+    onError: (e) => toast.error(e.message),
   })
   const clearCache = useMutation({ mutationFn: api.clearCache, onSuccess: (r) => toast(`Cleared ${r.cleared} cached responses`) })
 
-  const builtIn = sources?.filter((s) => !s.id.startsWith("scraper:")) ?? []
   const scrapers = settings?.scrapers ?? []
+  const byGroup = (id: GroupId) => sources?.filter((s) => groupOf(s.id) === id) ?? []
+  const navItems: SectionItem[] = GROUPS.map((g) => {
+    const items = byGroup(g.id)
+    const blocked = items.some((s) => s.enabled && s.unavailable)
+    return {
+      id: g.id,
+      label: g.label,
+      icon: g.icon,
+      meta: sources ? `${items.filter((s) => s.enabled).length}/${items.length}` : undefined,
+      attention: blocked ? "A source that's switched on can't run yet" : undefined,
+    }
+  })
+  const group = GROUPS.find((g) => g.id === section)!
+  const enabledIn = byGroup(section).filter((s) => s.enabled).length
+
+  const deleteScraper = (sc: ScraperDefinition) => {
+    const before = scrapers
+    saveScrapers.mutate(
+      scrapers.filter((x) => x.id !== sc.id),
+      { onSuccess: () => toast(`Deleted “${sc.name}”`, { action: { label: "Undo", onClick: () => saveScrapers.mutate(before) } }) }
+    )
+  }
 
   return (
     <>
       <PageHeader
         eyebrow="The scourer"
         title="Sources"
-        description="Where Dubplate looks for confirmation. Hits from different sources that agree push confidence up; trusted sources count for more."
+        description="Where Dubplate looks for confirmation. Sources that agree push confidence up; trusted ones count for more."
         actions={
-          <Button variant="outline" onClick={() => clearCache.mutate()}>
+          <Button variant="outline" onClick={() => clearCache.mutate()} disabled={clearCache.isPending}>
             Clear response cache
           </Button>
         }
       />
-      <Card size="sm" className="mb-4">
-        <CardContent className="flex flex-wrap items-end gap-3">
-          <Field className="max-w-56">
-            <FieldLabel>Test artist</FieldLabel>
-            <Input value={probe.artist} onChange={(e) => setProbe({ ...probe, artist: e.target.value })} />
-          </Field>
-          <Field className="max-w-56">
-            <FieldLabel>Test title</FieldLabel>
-            <Input value={probe.title} onChange={(e) => setProbe({ ...probe, title: e.target.value })} />
-          </Field>
-          <p className="text-muted-foreground max-w-sm pb-2 text-xs">Used by each source's Test button. Responses are cached for a week to stay polite with rate limits.</p>
-        </CardContent>
-      </Card>
-
-      {loadError && (
+      {loadError ? (
         <QueryError
-          className="mb-4"
           error={loadError}
           onRetry={() => {
             void refetchSettings()
             void refetchSources()
           }}
         />
-      )}
-      <div className={cn("grid gap-3 md:grid-cols-2 xl:grid-cols-3", loadError && "hidden")}>
-        {settings && sources
-          ? builtIn.map((s) => <SourceCard key={s.id} s={s} cfg={settings.sources[s.id] ?? { enabled: false, weight: 0.5 }} probe={probe} />)
-          : Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-56 rounded-4xl" />)}
-      </div>
+      ) : (
+        <div id="sources-top" className="grid scroll-mt-20 grid-cols-[minmax(0,1fr)] gap-6 pb-12 lg:grid-cols-[13rem_minmax(0,1fr)]">
+          <div className="space-y-4 lg:sticky lg:top-20 lg:self-start">
+            <SectionNav items={navItems} value={section} onChange={go} label="Source groups" />
+            <TestTrack value={probe} onChange={setProbe} />
+          </div>
 
-      <div className="mt-8 mb-3 flex items-end justify-between gap-2">
-        <div>
-          <h2 className="text-xl font-extrabold">Custom scrapers</h2>
-          <p className="text-muted-foreground text-sm">Grime archives, clash databases, label shops — anything with a search page.</p>
-        </div>
-        <Button onClick={() => setEditing({ ...BLANK_SCRAPER })}>
-          <HugeiconsIcon icon={Add01Icon} strokeWidth={2} data-icon="inline-start" />
-          New scraper
-        </Button>
-      </div>
-      <div className="grid gap-3 md:grid-cols-2">
-        {scrapers.map((sc) => (
-          <Card key={sc.id} size="sm" className={cn(!sc.enabled && "opacity-75")}>
-            <CardHeader>
-              <CardTitle className="flex flex-wrap items-center gap-2">
-                {sc.name}
-                <Badge variant="outline">{sc.kind}</Badge>
-                {!sc.verified && (
-                  <Badge variant="outline" className="text-rasta-gold">
-                    unverified
-                  </Badge>
+          <div key={section} className="animate-in fade-in slide-in-from-bottom-1 min-w-0 duration-200">
+            <Card>
+              <CardHeader>
+                <CardTitle>{group.title}</CardTitle>
+                <CardDescription>
+                  {group.description}
+                  {section === "scrapers" && " Presets ship switched off and unverified — test one before trusting it."}
+                </CardDescription>
+                <CardAction>
+                  {section === "scrapers" ? (
+                    <Button size="sm" onClick={() => setEditing({ ...BLANK_SCRAPER })}>
+                      <HugeiconsIcon icon={Add01Icon} strokeWidth={2} data-icon="inline-start" />
+                      New scraper
+                    </Button>
+                  ) : (
+                    sources && (
+                      <span className="text-muted-foreground text-xs tabular-nums">
+                        {enabledIn} of {byGroup(section).length} on
+                      </span>
+                    )
+                  )}
+                </CardAction>
+              </CardHeader>
+              <CardContent>
+                {!settings || !sources ? (
+                  <div className="space-y-2">
+                    {Array.from({ length: 4 }, (_, i) => (
+                      <Skeleton key={i} className="h-14 rounded-2xl" />
+                    ))}
+                  </div>
+                ) : section !== "scrapers" ? (
+                  <SourceList key={section} items={byGroup(section)} settings={settings} probe={probe} />
+                ) : scrapers.length ? (
+                  <div className="divide-border/70 divide-y overflow-hidden rounded-2xl border">
+                    {scrapers.map((sc) => (
+                      <ScraperRow
+                        key={sc.id}
+                        sc={sc}
+                        unavailable={sc.enabled ? (sources.find((s) => s.id === `scraper:${sc.id}`)?.unavailable ?? null) : null}
+                        onToggle={(v) => saveScrapers.mutate(scrapers.map((x) => (x.id === sc.id ? { ...x, enabled: v } : x)))}
+                        onEdit={() => setEditing(sc)}
+                        onDuplicate={() => setEditing({ ...sc, id: "", name: `${sc.name} copy`, enabled: false })}
+                        onDelete={() => deleteScraper(sc)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-muted-foreground rounded-2xl border border-dashed p-6 text-center text-sm">No custom scrapers yet. Add one for any site with a search page.</div>
                 )}
-              </CardTitle>
-              <CardDescription>{sc.scene || sc.notes}</CardDescription>
-              <div className="col-start-2 row-span-2 row-start-1 self-start justify-self-end">
-                <Switch
-                  checked={sc.enabled}
-                  onCheckedChange={(v) => saveScrapers.mutate(scrapers.map((x) => (x.id === sc.id ? { ...x, enabled: v } : x)))}
-                  aria-label={`Enable ${sc.name}`}
-                />
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="text-muted-foreground truncate font-mono text-[11px]">{sc.searchUrl}</div>
-              <div className="flex gap-1.5">
-                <Button size="sm" variant="outline" onClick={() => setEditing(sc)}>
-                  <HugeiconsIcon icon={Edit02Icon} strokeWidth={2} data-icon="inline-start" />
-                  Edit & test
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setEditing({ ...sc, id: "", name: `${sc.name} copy`, enabled: false })}>
-                  <HugeiconsIcon icon={Copy01Icon} strokeWidth={2} data-icon="inline-start" />
-                  Duplicate
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    if (confirm(`Delete scraper "${sc.name}"?`)) saveScrapers.mutate(scrapers.filter((x) => x.id !== sc.id))
-                  }}
-                >
-                  <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} data-icon="inline-start" />
-                  Delete
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      )}
       {editing && (
         <ScraperDialog
           key={editing.id || "new"}
@@ -364,7 +622,7 @@ export default function SourcesPage() {
           onClose={() => setEditing(null)}
           onSave={(def) => {
             const exists = scrapers.some((x) => x.id === def.id)
-            saveScrapers.mutate(exists ? scrapers.map((x) => (x.id === def.id ? def : x)) : [...scrapers, def])
+            saveScrapers.mutate(exists ? scrapers.map((x) => (x.id === def.id ? def : x)) : [...scrapers, def], { onSuccess: () => toast.success(`Saved “${def.name}”`) })
             setEditing(null)
           }}
         />

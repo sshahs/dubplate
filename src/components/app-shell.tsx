@@ -18,6 +18,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useState, ViewTransition, type MouseEvent, type ReactNode } from "react"
 import { flushSync } from "react-dom"
 import { NavLink, useLocation } from "react-router"
+import type { Stats } from "@shared/types"
 import { CommandPalette } from "@/components/command-palette"
 import { DubplateMark, RastaStripe } from "@/components/brand"
 import { JobDock } from "@/components/job-dock"
@@ -50,7 +51,7 @@ import { cn } from "@/lib/utils"
 export const NAV = [
   { to: "/", label: "Dashboard", icon: DashboardSquare01Icon, group: "Selector" },
   { to: "/libraries", label: "Libraries", icon: FolderLibraryIcon, group: "Selector" },
-  { to: "/tracks", label: "Tracks", icon: MusicNote03Icon, group: "Selector" },
+  { to: "/tracks", label: "Tracks", icon: MusicNote03Icon, group: "Selector", badge: "pending" as const },
   { to: "/review", label: "Review", icon: CheckListIcon, group: "Selector", badge: "review" as const },
   { to: "/execute", label: "Cut & Tag", icon: Scissor01Icon, group: "Selector", badge: "approved" as const },
   { to: "/untangler", label: "Untangler", icon: AiMagicIcon, group: "Tools" },
@@ -58,6 +59,18 @@ export const NAV = [
   { to: "/duplicates", label: "Duplicates", icon: Copy01Icon, group: "Tools" },
   { to: "/settings", label: "Settings", icon: Settings02Icon, group: "Tools" },
 ]
+
+type BadgeKind = "pending" | "review" | "approved"
+
+/** Sidebar counters: what each one counts, how it reads to a screen reader, and its colour. */
+const BADGES: Record<BadgeKind, { count: (s: Stats) => number; says: string; text: string; dot: string }> = {
+  // Everything still waiting for your sign-off, including the confident matches.
+  pending: { count: (s) => s.byStatus.matched + s.byStatus.review + s.byStatus.conflict, says: "waiting for approval", text: "text-rasta-green", dot: "bg-rasta-green" },
+  review: { count: (s) => s.byStatus.review + s.byStatus.conflict, says: "need a listen", text: "text-rasta-gold", dot: "bg-rasta-gold" },
+  approved: { count: (s) => s.byStatus.approved, says: "approved, ready to cut", text: "text-primary", dot: "bg-primary" },
+}
+
+const compactCount = (n: number) => (n >= 10_000 ? `${Math.floor(n / 1000)}k` : String(n))
 
 function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme()
@@ -101,10 +114,7 @@ function AppSidebar() {
   const location = useLocation()
   const { isMobile, setOpenMobile } = useSidebar()
   const groups = [...new Set(NAV.map((n) => n.group))]
-  const badgeFor = (b?: "review" | "approved") => {
-    if (!b || !stats) return 0
-    return b === "review" ? stats.byStatus.review + stats.byStatus.conflict : stats.byStatus.approved
-  }
+  const badgeFor = (b?: BadgeKind) => (b && stats ? BADGES[b].count(stats) : 0)
   return (
     <Sidebar variant="inset" collapsible="icon">
       <SidebarHeader>
@@ -149,15 +159,16 @@ function AppSidebar() {
                       {count > 0 && (
                         <>
                           {/* Pops in when work appears; no re-pop on every tick so a running job stays calm. */}
-                          <SidebarMenuBadge className={cn("animate-in zoom-in-50 fade-in tabular-nums duration-300", n.badge === "review" ? "text-rasta-gold" : "text-primary")}>
-                            {count}
+                          <SidebarMenuBadge className={cn("animate-in zoom-in-50 fade-in tabular-nums duration-300", BADGES[n.badge!].text)}>
+                            {compactCount(count)}
+                            <span className="sr-only"> {BADGES[n.badge!].says}</span>
                           </SidebarMenuBadge>
                           {/* Collapsed rail: the count becomes a dot on the icon. */}
                           <span
                             aria-hidden
                             className={cn(
                               "pointer-events-none absolute top-1.5 left-6 size-1.5 rounded-full opacity-0 transition-opacity duration-200 group-data-[collapsible=icon]:opacity-100 group-data-[collapsible=icon]:delay-100",
-                              n.badge === "review" ? "bg-rasta-gold" : "bg-primary"
+                              BADGES[n.badge!].dot
                             )}
                           />
                         </>

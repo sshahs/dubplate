@@ -7,6 +7,7 @@ function Slider({
   value,
   min = 0,
   max = 100,
+  "aria-label": ariaLabel,
   ...props
 }: SliderPrimitive.Root.Props) {
   const _values = Array.isArray(value)
@@ -40,6 +41,7 @@ function Slider({
           <SliderPrimitive.Thumb
             data-slot="slider-thumb"
             key={index}
+            aria-label={ariaLabel}
             className="ring-black/10 not-dark:bg-clip-padding ring-1 h-4 w-6 rounded-full bg-white shadow-md transition-[color,box-shadow,background-color] hover:ring-4 hover:ring-ring/30 focus-visible:ring-4 focus-visible:ring-ring/30 focus-visible:outline-hidden data-vertical:h-6 data-vertical:w-4 block shrink-0 select-none disabled:pointer-events-none disabled:opacity-50"
           />
         ))}
