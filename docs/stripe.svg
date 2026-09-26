@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 8" width="1200" height="8" preserveAspectRatio="none" role="img" aria-label="red, gold and green divider">
+  <rect x="0" y="0" width="400" height="8" fill="#d62f2f" />
+  <rect x="400" y="0" width="400" height="8" fill="#f4c20d" />
+  <rect x="800" y="0" width="400" height="8" fill="#1f9d55" />
+</svg>

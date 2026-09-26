@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 420" width="1280" height="420" role="img" aria-labelledby="title desc">
+  <title id="title">Dubplate</title>
+  <desc id="desc">A spinning dubplate with a red, gold and green label next to the Dubplate wordmark: AI-assisted tagging for sound-system crates.</desc>
+  <defs>
+    <style>
+      .spin { transform-origin: 250px 214px; animation: spin 3.2s linear infinite; }
+      .vu rect { transform-box: fill-box; transform-origin: bottom; animation: vu 0.9s ease-in-out infinite alternate; }
+      .vu rect:nth-child(2n) { animation-duration: 0.7s; }
+      .vu rect:nth-child(3n) { animation-duration: 1.1s; }
+      .vu rect:nth-child(5n) { animation-duration: 0.8s; animation-delay: -0.3s; }
+      .vu rect:nth-child(7n) { animation-delay: -0.5s; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @keyframes vu { from { transform: scaleY(0.2); } to { transform: scaleY(1); } }
+      @media (prefers-reduced-motion: reduce) { .spin, .vu rect { animation: none; } }
+      .word { font-family: "Arial Black", "Helvetica Neue", Helvetica, Arial, sans-serif; font-weight: 900; }
+      .sans { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; }
+      .mono { font-family: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace; }
+    </style>
+    <pattern id="grille" width="14" height="14" patternUnits="userSpaceOnUse">
+      <circle cx="7" cy="7" r="1.3" fill="#ffffff" fill-opacity="0.05" />
+    </pattern>
+    <radialGradient id="glowGreen" cx="1" cy="0" r="0.8">
+      <stop offset="0" stop-color="#1f9d55" stop-opacity="0.35" />
+      <stop offset="1" stop-color="#1f9d55" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="glowRed" cx="0" cy="1" r="0.7">
+      <stop offset="0" stop-color="#d62f2f" stop-opacity="0.3" />
+      <stop offset="1" stop-color="#d62f2f" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="rasta" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0" stop-color="#e5383b" />
+      <stop offset="0.5" stop-color="#f4c20d" />
+      <stop offset="1" stop-color="#2bb566" />
+    </linearGradient>
+    <radialGradient id="vinylShine" cx="0.35" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.12" />
+      <stop offset="0.4" stop-color="#ffffff" stop-opacity="0" />
+    </radialGradient>
+    <clipPath id="label"><circle cx="250" cy="214" r="62" /></clipPath>
+    <clipPath id="frame"><rect width="1280" height="420" rx="28" /></clipPath>
+  </defs>
+
+  <g clip-path="url(#frame)">
+    <rect width="1280" height="420" fill="#16110e" />
+    <rect width="1280" height="420" fill="url(#grille)" />
+    <rect width="1280" height="420" fill="url(#glowGreen)" />
+    <rect width="1280" height="420" fill="url(#glowRed)" />
+
+    <!-- tricolour bands -->
+    <rect x="0" y="0" width="427" height="10" fill="#d62f2f" />
+    <rect x="427" y="0" width="426" height="10" fill="#f4c20d" />
+    <rect x="853" y="0" width="427" height="10" fill="#1f9d55" />
+    <rect x="0" y="410" width="427" height="10" fill="#d62f2f" />
+    <rect x="427" y="410" width="426" height="10" fill="#f4c20d" />
+    <rect x="853" y="410" width="427" height="10" fill="#1f9d55" />
+
+    <!-- the plate -->
+    <circle cx="250" cy="220" r="168" fill="#000" fill-opacity="0.45" />
+    <g class="spin">
+      <circle cx="250" cy="214" r="166" fill="#0d0b0a" />
+      <g fill="none" stroke="#ffffff" stroke-opacity="0.07">
+        <circle cx="250" cy="214" r="156" />
+        <circle cx="250" cy="214" r="146" />
+        <circle cx="250" cy="214" r="137" />
+        <circle cx="250" cy="214" r="128" />
+        <circle cx="250" cy="214" r="118" />
+        <circle cx="250" cy="214" r="109" />
+        <circle cx="250" cy="214" r="100" />
+        <circle cx="250" cy="214" r="91" />
+        <circle cx="250" cy="214" r="82" />
+        <circle cx="250" cy="214" r="74" />
+      </g>
+      <g clip-path="url(#label)">
+        <rect x="186" y="150" width="128" height="42" fill="#d62f2f" />
+        <rect x="186" y="192" width="128" height="43" fill="#f4c20d" />
+        <rect x="186" y="235" width="128" height="42" fill="#1f9d55" />
+      </g>
+      <text x="250" y="178" text-anchor="middle" class="word" font-size="12" fill="#fff" letter-spacing="3">DUBPLATE</text>
+      <text x="250" y="258" text-anchor="middle" class="sans" font-size="9" font-weight="700" fill="#fff" letter-spacing="2">SPECIAL · 33⅓</text>
+      <circle cx="250" cy="214" r="5" fill="#0d0b0a" />
+    </g>
+    <circle cx="250" cy="214" r="166" fill="url(#vinylShine)" />
+
+    <!-- tonearm -->
+    <g>
+      <circle cx="430" cy="62" r="16" fill="#2a2320" stroke="#4a3f39" stroke-width="2" />
+      <circle cx="430" cy="62" r="6" fill="#8a7d74" />
+      <path d="M430 62 L404 250 L378 288" fill="none" stroke="#b9aca2" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
+      <rect x="360" y="280" width="30" height="16" rx="3" fill="#d9cdc3" transform="rotate(35 375 288)" />
+    </g>
+
+    <!-- wordmark -->
+    <text x="520" y="158" class="sans" font-size="18" font-weight="700" letter-spacing="7" fill="#f4c20d">PULL UP · SELECTOR</text>
+    <text x="514" y="262" class="word" font-size="104" letter-spacing="-2" fill="url(#rasta)">Dubplate</text>
+    <text x="520" y="306" class="sans" font-size="25" fill="#f3ead9">AI-assisted tagging for sound-system crates.</text>
+    <text x="520" y="344" class="mono" font-size="16" fill="#a89b8f">12_buju_vs_beenie_live_93_dubplate.mp3  →  Artist - Title</text>
+
+    <!-- VU meter -->
+    <g class="vu" transform="translate(1062 172)">
+      <rect x="0" y="0" width="12" height="96" rx="3" fill="#2bb566" />
+      <rect x="18" y="0" width="12" height="96" rx="3" fill="#2bb566" />
+      <rect x="36" y="0" width="12" height="96" rx="3" fill="#2bb566" />
+      <rect x="54" y="0" width="12" height="96" rx="3" fill="#f4c20d" />
+      <rect x="72" y="0" width="12" height="96" rx="3" fill="#f4c20d" />
+      <rect x="90" y="0" width="12" height="96" rx="3" fill="#f4c20d" />
+      <rect x="108" y="0" width="12" height="96" rx="3" fill="#e5383b" />
+      <rect x="126" y="0" width="12" height="96" rx="3" fill="#e5383b" />
+    </g>
+    <text x="1131" y="300" text-anchor="middle" class="mono" font-size="12" letter-spacing="3" fill="#6f635a">SOUND SYSTEM</text>
+  </g>
+</svg>
