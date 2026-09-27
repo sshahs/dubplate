@@ -8,8 +8,10 @@ import type {
   Correction,
   ExistingTags,
   Library,
+  LibrarySettings,
   Operation,
   OperationBatch,
+  SetAside,
   Stats,
   Track,
   TrackStatus,
@@ -19,6 +21,7 @@ import { parseKey } from "../shared/keys"
 import { TRACK_STATUSES } from "../shared/types"
 import { normArtist } from "./core/normalize"
 import { getDb, parseJson } from "./db"
+import { cleanLibrarySettings, forgetLibrarySettings } from "./library-settings"
 import { watchState } from "./watch-state"
 
 type Row = Record<string, unknown>
@@ -36,6 +39,7 @@ function rowToLibrary(r: Row): Library {
     exists: fs.existsSync(r.path as string),
     watch: !!r.watch,
     watchState: r.watch ? watchState(r.id as number) : "off",
+    settings: cleanLibrarySettings(parseJson(r.settings_json, {})),
   }
 }
 
@@ -48,18 +52,27 @@ export function getLibrary(id: number): Library | null {
   return r ? rowToLibrary(r) : null
 }
 
-export function addLibrary(p: string, name: string): Library {
-  const r = getDb().prepare("INSERT INTO libraries (path, name) VALUES (?, ?) RETURNING *").get(p, name) as Row
+export function addLibrary(p: string, name: string, extra: { watch?: boolean; settings?: LibrarySettings } = {}): Library {
+  const r = getDb()
+    .prepare("INSERT INTO libraries (path, name, watch, settings_json) VALUES (?, ?, ?, ?) RETURNING *")
+    .get(p, name, extra.watch ? 1 : 0, extra.settings && Object.keys(extra.settings).length ? JSON.stringify(cleanLibrarySettings(extra.settings)) : null) as Row
+  forgetLibrarySettings()
   return rowToLibrary(r)
 }
 
-export function updateLibrary(id: number, patch: { name?: string; watch?: boolean }) {
+export function updateLibrary(id: number, patch: { name?: string; watch?: boolean; settings?: LibrarySettings }) {
   if (patch.name !== undefined) getDb().prepare("UPDATE libraries SET name = ? WHERE id = ?").run(patch.name, id)
   if (patch.watch !== undefined) getDb().prepare("UPDATE libraries SET watch = ? WHERE id = ?").run(patch.watch ? 1 : 0, id)
+  if (patch.settings !== undefined) {
+    const clean = cleanLibrarySettings(patch.settings)
+    getDb().prepare("UPDATE libraries SET settings_json = ? WHERE id = ?").run(Object.keys(clean).length ? JSON.stringify(clean) : null, id)
+    forgetLibrarySettings()
+  }
 }
 
 export function removeLibrary(id: number) {
   getDb().prepare("DELETE FROM libraries WHERE id = ?").run(id)
+  forgetLibrarySettings()
 }
 
 export function touchLibraryScan(id: number) {
@@ -102,6 +115,7 @@ export function rowToTrack(r: Row): Track {
     analysis: parseJson(r.analysis_json, null),
     art: parseJson<ArtRef | null>(r.art_json, null),
     artFound: parseJson<ArtRef | null>(r.art_found_json, null),
+    aside: parseJson<SetAside | null>(r.aside_json, null),
     createdAt: r.created_at as string,
     updatedAt: r.updated_at as string,
   }
@@ -252,7 +266,7 @@ export function queryTrackIds(q: TrackQuery): number[] {
   return (getDb().prepare(`SELECT id FROM tracks ${sql} ORDER BY id`).all(...params) as { id: number }[]).map((r) => r.id)
 }
 
-const JSON_COLS = new Set(["tags", "heuristic", "ai", "candidates", "decision", "final", "analysis", "art", "artFound"])
+const JSON_COLS = new Set(["tags", "heuristic", "ai", "candidates", "decision", "final", "analysis", "art", "artFound", "aside"])
 /** Kept in track_data rather than on the track row. */
 const DATA_COLS: Record<string, string> = {
   heuristic: "heuristic_json",
@@ -284,6 +298,7 @@ const COLS: Record<string, string> = {
   analysis: "analysis_json",
   art: "art_json",
   artFound: "art_found_json",
+  aside: "aside_json",
 }
 
 export function updateTrack(id: number, patch: Partial<Track>) {
@@ -318,6 +333,17 @@ export function updateTrack(id: number, patch: Partial<Track>) {
   }
   sets.push("updated_at = datetime('now')")
   getDb().prepare(`UPDATE tracks SET ${sets.join(", ")} WHERE id = ?`).run(...params, id)
+}
+
+/** How many of these tracks are in each status. */
+export function statusCounts(ids: number[]): Record<TrackStatus, number> {
+  const out = Object.fromEntries(TRACK_STATUSES.map((s) => [s, 0])) as Record<TrackStatus, number>
+  const stmt = getDb().prepare("SELECT status FROM tracks WHERE id = ?")
+  for (const id of ids) {
+    const r = stmt.get(id) as { status: TrackStatus } | undefined
+    if (r) out[r.status]++
+  }
+  return out
 }
 
 export function setStatus(ids: number[], status: TrackStatus) {
@@ -402,14 +428,20 @@ function rowToOperation(r: Row): Operation {
     error: (r.error as string) ?? null,
     createdAt: r.created_at as string,
     revertedAt: (r.reverted_at as string) ?? null,
+    statusBefore: (r.status_before as TrackStatus) ?? null,
+    createdDirs: parseJson<string[]>(r.created_dirs_json, []),
+    batchLabel: (r.batch_label as string) ?? null,
   }
 }
 
-export function insertOperation(op: Omit<Operation, "id" | "createdAt" | "revertedAt">): number {
+export type NewOperation = Omit<Operation, "id" | "createdAt" | "revertedAt" | "statusBefore" | "createdDirs" | "batchLabel"> &
+  Partial<Pick<Operation, "statusBefore" | "createdDirs" | "batchLabel">>
+
+export function insertOperation(op: NewOperation): number {
   const r = getDb()
     .prepare(
-      `INSERT INTO operations (batch_id, track_id, kind, from_path, to_path, tags_before_json, tags_after_json, status, error)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
+      `INSERT INTO operations (batch_id, track_id, kind, from_path, to_path, tags_before_json, tags_after_json, status, error, status_before, created_dirs_json, batch_label)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
     )
     .get(
       op.batchId,
@@ -420,7 +452,10 @@ export function insertOperation(op: Omit<Operation, "id" | "createdAt" | "revert
       op.tagsBefore ? JSON.stringify(op.tagsBefore) : null,
       op.tagsAfter ? JSON.stringify(op.tagsAfter) : null,
       op.status,
-      op.error
+      op.error,
+      op.statusBefore ?? null,
+      op.createdDirs?.length ? JSON.stringify(op.createdDirs) : null,
+      op.batchLabel ?? null
     ) as { id: number }
   return r.id
 }
@@ -441,7 +476,7 @@ export function listBatches(limit = 50): OperationBatch[] {
   return (
     getDb()
       .prepare(
-        `SELECT batch_id, MIN(created_at) AS created_at, COUNT(*) AS count,
+        `SELECT batch_id, MIN(created_at) AS created_at, COUNT(*) AS count, MAX(batch_label) AS label,
           SUM(status = 'done') AS done, SUM(status = 'failed') AS failed,
           SUM(status = 'reverted') AS reverted, SUM(status = 'dry-run') AS dry
          FROM operations GROUP BY batch_id ORDER BY MIN(id) DESC LIMIT ?`
@@ -449,6 +484,7 @@ export function listBatches(limit = 50): OperationBatch[] {
       .all(limit) as Row[]
   ).map((r) => ({
     batchId: r.batch_id as string,
+    label: (r.label as string) || "Cut",
     createdAt: r.created_at as string,
     count: r.count as number,
     done: r.done as number,
@@ -498,22 +534,7 @@ export function stats(): Stats {
   }
 }
 
-export function duplicateGroups(): { key: string; kind: "hash" | "name"; tracks: TrackSummary[] }[] {
-  const db = getDb()
-  const out: { key: string; kind: "hash" | "name"; tracks: TrackSummary[] }[] = []
-  const hashes = db.prepare("SELECT hash FROM tracks WHERE hash IS NOT NULL AND missing = 0 GROUP BY hash HAVING COUNT(*) > 1 LIMIT 200").all() as { hash: string }[]
-  for (const { hash } of hashes) {
-    const rows = db.prepare(`${SUMMARY} WHERE t.hash = ? AND t.missing = 0 LIMIT 50`).all(hash) as Row[]
-    out.push({ key: hash, kind: "hash", tracks: rows.map(rowToSummary) })
-  }
-  const names = db
-    .prepare("SELECT proposed_name FROM tracks WHERE proposed_name IS NOT NULL AND missing = 0 GROUP BY lower(proposed_name) HAVING COUNT(*) > 1 LIMIT 200")
-    .all() as { proposed_name: string }[]
-  for (const { proposed_name } of names) {
-    const rows = db.prepare(`${SUMMARY} WHERE lower(t.proposed_name) = lower(?) AND t.missing = 0 LIMIT 50`).all(proposed_name) as Row[]
-    const tracks = rows.map(rowToSummary)
-    // skip groups that are already covered by an identical-hash group
-    if (new Set(tracks.map((t) => t.hash)).size > 1) out.push({ key: proposed_name, kind: "name", tracks })
-  }
-  return out
+/** List rows matching a WHERE clause over tracks `t` (for reports like duplicates). */
+export function summariesWhere(where: string, params: SQLInputValue[]): TrackSummary[] {
+  return (getDb().prepare(`${SUMMARY} WHERE ${where}`).all(...params) as Row[]).map(rowToSummary)
 }

@@ -13,6 +13,19 @@ export default defineConfig({
       '@core': path.resolve(import.meta.dirname, './server/core'),
     },
   },
+  build: {
+    rolldownOptions: {
+      output: {
+        // Libraries needed at startup get their own chunks, so they stay cached between app updates.
+        codeSplitting: {
+          groups: [
+            { name: 'react', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/, tags: ['$initial'], priority: 2 },
+            { name: 'vendor', test: /node_modules[\\/]/, tags: ['$initial'], priority: 1 },
+          ],
+        },
+      },
+    },
+  },
   server: {
     proxy: {
       '/api': { target: 'http://127.0.0.1:4455', changeOrigin: false },

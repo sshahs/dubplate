@@ -1,31 +1,25 @@
 // Verification & execution: builds a rename/tag plan, applies it with a
-// journal entry per file, and can rewind any batch.
+// journal entry per file, and can rewind any batch - cuts, folder moves and
+// duplicates set aside alike.
 
 import { randomUUID } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
 import { formatKey } from "../shared/keys"
-import type { ExistingTags, FinalMeta, Operation, PlanItem, Settings, Track } from "../shared/types"
+import type { ExistingTags, Library, Operation, PlanItem, Settings, Track } from "../shared/types"
 import { artToEmbed, describeArt, cachedArt } from "./art"
-import { decisionToFinal, renderTemplate, tagDiff, tagsFor, type TagExtras } from "./core/naming"
+import { idsFor } from "./core/ids"
+import { tagDiff, tagsFor, type TagExtras } from "./core/naming"
+import { ensureDir, followableSidecars, isInside, moveFile, removeCreatedDirs, removeEmptyDirs, sameFile } from "./fsops"
 import type { JobContext } from "./jobs"
-import { getTrack, insertOperation, listOperations, markOperationReverted, updateTrack } from "./repo"
+import { settingsForLibrary } from "./library-settings"
+import { metaFor, proposedFilename, targetFolder } from "./placement"
+import { getLibrary, getTrack, insertOperation, listLibraries, listOperations, markOperationReverted, updateTrack } from "./repo"
 import { readManagedTags, writeTags } from "./tagger"
 
-export function metaFor(t: Track): FinalMeta | null {
-  if (t.final) return t.final
-  if (t.decision && t.decision.title && t.decision.artists.length) return decisionToFinal(t.decision)
-  return null
-}
+export { metaFor, proposedFilename } from "./placement"
 
-export function proposedFilename(t: Track, settings: Settings): string | null {
-  const meta = metaFor(t)
-  if (!meta || !meta.title || !meta.artists.length) return null
-  const base = renderTemplate(settings.naming.template, meta, settings.naming)
-  return base ? `${base}.${t.ext.toLowerCase()}` : null
-}
-
-/** BPM, key and artwork to write for a track, per the settings. */
+/** BPM, key, artwork and catalogue IDs to write for a track, per the settings. */
 export function extrasFor(t: Track, settings: Settings): TagExtras {
   const out: TagExtras = {}
   if (settings.analysis.writeTags) {
@@ -33,32 +27,42 @@ export function extrasFor(t: Track, settings: Settings): TagExtras {
     out.key = formatKey(t.key, settings.analysis.keyNotation)
   }
   out.cover = artToEmbed(t, settings)?.hash ?? null
+  if (settings.naming.writeIds) out.ids = idsFor(t.decision, metaFor(t))
   return out
 }
 
-function sameFile(a: string, b: string) {
-  try {
-    const sa = fs.statSync(a)
-    const sb = fs.statSync(b)
-    return sa.ino === sb.ino && sa.dev === sb.dev
-  } catch {
-    return false
-  }
+/** The folder a file is in, relative to its library ("" for the top level), as the scanner records it. */
+export function relDirOf(lib: Library | null | undefined, file: string): string {
+  if (!lib) return path.dirname(file)
+  return path.relative(lib.path, path.dirname(file))
 }
 
 export function buildPlan(tracks: Track[], settings: Settings): PlanItem[] {
+  const libs = new Map(listLibraries().map((l) => [l.id, l]))
   const targets = new Map<string, number>()
   const items: PlanItem[] = tracks.map((t) => {
+    const s = settingsForLibrary(settings, t.libraryId)
+    const lib = libs.get(t.libraryId)
     const issues: string[] = []
     const meta = metaFor(t)
-    const toName = proposedFilename(t, settings) ?? t.filename
-    const toPath = path.join(path.dirname(t.path), toName)
-    const rename = settings.naming.renameFiles && toName !== t.filename
-    const tags = meta && settings.naming.writeTags ? tagsFor(meta, t.tags, settings.naming, extrasFor(t, settings)) : {}
+    const name = (s.naming.renameFiles && proposedFilename(t, settings)) || t.filename
+    let dir = path.dirname(t.path)
+    // Moving into folders on cut: the folder template decides the folder, inside the library.
+    if (s.organise.onCut && lib && meta) {
+      const folder = targetFolder(t, s)
+      if (folder !== null) dir = path.join(lib.path, ...folder.split("/").filter(Boolean))
+      if (folder && folder.split("/")[0].toLowerCase() === s.duplicates.holdingFolder.toLowerCase()) issues.push("Would land in the folder for duplicates set aside")
+      if (!isInside(lib.path, dir)) issues.push("Would end up outside the library")
+    }
+    const toPath = path.join(dir, name)
+    const rename = toPath !== t.path
+    const tags = meta && s.naming.writeTags ? tagsFor(meta, t.tags, s.naming, extrasFor(t, s)) : {}
     const tagChanges = tagDiff(t.tags, tags)
     if (!meta) issues.push("No approved artist/title yet")
     if (!fs.existsSync(t.path)) issues.push("File is missing on disk - rescan the library")
-    if (rename && fs.existsSync(toPath) && !sameFile(t.path, toPath)) issues.push(`"${toName}" already exists in this folder`)
+    if (rename && fs.existsSync(toPath) && !sameFile(t.path, toPath)) {
+      issues.push(dir === path.dirname(t.path) ? `"${name}" already exists in this folder` : `"${name}" already exists in ${relDirOf(lib, toPath) || "the library's top folder"}`)
+    }
     if (rename) {
       const key = toPath.toLowerCase()
       targets.set(key, (targets.get(key) ?? 0) + 1)
@@ -67,9 +71,11 @@ export function buildPlan(tracks: Track[], settings: Settings): PlanItem[] {
     return {
       trackId: t.id,
       fromPath: t.path,
-      toPath: rename ? toPath : t.path,
+      toPath,
       fromName: t.filename,
-      toName: rename ? toName : t.filename,
+      toName: name,
+      fromDir: relDirOf(lib, t.path),
+      toDir: relDirOf(lib, toPath),
       rename,
       tags,
       tagChanges,
@@ -85,31 +91,63 @@ export function buildPlan(tracks: Track[], settings: Settings): PlanItem[] {
   return items
 }
 
-async function renameSafely(from: string, to: string) {
-  if (from === to) return
-  if (fs.existsSync(to)) {
-    if (!sameFile(from, to)) throw new Error(`Refusing to overwrite ${path.basename(to)}`)
-    // Case-only rename on a case-insensitive filesystem: go via a temp name.
-    const tmp = `${from}.dubplate-${process.pid}.tmp`
-    await fs.promises.rename(from, tmp)
-    await fs.promises.rename(tmp, to)
-    return
-  }
-  await fs.promises.rename(from, to)
-}
-
 function pickBefore(before: ExistingTags, fields: (keyof ExistingTags)[]): ExistingTags {
   const out: ExistingTags = {}
   for (const f of fields) (out as Record<string, unknown>)[f] = before[f] ?? null
   return out
 }
 
+/** Folders files left, and where their audio went, so leftovers can follow and empty folders go. */
+export class MoveTracker {
+  private moves = new Map<string, { targets: Set<string>; libraryId: number }>()
+  add(from: string, to: string, libraryId: number) {
+    const src = path.dirname(from)
+    const dst = path.dirname(to)
+    if (src === dst) return
+    const m = this.moves.get(src) ?? { targets: new Set<string>(), libraryId }
+    m.targets.add(dst)
+    this.moves.set(src, m)
+  }
+
+  /**
+   * After the moves: cover images, cue sheets and the like follow their folder's
+   * audio when it all went to one place, then folders left empty are removed.
+   */
+  async finish(settings: Settings, batchId: string, label: string, ctx: JobContext) {
+    let followed = 0
+    for (const [src, { targets, libraryId }] of this.moves) {
+      const s = settingsForLibrary(settings, libraryId)
+      const lib = getLibrary(libraryId)
+      if (!lib || src === lib.path || targets.size !== 1 || !s.organise.sidecars) continue
+      const dst = [...targets][0]
+      for (const file of followableSidecars(src, new Set()) ?? []) {
+        const to = path.join(dst, path.basename(file))
+        if (fs.existsSync(to)) continue
+        try {
+          await moveFile(file, to)
+          insertOperation({ batchId, trackId: null, kind: "move", fromPath: file, toPath: to, tagsBefore: null, tagsAfter: null, status: "done", error: null, batchLabel: label })
+          followed++
+        } catch (err) {
+          ctx.log("warn", `Couldn't bring ${path.basename(file)} along: ${err instanceof Error ? err.message : err}`)
+        }
+      }
+    }
+    for (const [src, { libraryId }] of [...this.moves].sort((a, b) => b[0].length - a[0].length)) {
+      const lib = getLibrary(libraryId)
+      if (lib && settingsForLibrary(settings, libraryId).organise.tidy) await removeEmptyDirs(src, lib.path)
+    }
+    if (followed) ctx.log("info", `Brought ${followed} cover image${followed === 1 ? "" : "s"} and other files along with their folders`)
+  }
+}
+
 export async function executePlan(items: PlanItem[], settings: Settings, opts: { dryRun: boolean }, ctx: JobContext): Promise<string> {
   if (settings.safety.readOnly && !opts.dryRun) throw new Error("Read-only mode is on - switch it off in Settings to write to files")
   const batchId = randomUUID()
+  const label = "Cut"
   const runnable = items.filter((i) => !i.blocked)
   ctx.setTotal(runnable.length)
   const changed: number[] = []
+  const moved = new MoveTracker()
   for (const item of runnable) {
     if (ctx.signal.aborted) break
     const track = getTrack(item.trackId)
@@ -119,12 +157,14 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
     }
     const kind: Operation["kind"] = item.rename && item.tagChanges.length ? "rename+tag" : item.rename ? "rename" : "tag"
     const fields = item.tagChanges.map((c) => c.field)
+    const base = { batchId, trackId: track.id, kind, fromPath: item.fromPath, toPath: item.toPath, tagsAfter: item.tags, statusBefore: track.status, batchLabel: label }
     if (opts.dryRun) {
-      insertOperation({ batchId, trackId: track.id, kind, fromPath: item.fromPath, toPath: item.toPath, tagsBefore: pickBefore(track.tags, fields), tagsAfter: item.tags, status: "dry-run", error: null })
+      insertOperation({ ...base, tagsBefore: pickBefore(track.tags, fields), status: "dry-run", error: null })
       ctx.tick(true, item.toName)
       continue
     }
     let tagsBefore: ExistingTags | null = null
+    let createdDirs: string[] = []
     try {
       const st = await fs.promises.stat(track.path)
       if (st.size !== track.size || Math.round(st.mtimeMs) !== Math.round(track.mtimeMs)) {
@@ -136,12 +176,17 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
         for (const c of item.tagChanges) changes[c.field] = c.after
         writeTags(track.path, changes)
       }
-      if (item.rename) await renameSafely(track.path, item.toPath)
+      if (item.rename) {
+        createdDirs = await ensureDir(path.dirname(item.toPath))
+        await moveFile(track.path, item.toPath)
+        moved.add(track.path, item.toPath, track.libraryId)
+      }
       const after = await fs.promises.stat(item.toPath)
       const embedded = item.tags.cover && track.artFound?.hash === item.tags.cover
       updateTrack(track.id, {
         path: item.toPath,
         filename: path.basename(item.toPath),
+        relDir: relDirOf(getLibrary(track.libraryId), item.toPath),
         size: after.size,
         mtimeMs: after.mtimeMs,
         tags: { ...track.tags, ...item.tags },
@@ -150,7 +195,7 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
         // The found cover is now the file's own.
         ...(embedded ? { art: track.artFound, artFound: null } : {}),
       })
-      insertOperation({ batchId, trackId: track.id, kind, fromPath: item.fromPath, toPath: item.toPath, tagsBefore, tagsAfter: item.tags, status: "done", error: null })
+      insertOperation({ ...base, tagsBefore, status: "done", error: null, createdDirs })
       changed.push(track.id)
       ctx.tick(true, item.toName)
     } catch (err) {
@@ -163,12 +208,15 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
           // best effort - the journal records what happened
         }
       }
-      insertOperation({ batchId, trackId: track.id, kind, fromPath: item.fromPath, toPath: item.toPath, tagsBefore, tagsAfter: item.tags, status: "failed", error: message })
+      await removeCreatedDirs(createdDirs)
+      insertOperation({ ...base, tagsBefore, status: "failed", error: message })
       updateTrack(track.id, { status: "error", note: message })
       ctx.log("error", `${track.filename}: ${message}`)
       ctx.tick(false)
     }
   }
+  if (!opts.dryRun) await moved.finish(settings, batchId, label, ctx)
+  if (changed.length && !opts.dryRun) ctx.filesChanged()
   ctx.tracksChanged(changed)
   return batchId
 }
@@ -180,16 +228,24 @@ export async function rewind(opIds: number[] | null, batchId: string | null, ctx
     .sort((a, b) => b.id - a.id)
   ctx.setTotal(ops.length)
   const changed: number[] = []
+  let undone = 0
   for (const op of ops) {
     if (ctx.signal.aborted) break
     try {
       if (!fs.existsSync(op.toPath)) throw new Error(`${path.basename(op.toPath)} is no longer there`)
-      if (op.kind !== "tag" && op.fromPath !== op.toPath && fs.existsSync(op.fromPath) && !sameFile(op.fromPath, op.toPath)) {
+      const moves = op.kind !== "tag" && op.fromPath !== op.toPath
+      if (moves && fs.existsSync(op.fromPath) && !sameFile(op.fromPath, op.toPath)) {
         throw new Error(`${path.basename(op.fromPath)} exists again - not overwriting it`)
       }
       if (op.tagsBefore && Object.keys(op.tagsBefore).length) writeTags(op.toPath, op.tagsBefore as Record<string, unknown>)
-      if (op.kind !== "tag") await renameSafely(op.toPath, op.fromPath)
+      if (moves) {
+        // The folder it came from may have been tidied away.
+        await ensureDir(path.dirname(op.fromPath))
+        await moveFile(op.toPath, op.fromPath)
+        await removeCreatedDirs(op.createdDirs)
+      }
       markOperationReverted(op.id)
+      undone++
       if (op.trackId) {
         const t = getTrack(op.trackId)
         const st = await fs.promises.stat(op.fromPath)
@@ -203,7 +259,19 @@ export async function rewind(opIds: number[] | null, batchId: string | null, ctx
             artPatch.art = old ? describeArt(old, "embedded") : null
             if (t.art && t.art.hash === op.tagsAfter?.cover) artPatch.artFound = t.art
           }
-          updateTrack(t.id, { path: op.fromPath, filename: path.basename(op.fromPath), size: st.size, mtimeMs: st.mtimeMs, tags: restored, status: "approved", ...artPatch })
+          // Folder moves keep the track's status; a rewound cut goes back to approved.
+          const status = op.statusBefore ?? (op.kind === "move" || op.kind === "set-aside" ? t.status : "approved")
+          updateTrack(t.id, {
+            path: op.fromPath,
+            filename: path.basename(op.fromPath),
+            relDir: relDirOf(getLibrary(t.libraryId), op.fromPath),
+            size: st.size,
+            mtimeMs: st.mtimeMs,
+            tags: restored,
+            status,
+            ...(op.kind === "set-aside" ? { missing: false, aside: null } : {}),
+            ...artPatch,
+          })
           changed.push(t.id)
         }
       }
@@ -215,5 +283,6 @@ export async function rewind(opIds: number[] | null, batchId: string | null, ctx
       ctx.tick(false)
     }
   }
+  if (undone) ctx.filesChanged()
   ctx.tracksChanged(changed)
 }

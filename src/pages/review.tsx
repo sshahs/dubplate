@@ -1,14 +1,27 @@
 import { HugeiconsIcon } from "@hugeicons/react"
-import { CheckListIcon } from "@hugeicons/core-free-icons"
-import { keepPreviousData, useQuery } from "@tanstack/react-query"
+import { CheckListIcon, TickDouble02Icon } from "@hugeicons/core-free-icons"
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { addTransitionType, startTransition, useEffect, useMemo, useRef, useState, ViewTransition } from "react"
 import { Link } from "react-router"
+import { toast } from "sonner"
 import type { TrackStatus } from "@shared/types"
 import { PageHeader } from "@/components/app-shell"
 import { QueryError } from "@/components/query-error"
 import { ConfidenceMeter, StatusBadge } from "@/components/confidence"
 import { Cover } from "@/components/cover"
+import { SwipeToDecide } from "@/components/swipe-to-decide"
 import { TrackDetail } from "@/components/track-detail"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -18,7 +31,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { api } from "@/lib/api"
 import { usePrefetchTracks } from "@/lib/prefetch"
-import { undoLast } from "@/lib/undo"
+import { toastUndoable, undoLast } from "@/lib/undo"
 import { cn } from "@/lib/utils"
 
 const QUEUES: Record<string, { label: string; status: TrackStatus[] }> = {
@@ -29,6 +42,7 @@ const QUEUES: Record<string, { label: string; status: TrackStatus[] }> = {
 }
 
 export default function ReviewPage() {
+  const qc = useQueryClient()
   const [queue, setQueue] = useState("review")
   const [currentId, setCurrentId] = useState<number | null>(null)
   const filter = useMemo(() => ({ status: QUEUES[queue].status, sort: "confidence" as const, dir: "desc" as const, limit: 200 }), [queue])
@@ -88,6 +102,19 @@ export default function ReviewPage() {
     return () => window.removeEventListener("keydown", onKey)
   }, [items, index])
 
+  const total = data?.total ?? 0
+  const approveAll = useMutation({
+    mutationFn: () => api.bulk({ filter: { status: QUEUES[queue].status } }, "approve"),
+    onSuccess: (r) => {
+      toastUndoable(qc, `Approved ${r.changed} track${r.changed === 1 ? "" : "s"}`, r.undoId, {
+        description: r.skipped ? `${r.skipped} had no suggestion to approve - they're still here.` : "Off to Cut & Tag.",
+      })
+      void qc.invalidateQueries({ queryKey: ["tracks"] })
+      void qc.invalidateQueries({ queryKey: ["stats"] })
+    },
+    onError: (e) => toast.error(e.message),
+  })
+
   return (
     <>
       <PageHeader
@@ -95,11 +122,41 @@ export default function ReviewPage() {
         title="Review"
         description="The tracks the engine wasn't sure about. Have a listen, check the evidence, and make the call - every approval teaches the AI your style."
         actions={
-          <div className="text-muted-foreground hidden items-center gap-1.5 text-xs md:flex">
-            <Kbd>J</Kbd>/<Kbd>K</Kbd> move · <Kbd>A</Kbd> approve · <Kbd>X</Kbd> leave as-is · <Kbd>Z</Kbd> undo
-          </div>
+          <>
+            <div className="text-muted-foreground hidden items-center gap-1.5 text-xs lg:flex">
+              <Kbd>J</Kbd>/<Kbd>K</Kbd> move · <Kbd>A</Kbd> approve · <Kbd>X</Kbd> leave as-is · <Kbd>Z</Kbd> undo
+            </div>
+            {queue !== "unmatched" && total > 0 && (
+              <AlertDialog>
+                <AlertDialogTrigger
+                  render={
+                    <Button variant="outline" disabled={approveAll.isPending}>
+                      <HugeiconsIcon icon={TickDouble02Icon} strokeWidth={2} data-icon="inline-start" />
+                      Approve all {total}
+                    </Button>
+                  }
+                />
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>
+                      Approve all {total} in "{QUEUES[queue].label}"?
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Each one gets the artist and title Dubplate suggested, ready for Cut & Tag. You can undo straight afterwards. Approving in bulk doesn't teach the AI - only
+                      the ones you check yourself do.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Not yet</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => approveAll.mutate()}>Approve all</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+          </>
         }
       />
+      <p className="text-muted-foreground -mt-3 mb-4 text-xs md:hidden">Swipe a track right to approve it, or left to leave it as-is.</p>
       <Tabs value={queue} onValueChange={(v) => setQueue(String(v))} className="mb-4 max-w-full overflow-x-auto">
         <TabsList>
           {Object.entries(QUEUES).map(([k, v]) => (
@@ -161,30 +218,32 @@ export default function ReviewPage() {
               {index + 1} of {data?.total ?? items.length}
             </div>
           </Card>
-          <Card>
-            <CardContent>
-              {current && (
-                <ViewTransition
-                  key={current.id}
-                  enter={{ forward: "detail-enter-forward", back: "detail-enter-back", default: "none" }}
-                  exit={{ forward: "detail-exit-forward", back: "detail-exit-back", default: "none" }}
-                  default="none"
-                >
-                  <div>
-                    <TrackDetail
-                      trackId={current.id}
-                      compact
-                      onUndone={() => (returnTo.current = current.id)}
-                      onAdvance={() => {
-                        const next = items[index + 1] ?? items[index - 1]
-                        go(next ? next.id : null, "forward")
-                      }}
-                    />
-                  </div>
-                </ViewTransition>
-              )}
-            </CardContent>
-          </Card>
+          <SwipeToDecide>
+            <Card>
+              <CardContent>
+                {current && (
+                  <ViewTransition
+                    key={current.id}
+                    enter={{ forward: "detail-enter-forward", back: "detail-enter-back", default: "none" }}
+                    exit={{ forward: "detail-exit-forward", back: "detail-exit-back", default: "none" }}
+                    default="none"
+                  >
+                    <div>
+                      <TrackDetail
+                        trackId={current.id}
+                        compact
+                        onUndone={() => (returnTo.current = current.id)}
+                        onAdvance={() => {
+                          const next = items[index + 1] ?? items[index - 1]
+                          go(next ? next.id : null, "forward")
+                        }}
+                      />
+                    </div>
+                  </ViewTransition>
+                )}
+              </CardContent>
+            </Card>
+          </SwipeToDecide>
         </div>
       )}
     </>

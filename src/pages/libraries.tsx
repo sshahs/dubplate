@@ -1,10 +1,12 @@
 import { HugeiconsIcon } from "@hugeicons/react"
-import { Add01Icon, ArrowLeft01Icon, Delete02Icon, Folder01Icon, FolderLibraryIcon, FolderOpenIcon, RefreshIcon } from "@hugeicons/core-free-icons"
+import { Add01Icon, Delete02Icon, FolderLibraryIcon, RefreshIcon } from "@hugeicons/core-free-icons"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { Link } from "react-router"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/app-shell"
+import { FolderPicker } from "@/components/folder-picker"
+import { LibrarySettingsDialog } from "@/components/library-settings-dialog"
 import { QueryError } from "@/components/query-error"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -13,51 +15,20 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Switch } from "@/components/ui/switch"
-import type { Library } from "@shared/types"
+import type { Library, LibrarySettings } from "@shared/types"
 import { api } from "@/lib/api"
 import { useActiveJobs } from "@/lib/events"
 import { fmtAgo } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
-function FolderPicker({ onPick }: { onPick: (path: string) => void }) {
-  const [path, setPath] = useState<string | undefined>()
-  const { data, error, isFetching } = useQuery({ queryKey: ["browse", path], queryFn: () => api.browse(path) })
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <Button variant="outline" size="icon-sm" disabled={!data?.parent} onClick={() => data?.parent && setPath(data.parent)} aria-label="Up one folder">
-          <HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2} />
-        </Button>
-        <div className="bg-muted/60 min-w-0 flex-1 truncate rounded-full px-3 py-1.5 font-mono text-xs">{data?.path ?? "…"}</div>
-      </div>
-      <ScrollArea className="h-64 rounded-2xl border">
-        <div className="p-1">
-          {error && <div className="text-rasta-red p-3 text-sm">{(error as Error).message}</div>}
-          {data?.dirs.length === 0 && <div className="text-muted-foreground p-3 text-sm">No sub-folders.</div>}
-          {data?.dirs.map((d) => (
-            <button
-              key={d.path}
-              type="button"
-              onClick={() => setPath(d.path)}
-              className="hover:bg-muted flex w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-left text-sm"
-            >
-              <HugeiconsIcon icon={Folder01Icon} strokeWidth={2} className="text-rasta-gold size-4" />
-              <span className="truncate">{d.name}</span>
-            </button>
-          ))}
-        </div>
-      </ScrollArea>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-muted-foreground text-xs">{isFetching ? "Loading…" : `${data?.audioCount ?? 0} audio files directly in this folder`}</span>
-        <Button size="sm" variant="secondary" disabled={!data} onClick={() => data && onPick(data.path)}>
-          <HugeiconsIcon icon={FolderOpenIcon} strokeWidth={2} data-icon="inline-start" />
-          Use this folder
-        </Button>
-      </div>
-    </div>
-  )
+/** What a library has of its own, for badges on its card. */
+function overrides(ls: LibrarySettings): string[] {
+  const out: string[] = []
+  if (ls.genres || ls.sceneHint) out.push("own crates")
+  if (ls.template) out.push("own file names")
+  if (ls.folderTemplate || ls.organiseOnCut !== undefined) out.push("own folders")
+  return out
 }
 
 function AddLibraryDialog() {
@@ -192,6 +163,15 @@ export default function LibrariesPage() {
                   </div>
                   {!lib.exists && <Badge variant="destructive">folder missing</Badge>}
                 </div>
+                {overrides(lib.settings).length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {overrides(lib.settings).map((o) => (
+                      <Badge key={o} variant="outline" className="font-normal">
+                        {o}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-center gap-4 text-sm">
                   <Link to={`/tracks?libraryId=${lib.id}`} className="hover:underline">
                     <span className="font-mono font-semibold">{lib.fileCount}</span> <span className="text-muted-foreground">tracks</span>
@@ -214,7 +194,7 @@ export default function LibrariesPage() {
                     </span>
                   </span>
                 </label>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <Button size="sm" variant="outline" onClick={() => scan.mutate(lib.id)} disabled={!!scanning || !lib.exists}>
                     <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} data-icon="inline-start" className={scanning ? "animate-spin" : ""} />
                     {scanning ? `Scanning ${scanning.done}/${scanning.total || "…"}` : "Rescan"}
@@ -229,6 +209,7 @@ export default function LibrariesPage() {
                     <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} data-icon="inline-start" />
                     Remove
                   </Button>
+                  {settings && <LibrarySettingsDialog lib={lib} settings={settings} />}
                 </div>
               </CardContent>
             </Card>

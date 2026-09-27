@@ -1,6 +1,6 @@
 // Turns approved metadata into a filename and a set of tags.
 
-import type { Decision, ExistingTags, FinalMeta, Settings } from "../../shared/types"
+import type { Decision, ExistingTags, ExternalIds, FinalMeta, Settings } from "../../shared/types"
 import { collapseSpaces } from "./normalize"
 
 type Naming = Settings["naming"]
@@ -58,7 +58,7 @@ export function renderTemplate(template: string, meta: FinalMeta, naming: Naming
     featuring: meta.featuring.join(" & "),
     genre: meta.genre ?? "",
   }
-  let out = template.replace(/\{(\w+)\}/g, (_, k: string) => values[k.toLowerCase()] ?? "")
+  let out = template.replace(/\{(\w+)\}/g, (_, k: string) => (Object.hasOwn(values, k.toLowerCase()) ? values[k.toLowerCase()] : ""))
   // Drop empty bracket groups and dangling separators left by missing values.
   out = out
     .replace(/\(\s*\)|\[\s*\]/g, "")
@@ -89,6 +89,8 @@ export interface TagExtras {
   key?: string | null
   /** artwork cache hash of a cover to embed */
   cover?: string | null
+  /** MusicBrainz / Discogs IDs to write */
+  ids?: ExternalIds
 }
 
 /**
@@ -108,6 +110,11 @@ export function tagsFor(meta: FinalMeta, current: ExistingTags, naming: Naming, 
   if (extras.bpm && Math.round(extras.bpm) !== Math.round(current.bpm ?? 0)) out.bpm = Math.round(extras.bpm)
   if (extras.key && extras.key !== current.key) out.key = extras.key
   if (extras.cover && extras.cover !== current.cover) out.cover = extras.cover
+  const ids = extras.ids ?? {}
+  if (ids.mbRecordingId && ids.mbRecordingId !== current.mbRecordingId) out.mbRecordingId = ids.mbRecordingId
+  if (ids.mbReleaseId && ids.mbReleaseId !== current.mbReleaseId) out.mbReleaseId = ids.mbReleaseId
+  if (ids.mbArtistIds?.[0] && ids.mbArtistIds[0] !== current.mbArtistId) out.mbArtistId = ids.mbArtistIds[0]
+  if (ids.discogsReleaseId && ids.discogsReleaseId !== current.discogsReleaseId) out.discogsReleaseId = ids.discogsReleaseId
   return out
 }
 

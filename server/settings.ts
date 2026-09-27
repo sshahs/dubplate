@@ -1,21 +1,35 @@
-import type { LlmProviderConfig, ScraperDefinition, Settings, SourceConfig } from "../shared/types"
+import type { LlmProviderConfig, MediaServerConfig, ScraperDefinition, Settings, SourceConfig } from "../shared/types"
+import { sanitizeFilename } from "./core/naming"
 import { getDb } from "./db"
 import { setContact } from "./sources/http"
 
+/** Streaming stores: strongest for anything that's had a proper digital release. */
+const STORE_GENRES = ["Pop", "Rock", "Indie", "Hip-hop", "R&B", "Afrobeats", "Amapiano", "Latin", "Country", "Soundtracks", "Electronic", "Metal", "Punk", "Folk", "Classical", "Gospel", "Soca"]
+
 export const SOURCE_META: Record<
   string,
-  { label: string; needs: ("apiKey" | "apiSecret")[]; keyLabel?: string; secretLabel?: string; env?: [string, string?]; about: string; signup?: string }
+  {
+    label: string
+    needs: ("apiKey" | "apiSecret")[]
+    keyLabel?: string
+    secretLabel?: string
+    env?: [string, string?]
+    about: string
+    signup?: string
+    /** genres (crates picker names) the source is especially good for; none = good for everything */
+    suits?: string[]
+  }
 > = {
   musicbrainz: { label: "MusicBrainz", needs: [], about: "Open music encyclopaedia. Free, 1 request/second.", signup: "https://musicbrainz.org" },
-  discogs: { label: "Discogs", needs: ["apiKey"], keyLabel: "Personal access token", env: ["DISCOGS_TOKEN"], about: "Vinyl-first database - strong on reggae 7\"s, white labels and grime 12\"s.", signup: "https://www.discogs.com/settings/developers" },
+  discogs: { label: "Discogs", needs: ["apiKey"], keyLabel: "Personal access token", env: ["DISCOGS_TOKEN"], about: "Vinyl-first database - strong on reggae 7\"s, white labels and grime 12\"s.", signup: "https://www.discogs.com/settings/developers", suits: ["Reggae", "Roots", "Dub", "Dancehall", "Lovers rock", "Ska & rocksteady", "Soul", "Funk", "Jazz", "Disco", "House", "Techno", "Jungle", "Drum & bass", "UK garage", "Grime", "Dubstep", "Dubplates & specials"] },
   lastfm: { label: "Last.fm", needs: ["apiKey"], keyLabel: "API key", env: ["LASTFM_API_KEY"], about: "Scrobble data incl. spelling corrections. Crowd-sourced, so weighted lower.", signup: "https://www.last.fm/api/account/create" },
-  spotify: { label: "Spotify", needs: ["apiKey", "apiSecret"], keyLabel: "Client ID", secretLabel: "Client secret", env: ["SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET"], about: "Streaming catalogue search (client-credentials flow).", signup: "https://developer.spotify.com/dashboard" },
-  itunes: { label: "Apple Music / iTunes", needs: [], about: "iTunes Search API - no key needed, ~20 requests/minute." },
-  deezer: { label: "Deezer", needs: [], about: "Open search API with durations - no key needed." },
-  bandcamp: { label: "Bandcamp", needs: [], about: "Scrapes Bandcamp search - home of independent dub, grime and sound-system releases." },
-  archive: { label: "Internet Archive", needs: [], about: "Advanced search over archive.org - clash tapes, pirate radio sets and dubplate rips." },
-  mixcloud: { label: "Mixcloud", needs: [], about: "Radio shows and sets - useful for clash and pirate-radio recordings." },
-  youtube: { label: "YouTube", needs: ["apiKey"], keyLabel: "Data API v3 key", env: ["YOUTUBE_API_KEY"], about: "Many specials and dubplates only exist as uploads. Low weight - titles are messy.", signup: "https://console.cloud.google.com/apis/library/youtube.googleapis.com" },
+  spotify: { label: "Spotify", needs: ["apiKey", "apiSecret"], keyLabel: "Client ID", secretLabel: "Client secret", env: ["SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET"], about: "Streaming catalogue search (client-credentials flow).", signup: "https://developer.spotify.com/dashboard", suits: STORE_GENRES },
+  itunes: { label: "Apple Music / iTunes", needs: [], about: "iTunes Search API - no key needed, ~20 requests/minute.", suits: STORE_GENRES },
+  deezer: { label: "Deezer", needs: [], about: "Open search API with durations - no key needed.", suits: STORE_GENRES },
+  bandcamp: { label: "Bandcamp", needs: [], about: "Scrapes Bandcamp search - home of independent dub, grime and sound-system releases.", suits: ["Dub", "Roots", "Jungle", "Drum & bass", "Dubstep", "Grime", "UK garage", "Techno", "House", "Electronic", "Ambient", "Indie", "Punk", "Metal", "Folk", "Edits & bootlegs"] },
+  archive: { label: "Internet Archive", needs: [], about: "Advanced search over archive.org - clash tapes, pirate radio sets and dubplate rips.", suits: ["Sound clashes", "Radio rips", "Live sets", "DJ mixes", "Dubplates & specials", "Blues", "Jazz"] },
+  mixcloud: { label: "Mixcloud", needs: [], about: "Radio shows and sets - useful for clash and pirate-radio recordings.", suits: ["DJ mixes", "Radio rips", "Live sets", "Sound clashes"] },
+  youtube: { label: "YouTube", needs: ["apiKey"], keyLabel: "Data API v3 key", env: ["YOUTUBE_API_KEY"], about: "Many specials and dubplates only exist as uploads. Low weight - titles are messy.", signup: "https://console.cloud.google.com/apis/library/youtube.googleapis.com", suits: ["Dubplates & specials", "Sound clashes", "Edits & bootlegs", "Radio rips", "Live sets", "Afrobeats", "Amapiano", "Soca"] },
   acoustid: { label: "AcoustID fingerprint", needs: ["apiKey"], keyLabel: "Application API key", env: ["ACOUSTID_API_KEY"], about: "Identifies audio by fingerprint (needs fpcalc / Chromaprint installed). Strongest signal when it hits.", signup: "https://acoustid.org/new-application" },
 }
 
@@ -77,6 +91,7 @@ export const SCRAPER_PRESETS: ScraperDefinition[] = [
     scene: "Grime, dubstep, jungle, UK garage, dancehall 12\"s",
     notes: "UK dance-music store with deep grime/UKG/jungle back catalogue.",
     verified: false,
+    genres: ["Grime", "UK garage", "Jungle", "Drum & bass", "Dubstep", "House", "Techno", "Dancehall", "Electronic"],
   },
   {
     id: "regime-radio",
@@ -90,6 +105,7 @@ export const SCRAPER_PRESETS: ScraperDefinition[] = [
     scene: "Sound clash recordings",
     notes: "WordPress REST search over a sound-clash archive.",
     verified: false,
+    genres: ["Sound clashes", "Dancehall", "Reggae", "Dubplates & specials"],
   },
   {
     id: "wordpress-template",
@@ -104,7 +120,86 @@ export const SCRAPER_PRESETS: ScraperDefinition[] = [
     notes: "Duplicate this and point it at a blog that posts tracks as 'Artist - Title'.",
     verified: false,
   },
+  {
+    id: "traxsource",
+    name: "Traxsource",
+    enabled: false,
+    weight: 0.75,
+    kind: "html",
+    searchUrl: "https://www.traxsource.com/search/tracks?term={query}",
+    items: ".trk-row",
+    fields: { title: ".title a", artist: ".artists a", label: ".label a", url: ".title a@href", year: ".r-date" },
+    scene: "House, techno, disco and afro house downloads",
+    notes: "DJ download store with deep house, soulful and afro catalogues.",
+    verified: false,
+    genres: ["House", "Techno", "Disco", "Electronic", "Afrobeats", "Amapiano", "Soul", "Funk"],
+  },
+  {
+    id: "genius",
+    name: "Genius",
+    enabled: false,
+    weight: 0.6,
+    kind: "json",
+    searchUrl: "https://genius.com/api/search/song?q={query}&per_page=5",
+    items: "response.sections.0.hits",
+    fields: {
+      title: "result.title",
+      artist: "result.primary_artist.name",
+      url: "result.url",
+      year: "result.release_date_components.year",
+      artwork: "result.song_art_image_url",
+    },
+    scene: "Hip-hop, R&B, pop and afrobeats",
+    notes: "The lyrics site's own search: good on credits and spellings for rap and R&B.",
+    verified: false,
+    genres: ["Hip-hop", "R&B", "Pop", "Afrobeats", "Amapiano", "Latin", "Grime", "Soul", "Gospel", "Rock", "Indie", "Country"],
+  },
+  {
+    id: "audius",
+    name: "Audius",
+    enabled: false,
+    weight: 0.45,
+    kind: "json",
+    searchUrl: "https://discoveryprovider.audius.co/v1/tracks/search?query={query}&app_name=dubplate",
+    items: "data",
+    fields: { title: "title", artist: "user.name", year: "release_date", artwork: "artwork.480x480" },
+    scene: "Independent electronic and hip-hop uploads",
+    notes: "Open music platform with a public search API. Uploads are self-published, so it's weighted low.",
+    verified: false,
+    genres: ["Electronic", "Hip-hop", "House", "Techno", "Drum & bass", "Dubstep", "Ambient", "Edits & bootlegs"],
+  },
+  {
+    id: "hypem",
+    name: "Hype Machine",
+    enabled: false,
+    weight: 0.45,
+    kind: "html",
+    searchUrl: "https://hypem.com/search/{query}/1/",
+    items: ".section-track",
+    fields: { artist: ".track_name .artist", title: ".track_name .base-title", url: ".track_name a.track@href" },
+    scene: "Indie, electronic and remixes from music blogs",
+    notes: "Blog aggregator: good for remixes and edits that never got a store release.",
+    verified: false,
+    genres: ["Indie", "Electronic", "Pop", "House", "Hip-hop", "Edits & bootlegs"],
+  },
+  {
+    id: "allmusic",
+    name: "AllMusic",
+    enabled: false,
+    weight: 0.7,
+    kind: "html",
+    searchUrl: "https://www.allmusic.com/search/songs/{query}",
+    items: ".song",
+    fields: { title: ".title a", artist: ".performers a", url: ".title a@href" },
+    scene: "Jazz, soul, blues, rock and classical",
+    notes: "Editorial database with deep coverage of older recordings.",
+    verified: false,
+    genres: ["Jazz", "Soul", "Funk", "Blues", "Gospel", "Rock", "Folk", "Country", "Classical", "Pop", "World"],
+  },
 ]
+
+/** The presets every install already had before newer ones were added. */
+const ORIGINAL_PRESET_IDS = ["juno", "regime-radio", "wordpress-template"]
 
 export const DEFAULT_SETTINGS: Settings = {
   llm: {
@@ -124,6 +219,7 @@ export const DEFAULT_SETTINGS: Settings = {
     reviewThreshold: 60,
     autoApprove: false,
     parseOnlyMax: 75,
+    genreAware: true,
   },
   naming: {
     template: "{artist} - {title}",
@@ -134,6 +230,16 @@ export const DEFAULT_SETTINGS: Settings = {
     renameFiles: true,
     writeTags: true,
     tagComment: false,
+    writeIds: true,
+  },
+  organise: { template: "{artist}", onCut: false, missing: "skip", tidy: true, sidecars: true },
+  duplicates: { holdingFolder: "Duplicates set aside" },
+  integrations: {
+    mediaServers: [],
+    discord: { enabled: false },
+    telegram: { enabled: false },
+    notify: { jobs: true, review: true },
+    publicUrl: "",
   },
   scanner: {
     extensions: ["mp3", "flac", "m4a", "aac", "ogg", "oga", "opus", "wav", "aif", "aiff", "wma", "ape", "wv", "mpc"],
@@ -181,6 +287,22 @@ export function cleanGenres(genres: unknown): string[] {
   return out.slice(0, 40)
 }
 
+/**
+ * Saved scrapers, plus any preset added since this install last saw the list (switched
+ * off, like every preset). Presets you deleted stay deleted; presets you kept learn
+ * which genres they suit.
+ */
+function mergeScrapers(stored: ScraperDefinition[] | undefined, seen: string[] | undefined): ScraperDefinition[] {
+  if (!stored) return structuredClone(SCRAPER_PRESETS)
+  const offered = new Set(seen ?? ORIGINAL_PRESET_IDS)
+  const out = stored.map((s) => {
+    const preset = SCRAPER_PRESETS.find((p) => p.id === s.id)
+    return preset && !s.genres ? { ...s, genres: preset.genres } : s
+  })
+  for (const p of SCRAPER_PRESETS) if (!offered.has(p.id) && !out.some((s) => s.id === p.id)) out.push(structuredClone(p))
+  return out
+}
+
 function mergeProviders(stored: LlmProviderConfig[] | undefined): LlmProviderConfig[] {
   const byId = new Map((stored ?? []).map((p) => [p.id, p]))
   const merged = DEFAULT_PROVIDERS.map((d) => ({ ...d, ...byId.get(d.id) }))
@@ -194,7 +316,8 @@ export function loadSettings(): Settings {
   // Clone the defaults: callers (effectiveSettings) mutate the result.
   const s = deepMerge(structuredClone(DEFAULT_SETTINGS), stored)
   s.llm.providers = mergeProviders(stored.llm?.providers)
-  s.scrapers = stored.scrapers ?? structuredClone(SCRAPER_PRESETS)
+  s.scrapers = mergeScrapers(stored.scrapers, stored.scraperPresetsSeen)
+  s.scraperPresetsSeen = SCRAPER_PRESETS.map((p) => p.id)
   s.sources = deepMerge(structuredClone(DEFAULT_SOURCES), stored.sources ?? {})
   // Installs saved before genres existed still carry the old sound-system note; keep that
   // behaviour, but as picked genres the owner can now see and change.
@@ -253,7 +376,28 @@ export function publicSettings(): Settings & { secretsFromEnv: string[]; zdrFrom
     cfg.apiKey = mask(cfg.apiKey)
     cfg.apiSecret = mask(cfg.apiSecret)
   }
+  s.integrations.mediaServers = s.integrations.mediaServers.map((m) => ({ ...m, token: mask(m.token) }))
+  s.integrations.discord.webhookUrl = mask(s.integrations.discord.webhookUrl)
+  s.integrations.telegram.botToken = mask(s.integrations.telegram.botToken)
   return { ...s, secretsFromEnv: fromEnv, zdrFromEnv: zdrForcedByEnv() }
+}
+
+function cleanMediaServer(m: MediaServerConfig, prev: MediaServerConfig | undefined): MediaServerConfig {
+  const kind = m.kind === "jellyfin" || m.kind === "navidrome" ? m.kind : "plex"
+  return {
+    id: String(m.id || prev?.id || `${kind}-${Date.now().toString(36)}`),
+    kind,
+    name: (m.name ?? "").trim() || (kind === "plex" ? "Plex" : kind === "jellyfin" ? "Jellyfin" : "Navidrome"),
+    url: (m.url ?? "").trim().replace(/\/+$/, ""),
+    token: keepSecret(m.token, prev?.token),
+    user: m.user?.trim() || undefined,
+    enabled: m.enabled !== false,
+  }
+}
+
+/** A value the browser only ever sees masked. */
+export function isMasked(v: string | undefined): boolean {
+  return !!v?.startsWith(MASK)
 }
 
 function keepSecret(incoming: string | undefined, previous: string | undefined) {
@@ -284,6 +428,17 @@ export function saveSettings(patch: Partial<Settings>): Settings {
   }
   if (patch.scrapers) next.scrapers = patch.scrapers
   if (patch.llm && "genres" in patch.llm) next.llm.genres = cleanGenres(patch.llm.genres)
+  if (patch.integrations) {
+    const cur = current.integrations
+    if (patch.integrations.mediaServers) {
+      next.integrations.mediaServers = patch.integrations.mediaServers.map((m) => cleanMediaServer(m, cur.mediaServers.find((c) => c.id === m.id)))
+    }
+    next.integrations.discord.webhookUrl = keepSecret(patch.integrations.discord?.webhookUrl, cur.discord.webhookUrl)
+    next.integrations.telegram.botToken = keepSecret(patch.integrations.telegram?.botToken, cur.telegram.botToken)
+    next.integrations.publicUrl = (next.integrations.publicUrl ?? "").trim().replace(/\/+$/, "")
+  }
+  if (patch.duplicates) next.duplicates.holdingFolder = sanitizeFilename(next.duplicates.holdingFolder ?? "") || DEFAULT_SETTINGS.duplicates.holdingFolder
+  if (patch.organise) next.organise.template = next.organise.template?.trim() || DEFAULT_SETTINGS.organise.template
   // Guard against inverted thresholds.
   next.confidence.reviewThreshold = Math.min(next.confidence.reviewThreshold, next.confidence.autoThreshold)
   getDb()

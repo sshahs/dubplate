@@ -10,17 +10,19 @@ import { decisionToFinal } from "./core/naming"
 import { proposedFilename } from "./executor"
 import type { JobContext } from "./jobs"
 import { mapLimit } from "./jobs"
-import { aliasMap, getTrack, knownArtists, listCorrections, updateTrack } from "./repo"
+import { settingsForLibrary } from "./library-settings"
+import { aliasMap, getTrack, knownArtists, listCorrections, statusCounts, updateTrack } from "./repo"
 import { folderContext } from "./scanner"
-import { scourTrack, SourceBreaker } from "./sources"
+import { genreBoost, scourTrack, SourceBreaker } from "./sources"
 
 /** Statuses a human set - automated passes must not overwrite them. */
 const HUMAN_STATUSES: TrackStatus[] = ["approved", "done", "rejected"]
 
+/** Each source's trust weight, a little higher for sources that suit the crates' genres. */
 export function weightsFrom(settings: Settings): Record<string, number> {
   const w: Record<string, number> = {}
-  for (const [id, cfg] of Object.entries(settings.sources)) w[id] = cfg.weight
-  for (const s of settings.scrapers) w[`scraper:${s.id}`] = s.weight
+  for (const [id, cfg] of Object.entries(settings.sources)) w[id] = Math.min(1.5, cfg.weight * genreBoost(settings, id))
+  for (const s of settings.scrapers) w[`scraper:${s.id}`] = Math.min(1.5, s.weight * genreBoost(settings, `scraper:${s.id}`))
   return w
 }
 
@@ -31,7 +33,7 @@ export function scoreAndSave(track: Track, settings: Settings): Track {
     tags: track.tags,
     candidates: track.candidates ?? [],
     duration: track.duration,
-    weights: weightsFrom(settings),
+    weights: weightsFrom(settingsForLibrary(settings, track.libraryId)),
     thresholds: settings.confidence,
   })
   const keepStatus = HUMAN_STATUSES.includes(track.status)
@@ -125,6 +127,12 @@ export async function processTracks(ids: number[], settings: Settings, opts: Pro
     }
   })
   ctx.tracksChanged(changed)
+  if (changed.length) {
+    const c = statusCounts(changed)
+    const review = c.review + c.conflict
+    ctx.report({ identified: changed.length, matched: c.matched, approved: c.approved, review, unmatched: c.unmatched })
+    ctx.message([c.matched && `${c.matched} matched`, c.approved && `${c.approved} approved`, review && `${review} to review`, c.unmatched && `${c.unmatched} unmatched`].filter(Boolean).join(" · "))
+  }
 }
 
 /** The optional steps after scoring: cover art and BPM/key. Failures only log. */

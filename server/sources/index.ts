@@ -16,6 +16,22 @@ export function allAdapters(settings: Settings): { adapter: SourceAdapter; cfg: 
   return [...builtIn, ...scrapers]
 }
 
+/** How much more a source that suits the picked genres counts. */
+export const GENRE_BOOST = 1.2
+
+/** Genres a source is especially good for (built-in list, or a scraper's own). */
+export function suitsOf(id: string, settings: Settings): string[] {
+  if (id.startsWith("scraper:")) return settings.scrapers.find((s) => `scraper:${s.id}` === id)?.genres ?? []
+  return SOURCE_META[id]?.suits ?? []
+}
+
+/** ×GENRE_BOOST when the source suits any of the genres picked (and that's switched on), else ×1. */
+export function genreBoost(settings: Settings, id: string): number {
+  if (!settings.confidence.genreAware || !settings.llm.genres.length) return 1
+  const picked = new Set(settings.llm.genres.map((g) => g.toLowerCase()))
+  return suitsOf(id, settings).some((g) => picked.has(g.toLowerCase())) ? GENRE_BOOST : 1
+}
+
 export function sourceStatus(settings: Settings) {
   return allAdapters(settings).map(({ adapter, cfg }) => ({
     id: adapter.id,
@@ -24,6 +40,8 @@ export function sourceStatus(settings: Settings) {
     weight: cfg.weight,
     unavailable: adapter.unavailable({ cfg, settings }),
     meta: SOURCE_META[adapter.id] ?? null,
+    suits: suitsOf(adapter.id, settings),
+    boost: genreBoost(settings, adapter.id),
   }))
 }
 

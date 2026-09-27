@@ -2,7 +2,21 @@
 // so it covers MP3, FLAC, M4A, OGG/Opus, WAV, AIFF, WMA and APE alike).
 
 import path from "node:path"
-import { ByteVector, Picture, PictureType, File as TagFile, TagTypes, type IPicture } from "node-taglib-sharp"
+import {
+  ApeTag,
+  AsfTag,
+  ByteVector,
+  Id3v2FrameClassType,
+  Id3v2Tag,
+  Id3v2UserTextInformationFrame,
+  Mpeg4AppleTag,
+  Picture,
+  PictureType,
+  File as TagFile,
+  TagTypes,
+  XiphComment,
+  type IPicture,
+} from "node-taglib-sharp"
 import type { ExistingTags } from "../shared/types"
 import { cachedArt, storeArt } from "./art"
 import { sniffImage } from "./art-image"
@@ -25,6 +39,51 @@ const TAG_TYPE_BY_EXT: Record<string, TagTypes> = {
   ape: TagTypes.Ape,
   wv: TagTypes.Ape,
   mpc: TagTypes.Ape,
+}
+
+/** The field name most taggers (Mp3tag, foobar2000, Picard plugins) use for a Discogs release. */
+const DISCOGS_RELEASE = "DISCOGS_RELEASE_ID"
+
+/** The file's own tag of the kind Dubplate writes into, for fields TagLib has no property for. */
+function nativeTag(f: TagFile, create: boolean) {
+  const type = TAG_TYPE_BY_EXT[path.extname(f.name).slice(1).toLowerCase()]
+  return type === undefined ? undefined : f.getTag(type, create)
+}
+
+function readCustom(f: TagFile, key: string): string | undefined {
+  const t = nativeTag(f, false)
+  let v: string | undefined
+  if (t instanceof Id3v2Tag) {
+    const frames = t.getFramesByClassType<Id3v2UserTextInformationFrame>(Id3v2FrameClassType.UserTextInformationFrame)
+    v = Id3v2UserTextInformationFrame.findUserTextInformationFrame(frames, key, false)?.text?.[0]
+  } else if (t instanceof XiphComment) v = t.getFieldFirstValue(key)
+  else if (t instanceof Mpeg4AppleTag) v = t.getFirstItunesString("com.apple.iTunes", key)
+  else if (t instanceof ApeTag) v = t.getItem(key)?.text?.[0]
+  else if (t instanceof AsfTag) v = t.getDescriptorString(key)
+  return v?.trim() || undefined
+}
+
+function writeCustom(f: TagFile, key: string, value: string | undefined) {
+  const t = nativeTag(f, true)
+  if (t instanceof Id3v2Tag) {
+    const frames = t.getFramesByClassType<Id3v2UserTextInformationFrame>(Id3v2FrameClassType.UserTextInformationFrame)
+    const frame = Id3v2UserTextInformationFrame.findUserTextInformationFrame(frames, key, false)
+    if (!value) {
+      if (frame) t.removeFrame(frame)
+    } else if (frame) frame.text = [value]
+    else {
+      const created = Id3v2UserTextInformationFrame.fromDescription(key)
+      created.text = [value]
+      t.addFrame(created)
+    }
+  } else if (t instanceof XiphComment) {
+    if (value) t.setFieldAsStrings(key, value)
+    else t.removeField(key)
+  } else if (t instanceof Mpeg4AppleTag) {
+    if (value) t.setItunesStrings("com.apple.iTunes", key, value)
+    else t.setItunesStrings("com.apple.iTunes", key)
+  } else if (t instanceof ApeTag) t.setStringValue(key, value ?? "")
+  else if (t instanceof AsfTag) t.setDescriptorString(value ?? "", key)
 }
 
 function frontCover(pictures: IPicture[]): IPicture | undefined {
@@ -51,6 +110,10 @@ export function readManagedTags(file: string): ExistingTags {
       bpm: t.beatsPerMinute || undefined,
       key: t.initialKey || undefined,
       cover: cover ? storeArt(cover.data.toByteArray(), "embedded")?.hash : undefined,
+      mbRecordingId: t.musicBrainzTrackId || undefined,
+      mbReleaseId: t.musicBrainzReleaseId || undefined,
+      mbArtistId: t.musicBrainzArtistId || undefined,
+      discogsReleaseId: readCustom(f, DISCOGS_RELEASE),
     }
   } finally {
     f.dispose()
@@ -80,6 +143,10 @@ export function writeTags(file: string, changes: Partial<Record<keyof ExistingTa
     if ("comment" in changes) t.comment = str(changes.comment)
     if ("bpm" in changes) t.beatsPerMinute = Math.round(Number(changes.bpm)) || 0
     if ("key" in changes) t.initialKey = str(changes.key)
+    if ("mbRecordingId" in changes) t.musicBrainzTrackId = str(changes.mbRecordingId)
+    if ("mbReleaseId" in changes) t.musicBrainzReleaseId = str(changes.mbReleaseId)
+    if ("mbArtistId" in changes) t.musicBrainzArtistId = str(changes.mbArtistId)
+    if ("discogsReleaseId" in changes) writeCustom(f, DISCOGS_RELEASE, str(changes.discogsReleaseId))
     if ("cover" in changes) {
       // Only the front cover is Dubplate's; back covers, artist photos etc. stay put.
       const others = (t.pictures ?? []).filter((p) => p !== frontCover(t.pictures ?? []))

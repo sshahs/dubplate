@@ -25,11 +25,12 @@ const files: { rel: string; tags?: Record<string, string> }[] = [
   { rel: "Downloads/audio_track_01 copy.mp3" },
 ]
 
-for (const f of files) {
+for (const [i, f] of files.entries()) {
   const full = path.join(root, f.rel)
   fs.mkdirSync(path.dirname(full), { recursive: true })
   if (full.endsWith(".wav")) writeWav(full, 2)
-  else writeMp3(full, 200)
+  // A different length each, so only the copy below counts as a duplicate.
+  else writeMp3(full, 200 + i * 10)
   if (f.tags) writeTags(full, f.tags)
 }
 // an exact duplicate, to show off duplicate detection

@@ -18,7 +18,7 @@ interface MbRecording {
   title: string
   length?: number
   "first-release-date"?: string
-  "artist-credit"?: { name: string; joinphrase?: string; artist?: { name: string } }[]
+  "artist-credit"?: { name: string; joinphrase?: string; artist?: { id?: string; name: string } }[]
   releases?: { id?: string; title: string; date?: string }[]
 }
 
@@ -45,6 +45,11 @@ export const musicbrainz: SourceAdapter = {
         duration: r.length ? r.length / 1000 : undefined,
         url: `https://musicbrainz.org/recording/${r.id}`,
         externalId: r.id,
+        ids: {
+          mbRecordingId: r.id,
+          mbReleaseId: r.releases?.[0]?.id,
+          mbArtistIds: credits.map((c) => c.artist?.id).filter((id): id is string => !!id),
+        },
         sourceScore: r.score !== undefined ? r.score / 100 : undefined,
         // Cover Art Archive answers 404 when a release has no front cover; the fetcher moves on.
         artwork: r.releases?.[0]?.id ? `https://coverartarchive.org/release/${r.releases[0].id}/front-1200` : undefined,
@@ -118,6 +123,7 @@ export const discogs: SourceAdapter = {
         duration: discogsDuration(best.t.duration),
         url: rel.uri ?? `https://www.discogs.com/release/${rel.id}`,
         externalId: String(rel.id),
+        ids: { discogsReleaseId: String(rel.id) },
         artwork: (rel.images?.find((i) => i.type === "primary") ?? rel.images?.[0])?.uri || undefined,
       })
     }

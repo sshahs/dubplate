@@ -74,6 +74,7 @@ export const acoustid: SourceAdapter = {
           duration: rec.duration,
           url: `https://musicbrainz.org/recording/${rec.id}`,
           externalId: rec.id,
+          ids: { mbRecordingId: rec.id },
           sourceScore: r.score,
           fingerprint: true,
         })

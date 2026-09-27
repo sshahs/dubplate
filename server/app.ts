@@ -6,7 +6,7 @@ import { Hono, type Context } from "hono"
 import { compress } from "hono/compress"
 import { streamSSE } from "hono/streaming"
 import { parseKey } from "../shared/keys"
-import type { FinalMeta, ScraperDefinition, ServerEvent, Settings, Track, TrackStatus } from "../shared/types"
+import type { FinalMeta, Library, MediaServerConfig, ScraperDefinition, ServerEvent, Settings, Track, TrackStatus } from "../shared/types"
 import { TRACK_STATUSES } from "../shared/types"
 import { activeProvider, interpretTrack } from "./ai/interpreter"
 import { listModels, testProvider } from "./ai/providers"
@@ -17,10 +17,15 @@ import { parseFilename } from "./core/filename-parser"
 import { normArtist } from "./core/normalize"
 import { buildPlan, executePlan, metaFor, proposedFilename, rewind } from "./executor"
 import { activeJobs, cancelJob, emit, enqueueJob, listJobs, recentLogEvents, subscribe } from "./jobs"
+import { isBackup, makeBackup, restoreBackup } from "./backup"
+import { duplicateGroups, setAside, setAsideCount, validResolutions, type Resolution } from "./duplicates"
+import { sendChat, type ChatChannel } from "./integrations/chat"
+import { testMediaServer } from "./integrations/media-servers"
+import { executeOrganise, planOrganise, type OrganiseRequest } from "./organise"
 import { artworkTracks, processTracks, rescoreTracks, scoreAndSave } from "./pipeline"
 import * as repo from "./repo"
 import { scanLibrary } from "./scanner"
-import { publicSettings, saveSettings, settingsNow } from "./settings"
+import { isMasked, publicSettings, saveSettings, settingsNow } from "./settings"
 import { findFpcalc } from "./sources/acoustid"
 import { clearHttpCache } from "./sources/http"
 import { allAdapters, buildQuery, sourceStatus } from "./sources"
@@ -184,21 +189,22 @@ export function createApp() {
   app.get("/api/libraries", (c) => c.json(repo.listLibraries()))
 
   app.post("/api/libraries", async (c) => {
-    const body = await c.req.json<{ path: string; name?: string; scan?: boolean }>()
+    const body = await c.req.json<{ path: string; name?: string; scan?: boolean; process?: boolean; watch?: boolean }>()
     const p = path.resolve(body.path.replace(/^~(?=$|[\\/])/, os.homedir()))
     if (!fs.existsSync(p) || !fs.statSync(p).isDirectory()) return c.json({ error: "That folder doesn't exist" }, 400)
     const overlapping = repo.listLibraries().find((l) => p.startsWith(l.path + path.sep) || l.path.startsWith(p + path.sep) || l.path === p)
     if (overlapping) return c.json({ error: `Overlaps with library "${overlapping.name}"` }, 400)
-    const lib = repo.addLibrary(p, body.name?.trim() || path.basename(p))
-    if (body.scan !== false) enqueueScan(lib.id)
+    const lib = repo.addLibrary(p, body.name?.trim() || path.basename(p), { watch: !!body.watch })
+    if (body.watch) syncWatchers()
+    if (body.scan !== false) enqueueScan(lib.id, { process: !!body.process })
     return c.json(lib)
   })
 
   app.patch("/api/libraries/:id", async (c) => {
     const id = Number(c.req.param("id"))
     if (!repo.getLibrary(id)) return c.json({ error: "Library not found" }, 404)
-    const body = await c.req.json<{ name?: string; watch?: boolean }>()
-    repo.updateLibrary(id, { name: body.name?.trim() || undefined, watch: typeof body.watch === "boolean" ? body.watch : undefined })
+    const body = await c.req.json<{ name?: string; watch?: boolean; settings?: Library["settings"] }>()
+    repo.updateLibrary(id, { name: body.name?.trim() || undefined, watch: typeof body.watch === "boolean" ? body.watch : undefined, settings: body.settings })
     syncWatchers()
     return c.json(repo.getLibrary(id))
   })
@@ -209,11 +215,17 @@ export function createApp() {
     return c.json({ ok: true })
   })
 
-  function enqueueScan(id: number) {
+  /** Scan a library; `process` then identifies whatever the scan found new (first-run setup). */
+  function enqueueScan(id: number, opts: { process?: boolean } = {}) {
     const lib = repo.getLibrary(id)
     if (!lib) throw new Error("Library not found")
     return enqueueJob("scan", `Scan ${lib.name}`, async (ctx) => {
-      await scanLibrary(lib, settingsNow(), ctx)
+      const { added } = await scanLibrary(lib, settingsNow(), ctx)
+      if (opts.process && added.length) {
+        enqueueJob("process", `Identify ${added.length} track${added.length === 1 ? "" : "s"} in ${lib.name}`, (c) =>
+          processTracks(added, settingsNow(), { interpret: true, scour: true, force: false }, c)
+        )
+      }
     })
   }
 
@@ -288,12 +300,16 @@ export function createApp() {
     const s = settingsNow()
     const undoId = snapshot(body.action, ids)
     let changed = 0
+    let skipped = 0
     for (const id of ids) {
       const t = repo.getTrack(id)
       if (!t) continue
       if (body.action === "approve") {
         const final = t.final ?? (t.decision?.title && t.decision.artists.length ? sanitizeFinal(t.decision) : null)
-        if (!final || t.status === "done") continue
+        if (!final || t.status === "done") {
+          skipped++
+          continue
+        }
         repo.updateTrack(id, { final, status: "approved", proposedName: proposedFilename({ ...t, final }, s) })
       } else if (body.action === "reject") {
         repo.updateTrack(id, { status: "rejected" })
@@ -304,7 +320,7 @@ export function createApp() {
       }
       changed++
     }
-    return c.json({ changed, undoId })
+    return c.json({ changed, skipped, undoId })
   })
 
   // Set the same fields on many tracks at once (album, label, genre, BPM…).
@@ -578,8 +594,77 @@ export function createApp() {
     return c.json({ ok: true })
   })
 
+  // ---- duplicates ----
+  app.get("/api/duplicates", (c) => c.json({ groups: duplicateGroups(), setAside: setAsideCount(), holdingFolder: settingsNow().duplicates.holdingFolder }))
+
+  app.post("/api/duplicates/resolve", async (c) => {
+    const body = await c.req.json<{ groups: Resolution[] }>()
+    const s = settingsNow()
+    if (s.safety.readOnly) return c.json({ error: "Read-only mode is on - turn it off to move files." }, 409)
+    const resolutions = validResolutions(body.groups ?? [])
+    const n = resolutions.reduce((a, r) => a + r.aside.length, 0)
+    if (!n) return c.json({ error: "Nothing to set aside" }, 400)
+    return c.json(enqueueJob("duplicates", `Set aside ${n} duplicate${n === 1 ? "" : "s"}`, (ctx) => setAside(resolutions, settingsNow(), ctx)))
+  })
+
+  // ---- organise ----
+  app.post("/api/organise/preview", async (c) => {
+    const body = await c.req.json<OrganiseRequest>()
+    try {
+      return c.json(planOrganise(settingsNow(), body).preview)
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
+
+  app.post("/api/organise", async (c) => {
+    const body = await c.req.json<OrganiseRequest>()
+    const s = settingsNow()
+    if (s.safety.readOnly) return c.json({ error: "Read-only mode is on - turn it off to move files." }, 409)
+    const lib = repo.getLibrary(Number(body.libraryId))
+    if (!lib) return c.json({ error: "Library not found" }, 404)
+    return c.json(enqueueJob("organise", `Organise ${lib.name}`, (ctx) => executeOrganise(settingsNow(), body, ctx)))
+  })
+
+  // ---- backup ----
+  app.get("/api/backup", (c) => {
+    const backup = makeBackup({ secrets: c.req.query("secrets") === "1" })
+    const day = backup.exportedAt.slice(0, 10)
+    return c.body(JSON.stringify(backup, null, 2), 200, { "content-type": "application/json", "content-disposition": `attachment; filename="dubplate-backup-${day}.json"` })
+  })
+
+  app.post("/api/restore", async (c) => {
+    const body = await c.req.json<{ backup: unknown; parts?: { settings?: boolean; learnings?: boolean; libraries?: boolean } }>()
+    if (!isBackup(body.backup)) return c.json({ error: "That isn't a Dubplate backup file" }, 400)
+    const result = restoreBackup(body.backup, { settings: body.parts?.settings !== false, learnings: body.parts?.learnings !== false, libraries: body.parts?.libraries !== false })
+    syncWatchers()
+    emit({ type: "stats" })
+    return c.json(result)
+  })
+
+  // ---- integrations ----
+  /** A draft from the settings page: masked secrets mean "the one already saved". */
+  app.post("/api/integrations/media-server/test", async (c) => {
+    const { server } = await c.req.json<{ server: MediaServerConfig }>()
+    const saved = settingsNow().integrations.mediaServers.find((m) => m.id === server.id)
+    const token = !server.token || isMasked(server.token) ? saved?.token : server.token
+    return c.json(await testMediaServer({ ...server, url: (server.url ?? "").trim().replace(/\/+$/, ""), token }))
+  })
+
+  app.post("/api/integrations/chat/test", async (c) => {
+    const { channel, integrations } = await c.req.json<{ channel: ChatChannel; integrations: Settings["integrations"] }>()
+    const s = settingsNow()
+    const draft = structuredClone(s)
+    const d = integrations?.discord ?? s.integrations.discord
+    const t = integrations?.telegram ?? s.integrations.telegram
+    draft.integrations.discord = { enabled: true, webhookUrl: !d.webhookUrl || isMasked(d.webhookUrl) ? s.integrations.discord.webhookUrl : d.webhookUrl.trim() }
+    draft.integrations.telegram = { enabled: true, chatId: t.chatId?.trim(), botToken: !t.botToken || isMasked(t.botToken) ? s.integrations.telegram.botToken : t.botToken.trim() }
+    draft.integrations.publicUrl = (integrations?.publicUrl ?? s.integrations.publicUrl ?? "").trim().replace(/\/+$/, "")
+    const [r] = await sendChat(draft, { title: "Dubplate is connected", lines: ["Messages about finished jobs and tracks to review will arrive here."], link: { label: "Open Dubplate", path: "/" }, tone: "ok" }, channel)
+    return c.json(r ?? { channel, ok: false, message: channel === "discord" ? "Needs a webhook URL" : "Needs a bot token and a chat ID" })
+  })
+
   // ---- reports ----
-  app.get("/api/duplicates", (c) => c.json(repo.duplicateGroups()))
 
   app.get("/api/export", (c) => {
     const q = parseQuery(c)

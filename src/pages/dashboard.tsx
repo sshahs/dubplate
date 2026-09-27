@@ -1,6 +1,6 @@
 import { HugeiconsIcon } from "@hugeicons/react"
-import { AiMagicIcon, CheckListIcon, FolderLibraryIcon, RefreshIcon, Scissor01Icon, Tick02Icon } from "@hugeicons/core-free-icons"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { AiMagicIcon, CheckListIcon, RefreshIcon, Scissor01Icon } from "@hugeicons/core-free-icons"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import { useState, type CSSProperties } from "react"
 import { Link } from "react-router"
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, XAxis, YAxis } from "recharts"
@@ -8,16 +8,15 @@ import { toast } from "sonner"
 import { AnimatedNumber } from "@/components/animated-number"
 import { DubplateMark, VuMeter } from "@/components/brand"
 import { PageHeader } from "@/components/app-shell"
-import { GenrePicker } from "@/components/genre-picker"
+import { SetupChecklist } from "@/components/setup-checklist"
 import { QueryError } from "@/components/query-error"
 import { StatusBadge } from "@/components/confidence"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart"
 import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Spinner } from "@/components/ui/spinner"
 import { api } from "@/lib/api"
 import { useActiveJobs } from "@/lib/events"
 import { fmtAgo } from "@/lib/format"
@@ -61,57 +60,6 @@ const FLOW: { status: TrackStatus[]; label: string }[] = [
   { status: ["done"], label: "Done" },
 ]
 
-/** First run: what's in the crates, saved as you pick. Skipping it leaves the AI open to any genre. */
-function CratesStep() {
-  const qc = useQueryClient()
-  const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: api.settings })
-  const [picked, setPicked] = useState<string[] | null>(null)
-  const save = useMutation({
-    // One queue for every tap, so quick picks are saved in order and the last one wins.
-    scope: { id: "crates" },
-    mutationFn: (genres: string[]) => api.saveSettings({ llm: { genres } }),
-    onSuccess: (next) => qc.setQueryData(["settings"], next),
-    onError: (e) => toast.error(`Couldn't save your genres: ${e.message}`),
-  })
-  return (
-    <Card className="mt-8 w-full text-left">
-      <CardHeader>
-        <CardTitle>What's in your crates?</CardTitle>
-        <CardDescription>Optional. Pick what you've got and the AI knows what to expect; skip it and Dubplate reads any genre. You can change it later in Settings.</CardDescription>
-        <CardAction className="text-muted-foreground flex h-5 items-center gap-1.5 text-xs" aria-live="polite">
-          {save.isPending ? (
-            <>
-              <Spinner className="size-3.5" />
-              Saving
-            </>
-          ) : (
-            picked &&
-            save.isSuccess && (
-              <>
-                <HugeiconsIcon icon={Tick02Icon} strokeWidth={2} className="text-rasta-green size-3.5" />
-                Saved
-              </>
-            )
-          )}
-        </CardAction>
-      </CardHeader>
-      <CardContent>
-        {settings ? (
-          <GenrePicker
-            value={picked ?? settings.llm.genres}
-            onChange={(genres) => {
-              setPicked(genres)
-              save.mutate(genres)
-            }}
-          />
-        ) : (
-          <Skeleton className="h-64 rounded-2xl" />
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
 export default function DashboardPage() {
   const { data: stats, error: statsError, refetch: refetchStats } = useQuery({ queryKey: ["stats"], queryFn: api.stats })
   const { data: libraries } = useQuery({ queryKey: ["libraries"], queryFn: api.libraries })
@@ -147,17 +95,14 @@ export default function DashboardPage() {
           Point it at a folder of badly named tunes. It reads every filename like a selector would, checks MusicBrainz, Discogs, Bandcamp and friends
           for consensus, and only renames what it's sure of - everything else waits for your ear.
         </p>
-        <CratesStep />
-        <div className="mt-8 flex flex-wrap justify-center gap-2">
-          <Button nativeButton={false} render={<Link to="/libraries" />} size="lg">
-            <HugeiconsIcon icon={FolderLibraryIcon} strokeWidth={2} data-icon="inline-start" />
-            Add your first library
-          </Button>
-          <Button variant="outline" size="lg" nativeButton={false} render={<Link to="/untangler" />}>
+        <SetupChecklist />
+        <p className="text-muted-foreground mt-6 text-sm">
+          Want to see how it reads names first?{" "}
+          <Link to="/untangler" className="text-foreground underline underline-offset-2">
             Try the Untangler
-          </Button>
-        </div>
-        <p className="text-muted-foreground mt-6 text-xs">Scanning is read-only. Nothing on disk changes until you approve it and switch off read-only mode.</p>
+          </Link>
+        </p>
+        <p className="text-muted-foreground mt-2 text-xs">Scanning is read-only. Nothing on disk changes until you approve it and switch off read-only mode.</p>
       </div>
     )
   }

@@ -97,7 +97,8 @@ flowchart TB
 | **🔎 Metadata scourer** | Asks every enabled source at once, with polite per-host rate limits and a 7-day response cache. |
 | **📊 Confidence engine** | Groups the hits by recording, then weighs consensus across independent sources, agreement between readings, duration, fingerprint matches and conflicts. The result is an explainable 0–100 score. |
 | **🎨 Artwork, tempo & key** | Fetches a cover from the sources that confirmed the track (Cover Art Archive, Discogs, Bandcamp, Apple Music, Deezer…), and listens to the audio for BPM and musical key. |
-| **✂️ Verify & execute** | Bulk-approve the matches, review the rest, then rename and tag in place. Every operation is logged so any batch can be put back. |
+| **✂️ Verify & execute** | Bulk-approve the matches, review the rest, then rename and tag in place, writing MusicBrainz and Discogs IDs where the sources found them. Every operation is logged so any batch can be put back. |
+| **🗄️ Organise** | Optionally moves cut tracks into a folder layout of your choosing inside the library (`Artist / Year - Album`, `A-Z / Artist`, `BPM / Key`…), bringing cover images along and tidying empty folders. Previewed as a tree first, rewindable after. |
 
 ### 📊 Reading the meter
 
@@ -134,6 +135,10 @@ The **Evidence** tab shows every factor behind a score:
   <tr>
     <td><img src="docs/screenshots/review.png" alt="Review queue"><p align="center"><b>Selector's chair</b>: keyboard-driven review</p></td>
     <td><img src="docs/screenshots/cut-and-tag.png" alt="Cut and tag"><p align="center"><b>Cut & Tag</b>: plan, dry run, rewind</p></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/organise.png" alt="Organise"><p align="center"><b>Shelve the crates</b>: see every folder before a file moves</p></td>
+    <td><img src="docs/screenshots/duplicates.png" alt="Duplicates"><p align="center"><b>Doubles</b>: keep the best copy, set the rest aside</p></td>
   </tr>
   <tr>
     <td><img src="docs/screenshots/untangler.png" alt="Untangler"><p align="center"><b>Untangler</b>: test any filename</p></td>
@@ -175,8 +180,17 @@ The **Evidence** tab shows every factor behind a score:
 **🔧 Custom scrapers**: point Dubplate at any specialist site's search page
 (CSS selectors) or JSON API (dot-paths, e.g. WordPress `/wp-json`). Grime
 archives, clash databases and label shops all work. The built-in **Test**
-button shows exactly what gets extracted. Presets for Juno Download and a
-sound-clash archive ship switched off until you've verified them.
+button shows exactly what gets extracted. Presets for Juno Download,
+Traxsource, Genius, Audius, Hype Machine, AllMusic and a sound-clash archive
+ship switched off until you've verified them (site markup drifts, so test one
+before trusting it).
+
+**🎯 Tuned to your crates**: each source knows which genres it's strong for
+(Bandcamp for jungle and dub, Mixcloud for DJ mixes and radio rips, the
+streaming stores for pop and hip-hop…). When you've picked genres, sources
+that suit them count ×1.2, and presets that suit them are flagged as
+suggested. A library with its own genres gets its own tuning. Switch it off on
+the Sources page.
 
 <a id="ai-providers"></a>
 
@@ -216,16 +230,16 @@ npm run dev
 
 > [!TIP]
 > No music handy? `npm run demo -- ./demo-crates` makes a folder of silent
-> files with realistically messy names.
+> files with realistically messy names, plus one exact copy for Duplicates.
 
 **First session**
 
-1. **Welcome screen**: optionally pick what's in your crates (genres, plus kinds of recording like sound clashes or radio rips, or add your own). Skip it and Dubplate reads any genre. Change it later in **Settings → Your crates**.
-2. **Libraries**: add a folder. It's scanned read-only. Switch on **Watch for new files** to have new rips picked up and identified as they land.
-3. **Settings → AI interpreter**: pick a provider and model, then hit **Test**.
-4. **Dashboard → Process new**: interpret → scour → score.
-5. **Review**: listen, check the evidence, fix anything that's off and approve.
-6. **Cut & Tag**: do a dry run, switch off read-only mode, then cut. **Rewind** undoes any batch.
+1. **Welcome checklist**: pick what's in your crates (genres and kinds of recording, or add your own; skip it and Dubplate reads any genre), choose the AI that reads the names and hit **Save & test**, leave a contact email for MusicBrainz, then point it at your first folder. It's scanned read-only and every track is identified straight away.
+2. **Review**: listen, check the evidence, fix anything that's off and approve. On a phone, swipe right to approve and left to leave as-is. **Approve all** clears a whole queue at once, with Undo.
+3. **Cut & Tag**: do a dry run, switch off read-only mode, then cut. **Rewind** undoes any batch.
+4. **Organise** (optional): pick a folder layout, check the preview tree, and move everything into place.
+
+More libraries later: **Libraries → Add library**, then **Dashboard → Process new** (or switch on **Watch for new files** and new rips are identified as they land). **Customise** on a library gives it its own genres, file names or folder layout.
 
 **Keyboard**
 
@@ -237,6 +251,7 @@ npm run dev
 | <kbd>A</kbd> | Review | Approve (and learn) |
 | <kbd>X</kbd> | Review | Leave as-is |
 | <kbd>Z</kbd> | Review | Undo the last approve / leave-as-is |
+| Swipe right / left | Review, on a touch screen | Approve / leave as-is |
 | <kbd>Shift</kbd>-click | Tracks | Tick every row between two checkboxes |
 
 <a id="docker"></a>
@@ -359,6 +374,112 @@ choice), and a found cover becomes the front cover - other pictures in the
 file are left alone, and a file's existing cover is only replaced if you
 allow it.
 
+When the sources pinned a track down, its **MusicBrainz** recording, release
+and artist IDs and its **Discogs** release ID are written in the standard
+fields (`MUSICBRAINZ_TRACKID`, `MUSICBRAINZ_ALBUMID`, `MUSICBRAINZ_ARTISTID`,
+`DISCOGS_RELEASE_ID` or the ID3/MP4 equivalents), so Picard, Plex, Jellyfin and
+Navidrome recognise the track straight away. The IDs only come from the
+sources that agreed on the song you approved. Switch it off under
+**Settings → Naming & tags**.
+
+</details>
+
+<details>
+<summary><b>Folders (Organise)</b></summary>
+
+A folder template decides where a track lives inside its library.
+`/` starts a new folder level:
+
+| Template | Gives |
+| --- | --- |
+| `{artist}` | `Chronixx/` |
+| `{artist}/[{year} - ]{album}` | `Chronixx/2014 - Dread & Terrible/` |
+| `{initial}/{artist}` | `C/Chronixx/` |
+| `{genre}/{artist}` | `Reggae/Chronixx/` |
+| `{label}/{year}` | `Soul Circle/2014/` |
+| `[{bpmrange} BPM]/[{camelot}]` | `70-79 BPM/8A/` |
+
+Tokens: `{artist}` (main artists), `{firstartist}`, `{albumartist}`,
+`{album}`, `{year}`, `{decade}` (`1990s`), `{label}`, `{genre}`, `{version}`,
+`{initial}` (A-Z, `0-9` or `#`, ignoring a leading "The"), `{bpm}`,
+`{bpmrange}` (`140-149`), `{key}`, `{camelot}` and `{format}` (`FLAC`).
+
+- Anything in `[ ]` only appears when every tag inside it has a value.
+- A level whose own tag is missing (an album folder for a single) is skipped,
+  or named "Unknown …" if you prefer.
+- Album, year, genre and label follow the file's own tags first, just as
+  tagging leaves them.
+- Cover images, cue sheets and notes follow their folder when all of its
+  audio goes to the same place. Folders a move empties are removed (OS junk
+  like `.DS_Store` doesn't keep them alive).
+- Files never leave their library, collisions are blocked, and every move is
+  journalled: **Rewind** puts files back and removes the folders it made.
+
+Use it two ways: **Organise** re-files tracks you've already cut (after a
+preview of the whole tree), and **Also move files into place when cutting**
+files approved tracks as they're renamed and tagged.
+
+</details>
+
+<details>
+<summary><b>Per-library settings</b></summary>
+
+**Libraries → Customise** gives one library its own crates (genres and notes
+for the AI, and the source tuning that follows from them), its own filename
+template, and its own folder layout. Anything left off follows the app's
+settings, so a reggae library and a techno library can be read, named and
+filed differently.
+
+</details>
+
+<details>
+<summary><b>Duplicates</b></summary>
+
+**Duplicates** lists identical audio (same content fingerprint) and different
+files that would get the same name. For each group Dubplate suggests the copy
+to keep - lossless over lossy, then bitrate, never a clipped copy, then one
+that's already cut or has artwork - and says why. Pick another if you prefer.
+
+The others are **set aside, never deleted**: moved into a holding folder at
+the top of their library (`Duplicates set aside` by default, renamed in
+**Settings → Safety & scanner**), keeping their folder structure, and hidden
+from the library. Scans skip the holding folder. **Rewind** brings them back.
+**Keep the best of every identical copy** resolves every identical-audio group
+in one go; same-name groups always wait for you, as they may be different
+cuts.
+
+</details>
+
+<details>
+<summary><b>Media servers, Discord and Telegram</b></summary>
+
+**Settings → Media servers**: after every cut, organise, rewind or duplicate
+clean-up, Dubplate asks these to rescan, so new names show up straight away.
+
+| Server | Needs |
+| --- | --- |
+| Plex | Address (e.g. `http://nas:32400`) and an `X-Plex-Token`. Its music libraries are rescanned. |
+| Jellyfin / Emby | Address and an API key (Dashboard → API Keys). |
+| Navidrome | Address, user and password (Subsonic API `startScan`). |
+
+**Settings → Notifications**: a Discord webhook and/or a Telegram bot (token
+from @BotFather, chat ID from @userinfobot) get a message when a long job
+finishes (over 30 seconds, every cut, organise and rewind, and anything that
+failed) and when new tracks are waiting for a listen. Set **Dubplate's
+address** and messages link straight to the right page. Every connection has
+a **Test** button.
+
+</details>
+
+<details>
+<summary><b>Backup & restore</b></summary>
+
+**Settings → Backup & restore** downloads one JSON file with your settings,
+aliases, corrections and libraries (with their own settings). API keys and
+tokens are left out unless you ask for them. Restoring replaces the settings
+(keeping any keys the file doesn't carry), merges aliases and corrections in,
+and adds the libraries whose folders exist on the new machine.
+
 </details>
 
 ## 🛡️ Safety inna di dance
@@ -366,8 +487,9 @@ allow it.
 - 🔒 **Read-only by default.** Nothing on disk changes until you turn off read-only mode.
 - 👀 Scans only stat, list and read.
 - 🧾 Before writing, Dubplate checks that each file still has the size and mtime from the scan.
-- 🚫 Renames stay in the same folder and never overwrite another file.
-- ⏪ Every rename and tag write is logged with the old name and tag values (and any cover it replaced), so **Rewind** restores them all.
+- 🚫 Files never leave their library - renaming, organising and setting duplicates aside alike - and never overwrite another file.
+- 🗑️ Nothing is ever deleted. Duplicates are set aside in a holding folder.
+- ⏪ Every rename, move and tag write is logged with the old name, folder and tag values (and any cover it replaced), so **Rewind** restores them all.
 - ↩️ Review decisions and bulk edits come with **Undo** for a few moments afterwards.
 - 🏠 The server binds to localhost, rejects unknown `Host` headers (DNS rebinding) and needs an `X-Dubplate` header on every write request (CSRF).
 
@@ -379,9 +501,15 @@ allow it.
 - 👀 **Watch folders**: new files are scanned and identified as they land, with a periodic re-check for network shares and an optional nightly rescan.
 - ✏️ **Bulk edit**: set album, label, genre, year, artists, BPM or key across a selection - with Undo.
 - 🗄️ **Big libraries**: the Tracks list only draws what's on screen and loads rows in blocks as you scroll, so tens of thousands of tracks stay quick.
-- 🔔 **Job notifications**: a long job finishing in a background tab flags the tab title, and can pop a browser notification (needs HTTPS or localhost).
+- 🔔 **Job notifications**: a long job finishing in a background tab flags the tab title, and can pop a browser notification (needs HTTPS or localhost). **Discord and Telegram** get a message too, including when new tracks need a listen.
+- 🗄️ **Organise**: folder layouts from presets or your own template, previewed as a tree, with covers following their folders, empty folders tidied, and Rewind.
+- 🎚️ **Per-library settings**: a library can have its own genres, filename template and folder layout.
+- 🏷️ **Catalogue IDs**: MusicBrainz and Discogs IDs written to tags, so media servers and other taggers recognise tracks.
+- 📺 **Media servers**: Plex, Jellyfin/Emby and Navidrome rescan after every change.
+- 💾 **Backup & restore**: settings, learnings and libraries in one file.
+- 📱 **Review on a phone**: swipe right to approve, left to leave as-is; **Approve all** clears a queue with Undo.
 - 🎧 **Audio preview** in the review screen, with streaming and seeking.
-- 👯 **Duplicates**: identical audio by fingerprint, plus different files that would get the same name.
+- 👯 **Duplicates**: identical audio by fingerprint, plus different files that would get the same name. Keep the best copy and set the rest aside, never deleted.
 - 📟 **Live console**: job progress and logs streamed over server-sent events.
 - 📤 **Export** CSV or JSON reports for any filter.
 - ⌨️ **Command palette**, and light and dark themes.
