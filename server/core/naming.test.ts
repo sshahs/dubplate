@@ -23,6 +23,8 @@ describe("naming", () => {
 
   it("drops empty template parts", () => {
     expect(renderTemplate("{year} - {artist} - {title} [{label}]", { artists: ["Kano"], featuring: [], title: "Ps and Qs" }, naming)).toBe("Kano - Ps and Qs")
+    // Unknown tags are empty, including names of built-in object properties.
+    expect(renderTemplate("{artist} - {title} [{constructor}]", { artists: ["Kano"], featuring: [], title: "Ps and Qs" }, naming)).toBe("Kano - Ps and Qs")
   })
 
   it("sanitises characters filesystems reject", () => {

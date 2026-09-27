@@ -58,6 +58,7 @@ export function TrackDetail({
   const qc = useQueryClient()
   const { data: track, isLoading, error, refetch } = useQuery({ queryKey: ["track", trackId], queryFn: () => api.track(trackId) })
   const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: api.settings })
+  const { data: libraries } = useQuery({ queryKey: ["libraries"], queryFn: api.libraries })
   // The form follows the saved track until you edit it; edits are tied to the track they were made on.
   // Derived during render (not in an effect) so a cached track appears without a skeleton frame.
   const [edit, setEdit] = useState<{ trackId: number; draft: MetaDraft } | null>(null)
@@ -69,8 +70,10 @@ export function TrackDetail({
     if (!draft || !settings || !track) return null
     const meta = fromDraft(draft)
     if (!meta.title || !meta.artists.length) return null
-    return `${renderTemplate(settings.naming.template, meta, settings.naming)}.${track.ext.toLowerCase()}`
-  }, [draft, settings, track])
+    // A library can have its own naming template.
+    const template = libraries?.find((l) => l.id === track.libraryId)?.settings.template ?? settings.naming.template
+    return `${renderTemplate(template, meta, settings.naming)}.${track.ext.toLowerCase()}`
+  }, [draft, settings, track, libraries])
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["track", trackId] })

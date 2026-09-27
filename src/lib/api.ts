@@ -1,14 +1,19 @@
 import type {
   AiParse,
   Alias,
+  BackupFile,
   Correction,
+  DuplicateGroup,
   FinalMeta,
   HealthInfo,
   HeuristicParse,
   Job,
   Library,
+  LibrarySettings,
+  MediaServerConfig,
   Operation,
   OperationBatch,
+  OrganisePreview,
   PlanItem,
   ScraperDefinition,
   Settings,
@@ -123,6 +128,10 @@ export interface SourceStatus {
   weight: number
   unavailable: string | null
   meta: { label: string; needs: ("apiKey" | "apiSecret")[]; keyLabel?: string; secretLabel?: string; about: string; signup?: string } | null
+  /** genres the source is especially good for */
+  suits: string[]
+  /** ×1.2 when it suits the picked genres, else 1 */
+  boost: number
 }
 
 /** Fields bulk edit can set; null or "" clears. */
@@ -140,10 +149,22 @@ export interface BulkChanges {
 
 type Undoable = { undoId: string | null }
 
-export interface DuplicateGroup {
-  key: string
-  kind: "hash" | "name"
-  tracks: TrackSummary[]
+export type { DuplicateGroup }
+
+export interface OrganiseRequest {
+  libraryId: number
+  template?: string
+  missing?: "skip" | "unknown"
+  rename?: boolean
+  include?: "cut" | "approved"
+  sidecars?: boolean
+}
+
+export interface RestoreResult {
+  settings: boolean
+  aliases: number
+  corrections: number
+  libraries: { added: number; updated: number; skipped: { path: string; reason: string }[] }
 }
 
 export const api = {
@@ -151,8 +172,8 @@ export const api = {
   stats: () => get<Stats>("/api/stats"),
 
   libraries: () => get<Library[]>("/api/libraries"),
-  addLibrary: (path: string, name?: string) => post<Library>("/api/libraries", { path, name }),
-  updateLibrary: (id: number, body: { name?: string; watch?: boolean }) => patch<Library>(`/api/libraries/${id}`, body),
+  addLibrary: (path: string, name?: string, opts: { process?: boolean; watch?: boolean } = {}) => post<Library>("/api/libraries", { path, name, ...opts }),
+  updateLibrary: (id: number, body: { name?: string; watch?: boolean; settings?: LibrarySettings }) => patch<Library>(`/api/libraries/${id}`, body),
   removeLibrary: (id: number) => del<{ ok: true }>(`/api/libraries/${id}`),
   scanLibrary: (id: number) => post<Job>(`/api/libraries/${id}/scan`),
   scanAll: () => post<Job[]>("/api/libraries/scan-all"),
@@ -162,7 +183,7 @@ export const api = {
   track: (id: number) => get<Track>(`/api/tracks/${id}`),
   updateTrack: (id: number, body: { final?: Partial<FinalMeta>; note?: string; bpm?: number | null; key?: string | null }) => patch<Track>(`/api/tracks/${id}`, body),
   approve: (id: number, final?: Partial<FinalMeta>, learn = true) => post<Track & Undoable>(`/api/tracks/${id}/approve`, { final, learn }),
-  bulk: (s: Selection, action: "approve" | "reject" | "reset" | "unapprove") => post<{ changed: number } & Undoable>("/api/tracks/bulk", { ...sel(s), action }),
+  bulk: (s: Selection, action: "approve" | "reject" | "reset" | "unapprove") => post<{ changed: number; skipped: number } & Undoable>("/api/tracks/bulk", { ...sel(s), action }),
   bulkEdit: (s: Selection, changes: BulkChanges) => post<{ changed: number; skipped: number } & Undoable>("/api/tracks/bulk-edit", { ...sel(s), changes }),
   undo: (undoId: string) => post<{ restored: number; label: string }>(`/api/undo/${undoId}`),
   analyze: (s: Selection, force = false) => post<Job>("/api/analyze", { ...sel(s), force }),
@@ -206,6 +227,17 @@ export const api = {
   corrections: () => get<Correction[]>("/api/corrections"),
   deleteCorrection: (id: number) => del<{ ok: true }>(`/api/corrections/${id}`),
 
-  duplicates: () => get<DuplicateGroup[]>("/api/duplicates"),
+  duplicates: () => get<{ groups: DuplicateGroup[]; setAside: number; holdingFolder: string }>("/api/duplicates"),
+  resolveDuplicates: (groups: { keep: number; aside: number[] }[]) => post<Job>("/api/duplicates/resolve", { groups }),
+
+  organisePreview: (req: OrganiseRequest) => post<OrganisePreview>("/api/organise/preview", req),
+  organise: (req: OrganiseRequest) => post<Job>("/api/organise", req),
+
+  backupUrl: (secrets: boolean) => `/api/backup${secrets ? "?secrets=1" : ""}`,
+  restore: (backup: BackupFile, parts: { settings: boolean; learnings: boolean; libraries: boolean }) => post<RestoreResult>("/api/restore", { backup, parts }),
+
+  testMediaServer: (server: MediaServerConfig) => post<{ ok: boolean; message: string }>("/api/integrations/media-server/test", { server }),
+  testChat: (channel: "discord" | "telegram", integrations: Settings["integrations"]) =>
+    post<{ ok: boolean; message: string }>("/api/integrations/chat/test", { channel, integrations }),
   exportUrl: (f: TrackFilter, format: "csv" | "json") => `/api/export?${filterToQuery(f)}&format=${format}`,
 }

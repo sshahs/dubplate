@@ -15,7 +15,7 @@ import {
 } from "@hugeicons/core-free-icons"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { useLocation, useNavigate } from "react-router"
+import { Link, useLocation, useNavigate } from "react-router"
 import { toast } from "sonner"
 import type { Candidate, ScraperDefinition, SourceConfig } from "@shared/types"
 import { PageHeader } from "@/components/app-shell"
@@ -178,6 +178,11 @@ function SourceRow({
             <div className="flex flex-wrap items-center gap-2">
               <span className={cn("font-medium", !cfg.enabled && "text-muted-foreground")}>{s.label}</span>
               {keyFromEnv && <Badge variant="outline">key from env</Badge>}
+              {s.boost > 1 && (
+                <Badge variant="outline" className="text-rasta-green font-normal" title={`Counts ×${s.boost} for your crates`}>
+                  suits your crates
+                </Badge>
+              )}
               {s.unavailable && cfg.enabled && (
                 <Badge variant="outline" className="text-rasta-gold font-normal">
                   {s.unavailable}
@@ -274,6 +279,7 @@ function SourceRow({
 function ScraperRow({
   sc,
   unavailable,
+  suits,
   onToggle,
   onEdit,
   onDuplicate,
@@ -281,6 +287,8 @@ function ScraperRow({
 }: {
   sc: ScraperDefinition
   unavailable: string | null
+  /** suits the picked genres (and counts a little more for it) */
+  suits: boolean
   onToggle: (enabled: boolean) => void
   onEdit: () => void
   onDuplicate: () => void
@@ -294,6 +302,11 @@ function ScraperRow({
           <Badge variant="outline" className="font-mono font-normal uppercase">
             {sc.kind}
           </Badge>
+          {suits && (
+            <Badge variant="outline" className="text-rasta-green font-normal">
+              {sc.enabled ? "suits your crates" : "suggested for your crates"}
+            </Badge>
+          )}
           {unavailable ? (
             <Badge variant="outline" className="text-rasta-gold font-normal">
               {unavailable}
@@ -332,6 +345,47 @@ function ScraperRow({
         </DropdownMenuContent>
       </DropdownMenu>
       <Switch checked={sc.enabled} onCheckedChange={onToggle} size="sm" aria-label={`Use ${sc.name}`} />
+    </div>
+  )
+}
+
+/** Whether sources that suit the picked genres count a little more. */
+function CratesTuning({ settings }: { settings: PublicSettings }) {
+  const qc = useQueryClient()
+  const genres = settings.llm.genres
+  const toggle = useMutation({
+    mutationFn: (genreAware: boolean) => api.saveSettings({ confidence: { genreAware } }),
+    onSuccess: (s) => {
+      qc.setQueryData(["settings"], s)
+      void qc.invalidateQueries({ queryKey: ["sources"] })
+    },
+    onError: (e) => toast.error(e.message),
+  })
+  const listed = genres.length > 3 ? `${genres.slice(0, 3).join(", ")} and ${genres.length - 3} more` : genres.join(", ")
+  return (
+    <div className="bg-muted/40 space-y-2 rounded-2xl p-3">
+      <label className="flex items-center justify-between gap-2 text-sm font-medium">
+        <span className="flex items-center gap-2">
+          <HugeiconsIcon icon={Vynil01Icon} strokeWidth={2} className="text-primary size-4" />
+          Tuned to your crates
+        </span>
+        <Switch checked={settings.confidence.genreAware} onCheckedChange={(v) => toggle.mutate(v)} size="sm" disabled={toggle.isPending} aria-label="Tune sources to your crates" />
+      </label>
+      <p className="text-muted-foreground text-xs text-pretty">
+        {!genres.length ? (
+          <>
+            Pick genres in{" "}
+            <Link to="/settings#crates" className="text-foreground underline underline-offset-2">
+              Your crates
+            </Link>{" "}
+            and sources that suit them count a little more.
+          </>
+        ) : settings.confidence.genreAware ? (
+          `Sources that suit ${listed} count ×1.2.`
+        ) : (
+          "Every source counts the same, whatever's in your crates."
+        )}
+      </p>
     </div>
   )
 }
@@ -559,6 +613,7 @@ export default function SourcesPage() {
           <div className="space-y-4 lg:sticky lg:top-20 lg:self-start">
             <SectionNav items={navItems} value={section} onChange={go} label="Source groups" />
             <TestTrack value={probe} onChange={setProbe} />
+            {settings && <CratesTuning settings={settings} />}
           </div>
 
           <div key={section} className="animate-in fade-in slide-in-from-bottom-1 min-w-0 duration-200">
@@ -600,6 +655,7 @@ export default function SourcesPage() {
                         key={sc.id}
                         sc={sc}
                         unavailable={sc.enabled ? (sources.find((s) => s.id === `scraper:${sc.id}`)?.unavailable ?? null) : null}
+                        suits={(sources.find((s) => s.id === `scraper:${sc.id}`)?.boost ?? 1) > 1}
                         onToggle={(v) => saveScrapers.mutate(scrapers.map((x) => (x.id === sc.id ? { ...x, enabled: v } : x)))}
                         onEdit={() => setEditing(sc)}
                         onDuplicate={() => setEditing({ ...sc, id: "", name: `${sc.name} copy`, enabled: false })}

@@ -6,6 +6,7 @@ import { serveStatic } from "@hono/node-server/serve-static"
 import { createApp } from "./app"
 import { config, VERSION } from "./config"
 import { getDb } from "./db"
+import { startIntegrations } from "./integrations"
 import { markInterruptedJobs } from "./jobs"
 import { upsertAlias } from "./repo"
 import { pruneHttpCache } from "./sources/http"
@@ -75,4 +76,6 @@ serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => 
   console.log(`  ➜ data: ${config.dataDir}\n`)
   // Watched folders, periodic re-checks and the nightly scan.
   startAutomation()
+  // Media server rescans and chat messages after jobs.
+  startIntegrations()
 })

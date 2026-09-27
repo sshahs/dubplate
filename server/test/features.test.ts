@@ -38,6 +38,8 @@ function ctx(): JobContext {
     message: () => {},
     log: () => {},
     tracksChanged: () => {},
+    filesChanged: () => {},
+    report: () => {},
   }
 }
 

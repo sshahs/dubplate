@@ -11,6 +11,7 @@ const PAGES = {
   duplicates: () => import("@/pages/duplicates"),
   execute: () => import("@/pages/execute"),
   libraries: () => import("@/pages/libraries"),
+  organise: () => import("@/pages/organise"),
   review: () => import("@/pages/review"),
   settings: () => import("@/pages/settings"),
   sources: () => import("@/pages/sources"),
@@ -22,6 +23,7 @@ const DashboardPage = lazy(PAGES.dashboard)
 const DuplicatesPage = lazy(PAGES.duplicates)
 const ExecutePage = lazy(PAGES.execute)
 const LibrariesPage = lazy(PAGES.libraries)
+const OrganisePage = lazy(PAGES.organise)
 const ReviewPage = lazy(PAGES.review)
 const SettingsPage = lazy(PAGES.settings)
 const SourcesPage = lazy(PAGES.sources)
@@ -98,6 +100,7 @@ export default function App() {
                 <Route path="/tracks" element={<TracksPage />} />
                 <Route path="/review" element={<ReviewPage />} />
                 <Route path="/execute" element={<ExecutePage />} />
+                <Route path="/organise" element={<OrganisePage />} />
                 <Route path="/untangler" element={<UntanglerPage />} />
                 <Route path="/sources" element={<SourcesPage />} />
                 <Route path="/duplicates" element={<DuplicatesPage />} />

@@ -3,10 +3,13 @@ import {
   AiBrain01Icon,
   ArrowDown01Icon,
   BookOpen01Icon,
+  DatabaseRestoreIcon,
   Delete02Icon,
   FileEditIcon,
   Image01Icon,
+  Notification03Icon,
   RefreshIcon,
+  ServerStack01Icon,
   Shield01Icon,
   Target02Icon,
   TestTube01Icon,
@@ -22,6 +25,8 @@ import type { LlmProviderConfig, Settings } from "@shared/types"
 import { PageHeader } from "@/components/app-shell"
 import { GenrePicker } from "@/components/genre-picker"
 import { QueryError } from "@/components/query-error"
+import { BackupSettings } from "@/components/settings-backup"
+import { ChatSettings, MediaServerSettings } from "@/components/settings-integrations"
 import { SectionNav, SettingRow, SettingRows, type SectionItem } from "@/components/settings-layout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -39,7 +44,7 @@ import { api, type PublicSettings } from "@/lib/api"
 import { disableNotify, enableNotify, notifyEnabled, notifySupport } from "@/lib/notify"
 import { cn } from "@/lib/utils"
 
-type SectionId = "ai" | "crates" | "confidence" | "naming" | "extras" | "automation" | "safety" | "learning"
+type SectionId = "ai" | "crates" | "confidence" | "naming" | "extras" | "automation" | "notifications" | "servers" | "safety" | "learning" | "backup"
 
 /** Sections, and the part of the settings each one edits (for the unsaved-changes dots). */
 const SECTIONS: { id: SectionId; label: string; icon: SectionItem["icon"]; edits: (s: Settings) => unknown }[] = [
@@ -49,11 +54,14 @@ const SECTIONS: { id: SectionId; label: string; icon: SectionItem["icon"]; edits
   { id: "naming", label: "Naming & tags", icon: FileEditIcon, edits: (s) => s.naming },
   { id: "extras", label: "Artwork & tempo", icon: Image01Icon, edits: (s) => [s.artwork, s.analysis] },
   { id: "automation", label: "Automation", icon: Timer02Icon, edits: (s) => s.automation },
-  { id: "safety", label: "Safety & scanner", icon: Shield01Icon, edits: (s) => [s.safety, s.scanner, s.contact] },
+  { id: "notifications", label: "Notifications", icon: Notification03Icon, edits: (s) => [s.integrations.discord, s.integrations.telegram, s.integrations.notify, s.integrations.publicUrl] },
+  { id: "servers", label: "Media servers", icon: ServerStack01Icon, edits: (s) => s.integrations.mediaServers },
+  { id: "safety", label: "Safety & scanner", icon: Shield01Icon, edits: (s) => [s.safety, s.scanner, s.contact, s.duplicates] },
   { id: "learning", label: "Learning", icon: BookOpen01Icon, edits: () => null },
+  { id: "backup", label: "Backup & restore", icon: DatabaseRestoreIcon, edits: () => null },
 ]
 /** Older deep links that now live inside another section. */
-const HASH_ALIASES: Record<string, SectionId> = { notifications: "automation", scanner: "safety" }
+const HASH_ALIASES: Record<string, SectionId> = { scanner: "safety" }
 
 const one = (v: number | readonly number[]) => (Array.isArray(v) ? v[0] : (v as number))
 
@@ -380,7 +388,7 @@ function NotificationsCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Notifications</CardTitle>
+        <CardTitle>In this browser</CardTitle>
         <CardDescription>When a long job finishes while you're in another tab, the tab title shows it. This part is saved in this browser only.</CardDescription>
       </CardHeader>
       <CardContent>
@@ -655,6 +663,22 @@ export default function SettingsPage() {
                     <SettingRow title="Rename files" description="Off: only tags are written.">
                       <Switch checked={draft.naming.renameFiles} onCheckedChange={(v) => set((d) => void (d.naming.renameFiles = v))} aria-label="Rename files" />
                     </SettingRow>
+                    <SettingRow
+                      title="Folders"
+                      description={
+                        draft.organise.onCut ? (
+                          <>
+                            Cut tracks move into <code className="font-mono">{draft.organise.template}</code> inside their library.
+                          </>
+                        ) : (
+                          "Files stay in their folder when cut. Organise moves them into a layout of your choosing."
+                        )
+                      }
+                    >
+                      <Button variant="outline" nativeButton={false} render={<Link to="/organise" />}>
+                        Set up folders
+                      </Button>
+                    </SettingRow>
                   </SettingRows>
                 </CardContent>
               </Card>
@@ -676,6 +700,12 @@ export default function SettingsPage() {
                     </SettingRow>
                     <SettingRow title="Sign the comment" description="Adds “Identified by Dubplate” to the comment tag.">
                       <Switch checked={draft.naming.tagComment} onCheckedChange={(v) => set((d) => void (d.naming.tagComment = v))} aria-label="Sign the comment" />
+                    </SettingRow>
+                    <SettingRow
+                      title="Write MusicBrainz and Discogs IDs"
+                      description="When the sources pinned the track down, so Picard, Plex, Jellyfin and Navidrome recognise it straight away."
+                    >
+                      <Switch checked={draft.naming.writeIds} onCheckedChange={(v) => set((d) => void (d.naming.writeIds = v))} aria-label="Write MusicBrainz and Discogs IDs" />
                     </SettingRow>
                   </SettingRows>
                 </CardContent>
@@ -766,9 +796,17 @@ export default function SettingsPage() {
                   </SettingRows>
                 </CardContent>
               </Card>
-              <NotificationsCard />
             </>
           )}
+
+          {section === "notifications" && (
+            <>
+              <NotificationsCard />
+              <ChatSettings draft={draft} set={set} />
+            </>
+          )}
+
+          {section === "servers" && <MediaServerSettings draft={draft} set={set} />}
 
           {section === "safety" && (
             <>
@@ -809,6 +847,14 @@ export default function SettingsPage() {
                         }
                       />
                     </SettingRow>
+                    <SettingRow htmlFor="holding" title="Folder for duplicates set aside" description="Made at the top of a library when you set duplicates aside. Scans skip it.">
+                      <Input
+                        id="holding"
+                        className="w-full sm:w-64"
+                        value={draft.duplicates.holdingFolder}
+                        onChange={(e) => set((d) => void (d.duplicates.holdingFolder = e.target.value))}
+                      />
+                    </SettingRow>
                     <SettingRow stack htmlFor="ignore" title="Ignore" description="Folder or file names to skip; * and ? work as wildcards.">
                       <Input
                         id="ignore"
@@ -844,6 +890,15 @@ export default function SettingsPage() {
           )}
 
           {section === "learning" && <Learning />}
+
+          {section === "backup" && (
+            <BackupSettings
+              onRestored={() => {
+                setEdit(null)
+                void qc.invalidateQueries()
+              }}
+            />
+          )}
         </div>
       </div>
 

@@ -45,6 +45,16 @@ export interface JobContext {
   message(msg: string): void
   log(level: "info" | "warn" | "error" | "success", message: string): void
   tracksChanged(ids: number[]): void
+  /** files on disk were renamed, moved or retagged (media servers get told to rescan) */
+  filesChanged(): void
+  /** counts worth announcing, e.g. how many tracks now need a listen */
+  report(counts: Record<string, number>): void
+}
+
+/** What a finished job did, for anything that reacts to jobs (media servers, chat notifications). */
+export interface JobOutcome {
+  filesChanged: boolean
+  report: Record<string, number> | null
 }
 
 type JobFn = (ctx: JobContext) => Promise<void>
@@ -53,6 +63,16 @@ interface QueuedJob {
   job: Job
   fn: JobFn
   controller: AbortController
+  outcome: JobOutcome
+}
+
+type FinishListener = (job: Job, outcome: JobOutcome) => void | Promise<void>
+const finishListeners = new Set<FinishListener>()
+
+/** Run `l` after every job finishes (whatever its status). */
+export function onJobFinished(l: FinishListener) {
+  finishListeners.add(l)
+  return () => finishListeners.delete(l)
 }
 
 const queue: QueuedJob[] = []
@@ -108,7 +128,7 @@ export function enqueueJob(kind: JobKind, label: string, fn: JobFn): Job {
     startedAt: null,
     finishedAt: null,
   }
-  queue.push({ job, fn, controller: new AbortController() })
+  queue.push({ job, fn, controller: new AbortController(), outcome: { filesChanged: false, report: null } })
   publish(job, true)
   void pump()
   return job
@@ -119,7 +139,7 @@ async function pump() {
   const next = queue.shift()
   if (!next) return
   running = next
-  const { job, fn, controller } = next
+  const { job, fn, controller, outcome } = next
   job.status = "running"
   job.startedAt = new Date().toISOString()
   publish(job, true)
@@ -146,6 +166,12 @@ async function pump() {
     tracksChanged(ids) {
       if (ids.length) emit({ type: "tracks", ids })
     },
+    filesChanged() {
+      outcome.filesChanged = true
+    },
+    report(counts) {
+      outcome.report = { ...outcome.report, ...counts }
+    },
   }
   try {
     await fn(ctx)
@@ -160,6 +186,11 @@ async function pump() {
     lastEmit.delete(job.id)
     emit({ type: "stats" })
     running = null
+    for (const l of finishListeners) {
+      Promise.resolve()
+        .then(() => l({ ...job }, outcome))
+        .catch((err) => log("warn", `After "${job.label}": ${err instanceof Error ? err.message : err}`))
+    }
     void pump()
   }
 }

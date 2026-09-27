@@ -158,6 +158,15 @@ export const MIGRATIONS: string[] = [
 
   ALTER TABLE libraries ADD COLUMN watch INTEGER NOT NULL DEFAULT 0;
   `,
+  // 3: per-library settings, folder moves in the journal (with the status and folders a rewind
+  // needs), and duplicates set aside in a holding folder.
+  `
+  ALTER TABLE libraries ADD COLUMN settings_json TEXT;
+  ALTER TABLE operations ADD COLUMN status_before TEXT;
+  ALTER TABLE operations ADD COLUMN created_dirs_json TEXT;
+  ALTER TABLE operations ADD COLUMN batch_label TEXT;
+  ALTER TABLE tracks ADD COLUMN aside_json TEXT;
+  `,
 ]
 
 export type Db = DatabaseSync

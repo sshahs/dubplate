@@ -45,8 +45,13 @@ function globToRegex(glob: string): RegExp {
   return new RegExp(`^${esc}$`, "i")
 }
 
-export async function* walk(root: string, extensions: Set<string>, ignore: RegExp[], signal?: AbortSignal): AsyncGenerator<string> {
+/**
+ * Every audio file under `root`. `skipAtRoot` names top-level folders to leave out
+ * (the holding folder for duplicates that were set aside).
+ */
+export async function* walk(root: string, extensions: Set<string>, ignore: RegExp[], signal?: AbortSignal, skipAtRoot: string[] = []): AsyncGenerator<string> {
   const stack = [root]
+  const skip = new Set(skipAtRoot.map((n) => n.toLowerCase()))
   while (stack.length) {
     if (signal?.aborted) return
     const dir = stack.pop()!
@@ -58,6 +63,7 @@ export async function* walk(root: string, extensions: Set<string>, ignore: RegEx
     }
     for (const e of entries) {
       if (e.name.startsWith(".") || ignore.some((re) => re.test(e.name))) continue
+      if (dir === root && e.isDirectory() && skip.has(e.name.toLowerCase())) continue
       const full = path.join(dir, e.name)
       if (e.isDirectory()) stack.push(full)
       else if (e.isFile()) {
@@ -96,6 +102,10 @@ export async function readAudio(file: string) {
       bpm: c.bpm && c.bpm > 0 ? Math.round(c.bpm * 10) / 10 : undefined,
       key: firstString(c.key),
       cover: art?.hash,
+      mbRecordingId: c.musicbrainz_recordingid || undefined,
+      mbReleaseId: c.musicbrainz_albumid || undefined,
+      mbArtistId: c.musicbrainz_artistid?.[0] || undefined,
+      discogsReleaseId: c.discogs_release_id ? String(c.discogs_release_id) : undefined,
     }
     return {
       tags,
@@ -138,6 +148,19 @@ export interface ScanResult {
   changed: number[]
 }
 
+/**
+ * Top-level folders scans leave alone: the holding folder for duplicates, and any
+ * older one that still has set-aside copies in it (if the name was changed since).
+ */
+export function holdingFolders(lib: Library, settings: Settings): string[] {
+  const out = new Set([settings.duplicates.holdingFolder])
+  for (const r of getDb().prepare("SELECT path FROM tracks WHERE library_id = ? AND aside_json IS NOT NULL").all(lib.id) as { path: string }[]) {
+    const first = path.relative(lib.path, r.path).split(path.sep)[0]
+    if (first && first !== ".." && !path.isAbsolute(first)) out.add(first)
+  }
+  return [...out]
+}
+
 export async function scanLibrary(lib: Library, settings: Settings, ctx: JobContext): Promise<ScanResult> {
   const db = getDb()
   if (!fs.existsSync(lib.path)) throw new Error(`Library folder not found: ${lib.path}`)
@@ -146,7 +169,7 @@ export async function scanLibrary(lib: Library, settings: Settings, ctx: JobCont
 
   ctx.message("Walking folders…")
   const files: string[] = []
-  for await (const f of walk(lib.path, extensions, ignore, ctx.signal)) {
+  for await (const f of walk(lib.path, extensions, ignore, ctx.signal, holdingFolders(lib, settings))) {
     files.push(f)
     if (files.length % 500 === 0) ctx.message(`Found ${files.length} files…`)
   }
@@ -178,7 +201,8 @@ export async function scanLibrary(lib: Library, settings: Settings, ctx: JobCont
   const addedIds: number[] = []
   let moved = 0
 
-  const findMissingByHash = db.prepare("SELECT id FROM tracks WHERE hash = ? AND missing = 1 LIMIT 1")
+  // (duplicates set aside are missing on purpose - a new copy of the same audio is a new track)
+  const findMissingByHash = db.prepare("SELECT id FROM tracks WHERE hash = ? AND missing = 1 AND aside_json IS NULL LIMIT 1")
   const insert = db.prepare(
     `INSERT INTO tracks (library_id, path, original_path, rel_dir, filename, ext, size, mtime_ms, hash, duration, bitrate, sample_rate, codec, tags_json, status, note, art_json, bpm, musical_key, tags_version)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ${TAGS_VERSION}) RETURNING id`
@@ -294,7 +318,7 @@ export async function libraryHasChanges(lib: Library, settings: Settings, signal
     known.set(r.path, { size: r.size, mtime: r.mtime_ms, missing: r.missing })
   }
   let present = 0
-  for await (const file of walk(lib.path, extensions, ignore, signal)) {
+  for await (const file of walk(lib.path, extensions, ignore, signal, holdingFolders(lib, settings))) {
     const k = known.get(file)
     if (!k || k.missing) return true
     const st = await fs.promises.stat(file).catch(() => null)

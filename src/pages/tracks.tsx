@@ -42,6 +42,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { useDebounced } from "@/hooks/use-debounced"
 import { api, type BulkChanges, type Selection, type TrackFilter } from "@/lib/api"
 import { useActiveJobs } from "@/lib/events"
 import { fmtDuration, STATUS_META } from "@/lib/format"
@@ -59,15 +60,6 @@ const COLUMNS = 8
 const ROW_CLASS = "h-14 border-0 [&>td]:shadow-[inset_0_-1px_0_var(--color-border)]"
 
 type Sort = NonNullable<TrackFilter["sort"]>
-
-function useDebounced<T>(value: T, ms = 300) {
-  const [v, setV] = useState(value)
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms)
-    return () => clearTimeout(t)
-  }, [value, ms])
-  return v
-}
 
 function SkeletonRow({ index }: { index: number }) {
   return (

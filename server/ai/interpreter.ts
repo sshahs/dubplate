@@ -3,6 +3,7 @@
 
 import type { AiParse, Correction, LlmProviderConfig, Settings, Track } from "../../shared/types"
 import { collapseSpaces, normArtist, normKey } from "../core/normalize"
+import { settingsForLibrary } from "../library-settings"
 import { completeJson } from "./providers"
 
 const nullable = (type: string) => ({ type: [type, "null"] })
@@ -196,7 +197,7 @@ export async function interpretTrack(
   if (!provider) throw new Error("No AI provider is enabled - pick one in Settings")
   const examples = settings.llm.useCorrections ? similarCorrections(track.filename, opts.corrections) : []
   const raw = await completeJson(provider, {
-    system: systemPrompt(collectionContext(settings.llm)),
+    system: systemPrompt(collectionContext(settingsForLibrary(settings, track.libraryId).llm)),
     user: buildUserPrompt(track, examples),
     schema: AI_SCHEMA as unknown as Record<string, unknown>,
     schemaName: "identify_track",

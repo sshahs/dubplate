@@ -1,11 +1,12 @@
 import { HugeiconsIcon } from "@hugeicons/react"
-import { Alert02Icon, ArrowRight02Icon, Backward01Icon, Scissor01Icon, SquareLock02Icon, TestTube01Icon } from "@hugeicons/core-free-icons"
+import { Alert02Icon, Folder01Icon, Scissor01Icon, SquareLock02Icon, TestTube01Icon } from "@hugeicons/core-free-icons"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 import { Link } from "react-router"
 import { toast } from "sonner"
-import type { OperationBatch, ExistingTags } from "@shared/types"
+import type { ExistingTags } from "@shared/types"
 import { PageHeader } from "@/components/app-shell"
+import { BatchRow } from "@/components/batch-row"
 import { QueryError } from "@/components/query-error"
 import { ConfidenceMeter } from "@/components/confidence"
 import {
@@ -23,93 +24,22 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api } from "@/lib/api"
 import { useActiveJobs } from "@/lib/events"
-import { fmtAgo } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
-function BatchRow({ batch, busy }: { batch: OperationBatch; busy: boolean }) {
-  const [open, setOpen] = useState(false)
-  const { data: ops } = useQuery({ queryKey: ["ops", batch.batchId], queryFn: () => api.operations(batch.batchId), enabled: open })
-  const rewind = useMutation({
-    mutationFn: () => api.rewind({ batchId: batch.batchId }),
-    onSuccess: (j) => toast(j.label, { description: "Wheel up and come again…" }),
-    onError: (e) => toast.error(e.message),
-  })
-  const canRewind = !batch.dryRun && batch.done > 0
-  return (
-    <Collapsible open={open} onOpenChange={setOpen} className="animate-in fade-in slide-in-from-top-1 rounded-2xl border duration-300">
-      <div className="flex flex-wrap items-center gap-3 p-3">
-        <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-3 text-left">
-          <span className={cn("size-2 rounded-full", batch.dryRun ? "bg-muted-foreground" : batch.failed ? "bg-rasta-gold" : batch.reverted === batch.count ? "bg-muted-foreground" : "bg-rasta-green")} />
-          <span className="font-mono text-xs">{batch.batchId.slice(0, 8)}</span>
-          <span className="text-sm">
-            {batch.count} file{batch.count === 1 ? "" : "s"}
-          </span>
-          {batch.dryRun && <Badge variant="outline">dry run</Badge>}
-          {batch.failed > 0 && <Badge variant="destructive">{batch.failed} failed</Badge>}
-          {batch.reverted > 0 && <Badge variant="secondary">{batch.reverted} rewound</Badge>}
-          <span className="text-muted-foreground ml-auto text-xs">{fmtAgo(batch.createdAt)}</span>
-        </CollapsibleTrigger>
-        {canRewind && (
-          <AlertDialog>
-            <AlertDialogTrigger
-              render={
-                <Button size="sm" variant="outline" disabled={rewind.isPending || busy}>
-                  <HugeiconsIcon icon={Backward01Icon} strokeWidth={2} data-icon="inline-start" />
-                  Rewind
-                </Button>
-              }
-            />
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Rewind this batch?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Pull up! Every file in batch {batch.batchId.slice(0, 8)} goes back to its old name and old tags - as long as nothing else has touched it since.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={() => rewind.mutate()}>Rewind</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        )}
-      </div>
-      <CollapsibleContent>
-        <div className="space-y-1 border-t p-3">
-          {ops?.map((op) => (
-            <div key={op.id} className="flex items-center gap-2 text-xs">
-              <span
-                className={cn(
-                  "w-16 shrink-0",
-                  op.status === "done" ? "text-rasta-green" : op.status === "failed" ? "text-rasta-red" : "text-muted-foreground"
-                )}
-              >
-                {op.status}
-              </span>
-              <span className="text-muted-foreground min-w-0 flex-1 truncate font-mono" title={op.fromPath}>
-                {op.fromPath.split(/[\\/]/).pop()}
-              </span>
-              <HugeiconsIcon icon={ArrowRight02Icon} strokeWidth={2} className="size-3 shrink-0" />
-              <span className="min-w-0 flex-1 truncate" title={op.toPath}>
-                {op.toPath.split(/[\\/]/).pop()}
-              </span>
-              {op.error && <span className="text-rasta-red truncate">{op.error}</span>}
-            </div>
-          ))}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
-  )
+const TAG_NAMES: Partial<Record<keyof ExistingTags, string>> = {
+  cover: "artwork",
+  bpm: "BPM",
+  mbRecordingId: "MusicBrainz IDs",
+  mbReleaseId: "MusicBrainz IDs",
+  mbArtistId: "MusicBrainz IDs",
+  discogsReleaseId: "Discogs ID",
 }
-
-const TAG_NAMES: Partial<Record<keyof ExistingTags, string>> = { cover: "artwork", bpm: "BPM" }
 
 export default function ExecutePage() {
   const qc = useQueryClient()
@@ -177,6 +107,15 @@ export default function ExecutePage() {
             <Link to="/settings#naming" className="underline underline-offset-2">
               change
             </Link>
+            {settings?.organise.onCut && (
+              <>
+                {" "}
+                · into folders <code className="bg-muted rounded px-1.5 py-0.5 font-mono text-xs">{settings.organise.template}</code> ·{" "}
+                <Link to="/organise" className="underline underline-offset-2">
+                  layout
+                </Link>
+              </>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -268,8 +207,14 @@ export default function ExecutePage() {
                           </div>
                         </TableCell>
                         <TableCell className="max-w-[20rem]">
+                          {p.toDir !== p.fromDir && (
+                            <div className="text-rasta-gold flex min-w-0 items-center gap-1 text-xs" title={p.toDir || "the library's top folder"}>
+                              <HugeiconsIcon icon={Folder01Icon} strokeWidth={2} className="size-3 shrink-0" />
+                              <span className="truncate">{p.toDir || "top folder"}/</span>
+                            </div>
+                          )}
                           <div className="truncate text-sm font-medium" title={p.toPath}>
-                            {p.rename ? p.toName : <span className="text-muted-foreground">name unchanged</span>}
+                            {p.toName !== p.fromName ? p.toName : <span className="text-muted-foreground">name unchanged</span>}
                           </div>
                           {p.issues.map((i) => (
                             <div key={i} className="text-rasta-gold mt-0.5 flex items-center gap-1 text-xs">

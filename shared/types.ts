@@ -43,6 +43,22 @@ export interface ExistingTags {
   key?: string
   /** content hash of the embedded front cover (the key into Dubplate's artwork cache) */
   cover?: string
+  /** MusicBrainz recording ID ("MusicBrainz Track Id" in most taggers) */
+  mbRecordingId?: string
+  /** MusicBrainz release ID ("MusicBrainz Album Id") */
+  mbReleaseId?: string
+  /** MusicBrainz artist ID of the main artist */
+  mbArtistId?: string
+  /** Discogs release ID */
+  discogsReleaseId?: string
+}
+
+/** Catalogue identifiers a source can pin a track to. */
+export interface ExternalIds {
+  mbRecordingId?: string
+  mbReleaseId?: string
+  mbArtistIds?: string[]
+  discogsReleaseId?: string
 }
 
 /** A picture Dubplate knows about: embedded in a file, or found online to embed on cut. */
@@ -141,6 +157,8 @@ export interface Candidate {
   fingerprint?: boolean
   /** cover art URL (the largest the source offers) */
   artwork?: string
+  /** catalogue identifiers (MusicBrainz, Discogs) for writing to tags */
+  ids?: ExternalIds
 }
 
 export interface ConfidenceFactor {
@@ -227,8 +245,17 @@ export interface Track {
   art: ArtRef | null
   /** artwork found online, embedded when the track is cut */
   artFound: ArtRef | null
+  /** moved to the library's holding folder as a duplicate (the track is then hidden) */
+  aside: SetAside | null
   createdAt: string
   updatedAt: string
+}
+
+/** Where a duplicate went when it was set aside, and which copy was kept. */
+export interface SetAside {
+  at: string
+  from: string
+  keptId: number | null
 }
 
 export type TrackSummary = Omit<Track, "candidates" | "decision" | "heuristic" | "ai"> & {
@@ -250,9 +277,24 @@ export interface Library {
   watch: boolean
   /** "watching": live file events; "polling": checked every few minutes (events unavailable) */
   watchState: "watching" | "polling" | "off"
+  /** this library's own settings; anything unset follows the app's */
+  settings: LibrarySettings
 }
 
-export type JobKind = "scan" | "interpret" | "scour" | "score" | "process" | "execute" | "rewind" | "analyze" | "artwork"
+/** Per-library overrides of the app settings. A missing field means "same as the app". */
+export interface LibrarySettings {
+  /** what's in this library's crates (empty list = any genre) */
+  genres?: string[]
+  sceneHint?: string
+  /** filename template */
+  template?: string
+  /** folder template for organising */
+  folderTemplate?: string
+  /** move files into folders when cutting */
+  organiseOnCut?: boolean
+}
+
+export type JobKind = "scan" | "interpret" | "scour" | "score" | "process" | "execute" | "rewind" | "analyze" | "artwork" | "organise" | "duplicates"
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled"
 
 export interface Job {
@@ -278,8 +320,10 @@ export type ServerEvent =
 export interface Operation {
   id: number
   batchId: string
+  /** null for a file that isn't a track (cover images, cue sheets moved along with a folder) */
   trackId: number | null
-  kind: "rename" | "tag" | "rename+tag"
+  /** "move": into another folder, name and tags untouched; "set-aside": a duplicate moved to the holding folder */
+  kind: "rename" | "tag" | "rename+tag" | "move" | "set-aside"
   fromPath: string
   toPath: string
   tagsBefore: ExistingTags | null
@@ -288,10 +332,18 @@ export interface Operation {
   error: string | null
   createdAt: string
   revertedAt: string | null
+  /** the track's status before, so a rewind can put it back */
+  statusBefore: TrackStatus | null
+  /** folders this operation created, removed again by a rewind if they're left empty */
+  createdDirs: string[]
+  /** what the batch was, e.g. "Cut" or "Organise" */
+  batchLabel: string | null
 }
 
 export interface OperationBatch {
   batchId: string
+  /** "Cut", "Organise", "Set aside duplicates"… */
+  label: string
   createdAt: string
   count: number
   done: number
@@ -306,6 +358,10 @@ export interface PlanItem {
   toPath: string
   fromName: string
   toName: string
+  /** folder inside the library, before and after ("" = the library's top level) */
+  fromDir: string
+  toDir: string
+  /** the file changes name or folder */
   rename: boolean
   tags: ExistingTags
   tagChanges: { field: keyof ExistingTags; before: unknown; after: unknown }[]
@@ -375,6 +431,8 @@ export interface ScraperDefinition {
   scene: string
   notes?: string
   verified?: boolean
+  /** genres this site is good for (names from the crates picker) */
+  genres?: string[]
 }
 
 export interface Settings {
@@ -391,11 +449,15 @@ export interface Settings {
   }
   sources: Record<string, SourceConfig>
   scrapers: ScraperDefinition[]
+  /** built-in scraper presets already offered, so ones added in later versions appear once */
+  scraperPresetsSeen?: string[]
   confidence: {
     autoThreshold: number
     reviewThreshold: number
     autoApprove: boolean
     parseOnlyMax: number
+    /** trust sources that suit the picked genres a little more */
+    genreAware: boolean
   }
   naming: {
     template: string
@@ -406,6 +468,33 @@ export interface Settings {
     renameFiles: boolean
     writeTags: boolean
     tagComment: boolean
+    /** write MusicBrainz and Discogs IDs when the sources found them */
+    writeIds: boolean
+  }
+  organise: {
+    /** folder template, e.g. "{artist}/[{year} - ]{album}"; "/" starts a new folder level */
+    template: string
+    /** move files into their folders when cutting */
+    onCut: boolean
+    /** a folder level with nothing to show: skip it, or name it "Unknown …" */
+    missing: "skip" | "unknown"
+    /** remove folders left empty by a move */
+    tidy: boolean
+    /** move cover images, cue sheets and the like along when a whole folder moves */
+    sidecars: boolean
+  }
+  duplicates: {
+    /** folder at each library's top level where set-aside copies go (never scanned) */
+    holdingFolder: string
+  }
+  integrations: {
+    mediaServers: MediaServerConfig[]
+    discord: { enabled: boolean; webhookUrl?: string }
+    telegram: { enabled: boolean; botToken?: string; chatId?: string }
+    /** what to announce in Discord / Telegram */
+    notify: { jobs: boolean; review: boolean }
+    /** Dubplate's address as others reach it, for links in messages */
+    publicUrl: string
   }
   scanner: {
     extensions: string[]
@@ -446,6 +535,20 @@ export interface Settings {
   contact: string
 }
 
+export type MediaServerKind = "plex" | "jellyfin" | "navidrome"
+
+export interface MediaServerConfig {
+  id: string
+  kind: MediaServerKind
+  name: string
+  url: string
+  /** Plex token, Jellyfin/Emby API key, or the Navidrome password */
+  token?: string
+  /** Navidrome user */
+  user?: string
+  enabled: boolean
+}
+
 export interface Alias {
   id: number
   alias: string
@@ -469,4 +572,57 @@ export interface HealthInfo {
   llm: { id: string; label: string; model: string; kind: LlmProviderKind } | null
   /** the server's time zone, for scheduled scans */
   timeZone: string
+}
+
+// ---------- organising ----------
+
+export interface OrganiseMove {
+  trackId: number | null
+  from: string
+  to: string
+  /** paths inside the library */
+  fromRel: string
+  toRel: string
+  issues: string[]
+  blocked: boolean
+  /** a cover image, cue sheet or similar moving along with its folder */
+  sidecar?: boolean
+}
+
+export interface OrganisePreview {
+  libraryId: number
+  template: string
+  counts: { tracks: number; moving: number; unchanged: number; blocked: number; notReady: number; sidecars: number; folders: number }
+  /** the folders files will be in afterwards, with how many files each and a few names */
+  folders: { path: string; count: number; samples: string[] }[]
+  /** a sample of the moves */
+  moves: OrganiseMove[]
+  blocked: OrganiseMove[]
+}
+
+// ---------- duplicates ----------
+
+export interface DuplicateGroup {
+  key: string
+  kind: "hash" | "name"
+  tracks: TrackSummary[]
+  /** the copy Dubplate would keep */
+  best: number
+  /** why each copy ranks where it does, e.g. "FLAC, already cut" */
+  reasons: Record<number, string>
+}
+
+// ---------- backup ----------
+
+export interface BackupFile {
+  app: "dubplate"
+  format: 1
+  version: string
+  exportedAt: string
+  /** API keys and tokens included */
+  secrets: boolean
+  settings: Settings
+  aliases: { alias: string; canonical: string }[]
+  corrections: { filename: string; artists: string[]; title: string; version: string | null; createdAt: string }[]
+  libraries: { path: string; name: string; watch: boolean; settings: LibrarySettings }[]
 }

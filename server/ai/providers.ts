@@ -2,6 +2,7 @@
 // matches a schema - natively where supported, by instruction otherwise.
 
 import type { LlmProviderConfig } from "../../shared/types"
+import { networkMessage } from "../net"
 
 export interface JsonRequest {
   system: string
@@ -249,6 +250,6 @@ export async function testProvider(p: LlmProviderConfig): Promise<{ ok: boolean;
     })) as { ok?: boolean }
     return { ok: out?.ok === true, message: out?.ok ? `${p.model} is responding` : "Unexpected reply", latencyMs: Date.now() - started }
   } catch (err) {
-    return { ok: false, message: err instanceof Error ? err.message : String(err), latencyMs: Date.now() - started }
+    return { ok: false, message: networkMessage(err), latencyMs: Date.now() - started }
   }
 }
