@@ -6,14 +6,16 @@ import { randomUUID } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
 import { formatKey } from "../shared/keys"
-import type { ExistingTags, Library, Operation, PlanItem, Settings, Track } from "../shared/types"
+import type { ExistingTags, FileCheck, Library, Operation, PlanItem, Settings, Track } from "../shared/types"
 import { artToEmbed, describeArt, cachedArt } from "./art"
 import { idsFor } from "./core/ids"
 import { tagDiff, tagsFor, type TagExtras } from "./core/naming"
+import { mismatch, sniffFileSync } from "./sniff"
 import { ensureDir, followableSidecars, isInside, moveFile, removeCreatedDirs, removeEmptyDirs, sameFile } from "./fsops"
 import type { JobContext } from "./jobs"
 import { placementLibraryId, settingsForLibrary } from "./library-settings"
-import { metaFor, proposedFilename, targetFolder } from "./placement"
+import { lyricsToEmbed, usableLyrics } from "./lyrics"
+import { extFor, metaFor, proposedFilename, targetFolder } from "./placement"
 import { getLibrary, getTrack, insertOperation, libraryForPath, listLibraries, listOperations, markOperationReverted, updateTrack } from "./repo"
 import { readManagedTags, writeTags } from "./tagger"
 
@@ -29,7 +31,55 @@ export function extrasFor(t: Track, settings: Settings): TagExtras {
   out.cover = artToEmbed(t, settings)?.hash ?? null
   if (settings.naming.writeIds) out.ids = idsFor(t.decision, metaFor(t))
   if (settings.analysis.writeReplayGain) out.replayGain = t.analysis?.loudness ?? null
+  out.lyrics = lyricsToEmbed(t, settings)
+  out.replaceLyrics = settings.lyrics.replaceExisting
   return out
+}
+
+/** The .lrc file next to an audio file with the same name, if there is one. */
+export function lrcFor(audio: string): string | null {
+  const base = audio.slice(0, audio.length - path.extname(audio).length)
+  for (const ext of [".lrc", ".LRC"]) if (fs.existsSync(base + ext)) return base + ext
+  return null
+}
+
+/** Where a track's .lrc goes when the track goes to `to` (`ext` keeps an existing one's case). */
+function lrcPathFor(to: string, ext = ".lrc") {
+  return to.slice(0, to.length - path.extname(to).length) + ext
+}
+
+/** A track's own .lrc follows it to its new name or folder (journalled; never over another file). */
+export async function followLrc(from: string, to: string, journal: { batchId: string; label: string }, ctx: Pick<JobContext, "log">) {
+  const lrc = lrcFor(from)
+  if (!lrc) return
+  const target = lrcPathFor(to, path.extname(lrc))
+  if (target === lrc || fs.existsSync(target)) return
+  try {
+    await moveFile(lrc, target)
+    insertOperation({ batchId: journal.batchId, trackId: null, kind: "move", fromPath: lrc, toPath: target, tagsBefore: null, tagsAfter: null, status: "done", error: null, batchLabel: journal.label })
+  } catch (err) {
+    ctx.log("warn", `Couldn't bring ${path.basename(lrc)} along: ${err instanceof Error ? err.message : err}`)
+  }
+}
+
+/** The LRC file Dubplate writes: a small header, then the timed lines. */
+export function lrcText(t: Track, synced: string): string {
+  const meta = metaFor(t)
+  const head = meta ? [`[ar:${meta.artists.join(", ")}]`, `[ti:${meta.title}]`] : []
+  return `${[...head, synced.trim()].join("\n")}\n`
+}
+
+/** What reading the file says once it has a new name (a fixed extension no longer counts against it). */
+export function fileCheckAt(t: Pick<Track, "fileCheck">, file: string): FileCheck | null {
+  const { realExt: _e, realFormat: _f, ...rest } = t.fileCheck ?? {}
+  let real = null
+  try {
+    real = mismatch(file, sniffFileSync(file))
+  } catch {
+    // unreadable: keep what was known
+  }
+  const next: FileCheck = { ...rest, ...(real ? { realExt: real.ext, realFormat: real.label } : {}) }
+  return Object.keys(next).length ? next : null
 }
 
 /** The folder a file is in, relative to its library ("" for the top level), as the scanner records it. */
@@ -49,7 +99,10 @@ export function buildPlan(tracks: Track[], settings: Settings): PlanItem[] {
     const s = settingsForLibrary(settings, dest?.id ?? t.libraryId)
     const issues: string[] = []
     const meta = metaFor(t)
-    const name = (s.naming.renameFiles && proposedFilename(t, settings)) || t.filename
+    let name = (s.naming.renameFiles && proposedFilename(t, settings)) || t.filename
+    // Not renaming, but the extension is wrong for what the file is: fix just that.
+    const ext = extFor(t, settings)
+    if (path.extname(name).slice(1).toLowerCase() !== ext) name = `${name.slice(0, name.length - path.extname(name).length)}.${ext}`
     let dir = path.dirname(t.path)
     // Moving into folders on cut: the folder template decides the folder, inside the library.
     if (dest && meta && (inbox || s.organise.onCut)) {
@@ -188,11 +241,15 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
         await moveFile(track.path, item.toPath)
         moved.add(track.path, item.toPath, track.libraryId)
       }
+      if (item.rename) await followLrc(track.path, item.toPath, { batchId, label }, ctx)
+      await writeLrc(track, item.toPath, settings, { batchId, label }, ctx)
       const after = await fs.promises.stat(item.toPath)
       const embedded = item.tags.cover && track.artFound?.hash === item.tags.cover
       updateTrack(track.id, {
         path: item.toPath,
         filename: path.basename(item.toPath),
+        ext: path.extname(item.toPath).slice(1).toLowerCase(),
+        fileCheck: fileCheckAt(track, item.toPath),
         relDir: relDirOf(getLibrary(item.toLibraryId ?? track.libraryId), item.toPath),
         // Out of an inbox: the track now belongs to the library it went into.
         ...(item.toLibraryId ? { libraryId: item.toLibraryId } : {}),
@@ -230,6 +287,21 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
   return batchId
 }
 
+/** Save timed lyrics as a .lrc next to the track, when asked to and there isn't one already. */
+async function writeLrc(t: Track, audio: string, settings: Settings, journal: { batchId: string; label: string }, ctx: Pick<JobContext, "log">) {
+  const synced = settings.lyrics.lrcFile ? usableLyrics(t)?.synced : undefined
+  if (!synced) return
+  const file = lrcPathFor(audio)
+  if (lrcFor(audio)) return
+  const text = lrcText(t, synced)
+  try {
+    await fs.promises.writeFile(file, text, { flag: "wx" })
+    insertOperation({ batchId: journal.batchId, trackId: null, kind: "write", fromPath: file, toPath: file, tagsBefore: null, tagsAfter: { lyrics: text }, status: "done", error: null, batchLabel: journal.label })
+  } catch (err) {
+    ctx.log("warn", `Couldn't save ${path.basename(file)}: ${err instanceof Error ? err.message : err}`)
+  }
+}
+
 /** Undo a batch (or selected operations), newest first. */
 export async function rewind(opIds: number[] | null, batchId: string | null, ctx: JobContext) {
   const ops = (batchId ? listOperations(batchId) : listOperations(undefined, 5000).filter((o) => opIds?.includes(o.id)))
@@ -241,6 +313,16 @@ export async function rewind(opIds: number[] | null, batchId: string | null, ctx
   for (const op of ops) {
     if (ctx.signal.aborted) break
     try {
+      if (op.kind === "write") {
+        // A file Dubplate made: taken away again, unless it's been changed since.
+        const now = fs.existsSync(op.toPath) ? await fs.promises.readFile(op.toPath, "utf8") : null
+        if (now !== null && now === op.tagsAfter?.lyrics) await fs.promises.unlink(op.toPath)
+        else if (now !== null) ctx.log("warn", `${path.basename(op.toPath)} was changed since Dubplate saved it, so it's left in place`)
+        markOperationReverted(op.id)
+        undone++
+        ctx.tick(true, path.basename(op.toPath))
+        continue
+      }
       if (!fs.existsSync(op.toPath)) throw new Error(`${path.basename(op.toPath)} is no longer there`)
       const moves = op.kind !== "tag" && op.fromPath !== op.toPath
       if (moves && fs.existsSync(op.fromPath) && !sameFile(op.fromPath, op.toPath)) {
@@ -275,6 +357,8 @@ export async function rewind(opIds: number[] | null, batchId: string | null, ctx
           updateTrack(t.id, {
             path: op.fromPath,
             filename: path.basename(op.fromPath),
+            ext: path.extname(op.fromPath).slice(1).toLowerCase(),
+            fileCheck: fileCheckAt(t, op.fromPath),
             relDir: relDirOf(home, op.fromPath),
             ...(home && home.id !== t.libraryId ? { libraryId: home.id } : {}),
             size: st.size,

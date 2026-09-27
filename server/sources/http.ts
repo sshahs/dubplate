@@ -20,6 +20,7 @@ const HOST_INTERVAL_MS: Record<string, number> = {
   "api.acoustid.org": 350,
   "coverartarchive.org": 1100,
   "i.discogs.com": 1100,
+  "lrclib.net": 250,
 }
 
 const nextSlot = new Map<string, number>()

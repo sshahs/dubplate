@@ -2,6 +2,7 @@ import type {
   AiParse,
   AiUsageReport,
   Alias,
+  ApiToken,
   AuthStatus,
   BackupFile,
   Correction,
@@ -14,6 +15,7 @@ import type {
   HealthInfo,
   HealthReport,
   HeuristicParse,
+  HookCall,
   Job,
   Library,
   LibrarySettings,
@@ -31,6 +33,7 @@ import type {
   TrackStatus,
   TrackSummary,
   Candidate,
+  UploadResult,
 } from "@shared/types"
 
 export class ApiError extends Error {
@@ -96,6 +99,8 @@ export interface TrackFilter {
   /** a smart crate's tracks */
   crate?: number
   quality?: "suspect"
+  /** only files with something wrong with them (damaged, wrong extension…) */
+  problems?: boolean
   sort?: "filename" | "confidence" | "status" | "updated" | "path" | "bpm" | "key"
   dir?: "asc" | "desc"
   limit?: number
@@ -111,6 +116,7 @@ export function filterToQuery(f: TrackFilter): string {
   if (f.max !== undefined) p.set("max", String(f.max))
   if (f.crate) p.set("crate", String(f.crate))
   if (f.quality) p.set("quality", f.quality)
+  if (f.problems) p.set("problems", "1")
   if (f.sort) p.set("sort", f.sort)
   if (f.dir) p.set("dir", f.dir)
   if (f.limit) p.set("limit", String(f.limit))
@@ -128,7 +134,38 @@ function serverFilter(f: TrackFilter) {
     maxConfidence: f.max,
     crateId: f.crate,
     quality: f.quality,
+    problems: f.problems,
   }
+}
+
+/**
+ * Upload one file into a library, reporting progress (fetch can't, so XHR).
+ * `signal` cancels it.
+ */
+export function uploadFile(file: File, libraryId: number, onProgress: (sent: number) => void, signal?: AbortSignal): Promise<UploadResult> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    const q = new URLSearchParams({ library: String(libraryId), name: file.name })
+    xhr.open("PUT", `/api/upload?${q}`)
+    xhr.setRequestHeader("x-dubplate", "1")
+    xhr.setRequestHeader("content-type", "application/octet-stream")
+    xhr.upload.onprogress = (e) => onProgress(e.loaded)
+    xhr.onload = () => {
+      if (xhr.status === 401) window.dispatchEvent(new Event(SIGNED_OUT))
+      let data: { error?: string } | null = null
+      try {
+        data = JSON.parse(xhr.responseText)
+      } catch {
+        // not JSON: a proxy's error page, say
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && data) resolve(data as UploadResult)
+      else reject(new ApiError(xhr.status, data?.error ?? (xhr.status === 413 ? "Too big for the server (or a proxy in front of it)" : `The server replied ${xhr.status}`)))
+    }
+    xhr.onerror = () => reject(new ApiError(0, "Lost the connection to Dubplate"))
+    xhr.onabort = () => reject(new ApiError(0, "Cancelled"))
+    signal?.addEventListener("abort", () => xhr.abort(), { once: true })
+    xhr.send(file)
+  })
 }
 
 export type Selection = { ids: number[] } | { filter: TrackFilter }
@@ -263,6 +300,8 @@ export const api = {
   bulkEdit: (s: Selection, changes: BulkChanges) => post<{ changed: number; skipped: number } & Undoable>("/api/tracks/bulk-edit", { ...sel(s), changes }),
   undo: (undoId: string) => post<{ restored: number; label: string }>(`/api/undo/${undoId}`),
   analyze: (s: Selection, force = false) => post<Job>("/api/analyze", { ...sel(s), force }),
+  findLyrics: (s: Selection, force = false) => post<Job>("/api/lyrics", { ...sel(s), force }),
+  trackLyrics: (id: number, action: "find" | "reject") => post<Track>(`/api/tracks/${id}/lyrics`, { action }),
   findArtwork: (s: Selection, force = false) => post<Job>("/api/artwork", { ...sel(s), force }),
   findTrackArtwork: (id: number) => post<Track>(`/api/tracks/${id}/artwork/find`),
   dropFoundArtwork: (id: number) => del<Track>(`/api/tracks/${id}/artwork/found`),
@@ -300,6 +339,10 @@ export const api = {
   clearCache: () => post<{ cleared: number }>("/api/cache/clear"),
   collection: () => get<CollectionStatus>("/api/sources/discogs-collection"),
   syncCollection: () => post<Job>("/api/sources/discogs-collection/sync"),
+  tokens: () => get<ApiToken[]>("/api/tokens"),
+  createToken: (name: string, scope: ApiToken["scope"]) => post<ApiToken & { token: string }>("/api/tokens", { name, scope }),
+  deleteToken: (id: number) => del<{ ok: true }>(`/api/tokens/${id}`),
+  hookCalls: () => get<HookCall[]>("/api/hooks/recent"),
 
   crates: () => get<Crate[]>("/api/crates"),
   crate: (id: number) => get<Crate>(`/api/crates/${id}`),

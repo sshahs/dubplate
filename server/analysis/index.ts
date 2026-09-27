@@ -33,7 +33,7 @@ export function needsAnalysis(t: Track, settings: Settings, retryFailed = false)
   const a = t.analysis
   if (!a) return true
   if (a.error) return retryFailed
-  return (settings.analysis.loudness && a.loudness === undefined) || (settings.analysis.quality && a.quality === undefined)
+  return (settings.analysis.loudness && a.loudness === undefined) || (settings.analysis.quality && a.quality === undefined) || (settings.analysis.integrity && a.integrity === undefined)
 }
 
 /** Analyse one track and save the result; returns the updated fields. */
@@ -46,6 +46,7 @@ export async function analyseTrack(t: Track, settings: Settings): Promise<Partia
       bpmMin: settings.analysis.bpmMin,
       quality: settings.analysis.quality,
       loudness: settings.analysis.loudness,
+      integrity: settings.analysis.integrity,
       codec: t.codec,
       bitrate: t.bitrate,
       sampleRate: t.sampleRate,
@@ -72,7 +73,7 @@ export async function analyzeTracks(ids: number[], settings: Settings, opts: { f
       const patch = await analyseTrack(t, settings)
       changed.push(id)
       const a = patch.analysis!
-      const said = [a.bpm && `${a.bpm} BPM`, a.key, a.quality?.verdict === "suspect" && "sounds re-encoded"].filter(Boolean).join(" · ")
+      const said = [a.bpm && `${a.bpm} BPM`, a.key, a.quality?.verdict === "suspect" && "sounds re-encoded", typeof a.integrity?.damagedAt === "number" && "damaged", a.integrity?.truncated && "cut short"].filter(Boolean).join(" · ")
       ctx.tick(true, `${t.filename} → ${said || "no clear pulse or key"}`)
     } catch (err) {
       if (ctx.signal.aborted) return

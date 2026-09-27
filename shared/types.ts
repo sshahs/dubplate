@@ -55,6 +55,11 @@ export interface ExistingTags {
   replayGainTrackGain?: number
   /** ReplayGain track peak, as a linear sample value (1 = full scale) */
   replayGainTrackPeak?: number
+  /**
+   * Unsynced lyrics. Written and journalled in full; the database keeps only a
+   * short description (e.g. "32 lines"), enough to know the file has some.
+   */
+  lyrics?: string
 }
 
 /** Catalogue identifiers a source can pin a track to. */
@@ -107,6 +112,64 @@ export interface QualityCheck {
   detail: string
 }
 
+/** Whether the whole file decodes, and how much silence it starts and ends with. */
+export interface IntegrityCheck {
+  /** seconds of audio that decoded */
+  decodedSeconds: number
+  /** how long the file says it is, when that can be trusted (null: can't tell) */
+  expectedSeconds: number | null
+  /** it stops well before its stated length (a download or copy that didn't finish) */
+  truncated: boolean
+  /** decoding broke off this many seconds in */
+  damagedAt: number | null
+  damage?: string
+  /** seconds of silence before the audio starts, and after it ends */
+  silenceStart: number
+  silenceEnd: number
+}
+
+/** What reading the file (not its audio) found out about it. */
+export interface FileCheck {
+  /** what the file really is, by its content, when its extension says otherwise (e.g. "m4a") */
+  realExt?: string
+  /** a readable name for that, e.g. "M4A (AAC)" */
+  realFormat?: string
+  /** the tags couldn't be read */
+  unreadable?: string
+  /** a zero-byte file */
+  empty?: boolean
+}
+
+export type FileProblemKind = "format" | "unreadable" | "empty" | "damaged" | "truncated" | "silence"
+
+export interface FileProblem {
+  kind: FileProblemKind
+  /** "error": the file is broken; "warn": worth fixing; "info": worth knowing */
+  severity: "error" | "warn" | "info"
+  label: string
+  detail: string
+}
+
+/** Lyrics looked up for a track, written into it when it's cut. */
+export interface LyricsFound {
+  /** the artist and title they were looked up for (normalised): a different reading is looked up again */
+  for: string
+  found: boolean
+  /** why nothing was found or looked up */
+  reason?: string
+  /** the source says the tune has no words */
+  instrumental?: boolean
+  plain?: string
+  /** LRC lines, "[mm:ss.xx] words", when the source had them timed to this length of track */
+  synced?: string
+  source?: "lrclib"
+  /** the source's own id */
+  sourceId?: number
+  /** you said these are the wrong words */
+  rejected?: boolean
+  at: string
+}
+
 /** What listening to the audio said about tempo and key. */
 export interface TrackAnalysis {
   bpm: number | null
@@ -123,6 +186,8 @@ export interface TrackAnalysis {
   /** measured over the whole file (missing on tracks analysed before loudness existed) */
   loudness?: LoudnessMeasure | null
   quality?: QualityCheck | null
+  /** whether it all decodes, and silence at the ends (missing on tracks analysed before this existed) */
+  integrity?: IntegrityCheck | null
 }
 
 /** A reading of "who and what" a file is, from any parser. */
@@ -282,6 +347,10 @@ export interface Track {
   artFound: ArtRef | null
   /** moved to the library's holding folder as a duplicate (the track is then hidden) */
   aside: SetAside | null
+  /** what reading the file found (a wrong extension, unreadable tags…) */
+  fileCheck: FileCheck | null
+  /** lyrics found online, written when the track is cut */
+  lyrics: LyricsFound | null
   createdAt: string
   updatedAt: string
 }
@@ -293,7 +362,7 @@ export interface SetAside {
   keptId: number | null
 }
 
-export type TrackSummary = Omit<Track, "candidates" | "decision" | "heuristic" | "ai"> & {
+export type TrackSummary = Omit<Track, "candidates" | "decision" | "heuristic" | "ai" | "lyrics"> & {
   proposedArtist: string | null
   proposedTitle: string | null
   sourceCount: number
@@ -333,7 +402,7 @@ export interface LibrarySettings {
   inboxFor?: number
 }
 
-export type JobKind = "scan" | "interpret" | "scour" | "score" | "process" | "execute" | "rewind" | "analyze" | "artwork" | "organise" | "duplicates" | "sync"
+export type JobKind = "scan" | "interpret" | "scour" | "score" | "process" | "execute" | "rewind" | "analyze" | "artwork" | "organise" | "duplicates" | "sync" | "lyrics" | "upload"
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled"
 
 export interface Job {
@@ -361,8 +430,11 @@ export interface Operation {
   batchId: string
   /** null for a file that isn't a track (cover images, cue sheets moved along with a folder) */
   trackId: number | null
-  /** "move": into another folder, name and tags untouched; "set-aside": a duplicate moved to the holding folder */
-  kind: "rename" | "tag" | "rename+tag" | "move" | "set-aside"
+  /**
+   * "move": into another folder, name and tags untouched; "set-aside": a duplicate moved to the
+   * holding folder; "write": a new file Dubplate made (a .lrc), its contents in tagsAfter.lyrics
+   */
+  kind: "rename" | "tag" | "rename+tag" | "move" | "set-aside" | "write"
   fromPath: string
   toPath: string
   tagsBefore: ExistingTags | null
@@ -519,6 +591,8 @@ export interface Settings {
     tagComment: boolean
     /** write MusicBrainz and Discogs IDs when the sources found them */
     writeIds: boolean
+    /** give a file whose extension is wrong for its format the right one when cutting */
+    fixExtensions: boolean
   }
   organise: {
     /** folder template, e.g. "{artist}/[{year} - ]{album}"; "/" starts a new folder level */
@@ -576,6 +650,8 @@ export interface Settings {
     loudness: boolean
     /** write ReplayGain tags when cutting */
     writeReplayGain: boolean
+    /** check the whole file decodes, and measure silence at the ends */
+    integrity: boolean
   }
   automation: {
     /** identify files that watched folders or the nightly scan pick up */
@@ -595,7 +671,63 @@ export interface Settings {
     /** Traktor's name for the drive the music is on (e.g. "Macintosh HD"; Windows paths use their drive letter) */
     traktorVolume: string
   }
+  lyrics: {
+    /** look lyrics up when identifying tracks */
+    fetch: boolean
+    /** write them into the file when cutting */
+    embed: boolean
+    /** put the timed (LRC) version in the tag when there is one, for players that scroll along */
+    embedSynced: boolean
+    /** save timed lyrics as a .lrc file next to the track */
+    lrcFile: boolean
+    /** replace lyrics a file already has */
+    replaceExisting: boolean
+  }
+  uploads: {
+    /** largest file accepted, in MB */
+    maxMb: number
+  }
+  hooks: {
+    /** folders as download tools see them → as Dubplate does, e.g. /downloads → /music/Downloads */
+    pathMap: PathMapping[]
+  }
   contact: string
+}
+
+/** A key for scripts and download tools to call Dubplate with. Only its hash is stored. */
+export interface ApiToken {
+  id: number
+  name: string
+  /** the first characters, to tell tokens apart */
+  prefix: string
+  /** "hooks": only the import hook and uploads; "full": the whole API (not sign-in or tokens) */
+  scope: "hooks" | "full"
+  createdAt: string
+  lastUsedAt: string | null
+}
+
+/** A call to the import hook, kept for a while so a setup can be checked. */
+export interface HookCall {
+  at: string
+  /** the token's name */
+  token: string
+  /** which tool it looked like: "qBittorrent", "slskd", "Lidarr"… */
+  from: string
+  /** a tool's "test" call */
+  test: boolean
+  paths: string[]
+  /** libraries queued for a scan */
+  libraries: string[]
+  ignored: { path: string; reason: string }[]
+}
+
+/** A file saved by an upload. */
+export interface UploadResult {
+  /** where it went, relative to the library */
+  path: string
+  name: string
+  size: number
+  libraryId: number
 }
 
 export interface PathMapping {

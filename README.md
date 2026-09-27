@@ -304,7 +304,7 @@ Pick one with `DUBPLATE_TAG` in `.env`.
   docker compose exec ollama ollama pull qwen3:8b
   ```
 
-- 🌐 If you browse to it by a LAN name or IP (e.g. a NAS), add that name or IP to `DUBPLATE_ALLOWED_HOSTS`.
+- 🌐 If you browse to it by a LAN name or IP (e.g. a NAS), add that name or IP to `DUBPLATE_ALLOWED_HOSTS`. Download tools in other containers call it with an API token instead, which doesn't need this.
 - 🔑 Reachable by others on your network? Set a password in **Settings → Sign-in & safety**, or with `DUBPLATE_PASSWORD`.
 - ❤️ A built-in healthcheck reports the container as healthy once the server is up.
 
@@ -520,7 +520,7 @@ export, or save them as the default.
 <summary><b>Audio quality & loudness</b></summary>
 
 While it listens for BPM and key, Dubplate also checks two more things
-(both can be switched off in **Settings → Artwork & audio**):
+(both can be switched off in **Settings → Artwork, lyrics & audio**):
 
 - 🕵️ **Fake quality**: a lossy encode cuts off the treble at a frequency that
   gives its real bitrate away (about 16 kHz for 128 kbps, 19-20 kHz for
@@ -541,6 +541,50 @@ hint to listen, never an action on its own.
 </details>
 
 <details>
+<summary><b>Broken files</b></summary>
+
+Files get checked as well as their names:
+
+| Problem | How it's found | What happens |
+| --- | --- | --- |
+| **Wrong extension** | The first bytes say what a file really is: a `.mp3` that's an M4A from a YouTube ripper, a "FLAC" that's an MP3 | Its tags are read and written as what it really is, and cutting gives it the right extension (switch that off under **Settings → Artwork, lyrics & audio**) |
+| **Cut short** | The header's stated length (a WAV's or AIFF's data size, an MP3's VBR header, FLAC and MP4 headers) against what actually decodes | Flagged; a download or copy that didn't finish |
+| **Damaged** | Decoding breaks off partway | Flagged, with where it stops |
+| **Long silence** | More than 2 s of silence at the start or 5 s at the end (below -50 dBFS, so vinyl crackle counts as sound) | Noted, for DJs who'd have to skip it |
+| **Unreadable tags** | The tag reader gives up | Noted |
+
+The whole-file checks run while the audio is analysed. The problems show in a
+track's details, with the **File problems** filter in Tracks, and on the
+Health page; **Duplicates** never keeps a broken copy over a whole one. Tracks
+analysed before this existed are checked the next time analysis runs on them.
+
+</details>
+
+<details>
+<summary><b>Lyrics</b></summary>
+
+Lyrics come from [LRCLIB](https://lrclib.net), a free lyrics library (no key
+needed), timed to the music where it has them. They're looked up while
+identifying, for tracks the sources pinned down, by artist and title; a hit
+has to be the same song within 20 s of the same length, and timed lyrics are
+only kept when the lengths agree to within 3 s, so the words land on time.
+Dubplates, specials and clashes are skipped (their words aren't the
+original's), and dubs, versions and instrumentals are marked as having none.
+
+When a track is cut, its lyrics are written into the file (`USLT` in ID3,
+`LYRICS` in FLAC and Ogg, `©lyr` in MP4), and if you like as a `.lrc` next to
+it for players that read timed lyrics from a file. A file's own lyrics are
+kept unless you allow replacing them. A `.lrc` follows its track when it's
+renamed or moved, and Rewind takes out what Dubplate wrote (a `.lrc` you've
+edited since is left alone).
+
+Each track's details show the words, with **Look again** and **Not these**.
+**Find lyrics** in the Tracks menu looks a selection up afresh. Settings live
+under **Settings → Artwork, lyrics & audio**.
+
+</details>
+
+<details>
 <summary><b>Hands-off & inbox folders</b></summary>
 
 **Hands-off** (Libraries → Customise): tracks that come in to that library
@@ -555,6 +599,62 @@ an inbox for your main library. Tracks are identified
 there, and cutting moves them into the main library using its filename and
 folder templates. Pair it with watching and hands-off for a drop folder that
 files itself. Rewind moves them back to the inbox.
+
+</details>
+
+<details>
+<summary><b>Uploads from your phone</b></summary>
+
+**Upload** sends files from a phone or computer straight into a library,
+with a progress bar each, two at a time. Upload into an inbox with hands-off
+on and a tune you send from your phone is identified and filed by itself.
+Uploads are identified as soon as they land, whether or not identifying new
+files is switched on.
+
+With Dubplate installed on an Android phone, audio files can also be
+**shared** to it from other apps (Files, a messaging app, a downloader): the
+share opens the Upload page with them already on their way.
+
+- An upload never replaces a file: a name that's taken gets a number, `(2)`.
+- It's written to a hidden temporary file and only named once it's all there,
+  so a scan never picks up half a file.
+- Only music files (by extension, and by content) are taken, up to 2 GB each
+  by default (**Settings → Uploads & download tools**). A reverse proxy in front
+  may have a lower limit of its own: nginx's is 1 MB unless you raise
+  `client_max_body_size`.
+
+</details>
+
+<details>
+<summary><b>Download tools & API tokens</b></summary>
+
+When a download finishes, a download tool can tell Dubplate, which scans the
+library it landed in and identifies what's new. Make the download folder a
+library (an inbox, with hands-off on, and downloads file themselves), then set
+the tool up under **Settings → Uploads & download tools**, where the commands
+below come ready-filled with your address and token:
+
+| Tool | Where | What |
+| --- | --- | --- |
+| qBittorrent | Options → Downloads → Run external program → on torrent finished | `curl -fsS -X POST -H "Authorization: Bearer TOKEN" --data-urlencode "path=%F" "http://dubplate:4455/api/hooks/import?from=qBittorrent"` (needs `curl` where qBittorrent runs) |
+| slskd | `integration.webhooks` in its config (a version with webhooks) | Calls on `DownloadDirectoryComplete`, with an `Authorization: Bearer TOKEN` header |
+| Lidarr | Settings → Connect → Webhook | On Release Import and On Upgrade, method POST, any username, the token as the password. Its **Test** button shows up in the list of recent calls |
+| Anything else | | `POST /api/hooks/import` with `{"path": "/downloads/Album"}` (or a form field, or `?path=`), or `{"library": "Downloads"}` to rescan a whole library |
+
+If the tool sees the folders under other names (qBittorrent in its own
+container calling it `/downloads` while Dubplate has `/music/Downloads`), add
+the pair under **If the tool sees the folders elsewhere**. The settings page
+lists the last calls and what came of them, so a setup can be checked.
+
+**API tokens** are made in the same place, one per tool, and shown once. Only
+a SHA-256 of each is stored. A token goes in an `Authorization: Bearer`
+header, as a Basic-auth password (for tools with only a username/password
+box), in `X-Dubplate-Token`, or as `?token=` as a last resort (it can end up in
+logs). A **downloads & uploads** token can only call the import hook and
+upload files; an **everything** token can use the whole API, for your own
+scripts. No token can sign in, change the password or manage tokens. A request
+with a token doesn't need the browser-only `X-Dubplate` header or an allowed
+`Host`, so another container can call `http://dubplate:4455`.
 
 </details>
 
@@ -592,6 +692,7 @@ skipped and names are read by the rule-based parser until the 1st.
 **Health** checks everything Dubplate depends on in one go: its data folder
 and disk space, failed jobs, `fpcalc`, whether a password is needed, each
 library (folder there, readable, writable if you've switched off read-only),
+files that are broken or have the wrong extension,
 the AI provider and model, whether the sources can be reached and have their
 keys, and the media servers and chats. Each problem says how to fix it and
 links to the right setting. `/api/health` stays open for Docker's healthcheck.
@@ -613,7 +714,7 @@ crates whose names aren't taken.
 
 ## 🛡️ Safety inna di dance
 
-- 🔒 **Read-only by default.** Nothing on disk changes until you turn off read-only mode.
+- 🔒 **Read-only by default.** Nothing already on disk changes until you turn off read-only mode. (Uploads add new files, and never replace one.)
 - 👀 Scans only stat, list and read.
 - 🧾 Before writing, Dubplate checks that each file still has the size and mtime from the scan.
 - 🚫 Files never leave their library - renaming, organising and setting duplicates aside alike - and never overwrite another file.
@@ -623,6 +724,8 @@ crates whose names aren't taken.
 - 🏠 The server binds to localhost, rejects unknown `Host` headers (DNS rebinding) and needs an `X-Dubplate` header on every write request (CSRF).
 - 🔑 An optional password keeps everyone else out when it's on a server or your network.
 - 🤖 Hands-off only cuts tracks the sources agree on, never on the AI's word alone, and every cut can be rewound.
+- 🎟️ API tokens are stored as hashes, shown once, deleted in one click, and a downloads-only token can't read or change anything else.
+- 🏷️ A file named as the wrong format has its tags written as what it really is, so an M4A called `.mp3` doesn't get an MP3 tag put in front of it.
 
 ## 🎁 Extra riddims
 
@@ -650,6 +753,10 @@ crates whose names aren't taken.
 - 💸 **AI usage & cost**: tokens and estimated spend per day, provider and job, with a monthly budget.
 - 🩺 **Health page**: every dependency checked, with a fix for each problem.
 - 📲 **Install it on a phone**: add Dubplate to the home screen from the browser (needs HTTPS, or localhost) and it opens like an app.
+- 📤 **Upload from your phone**: send files into a library from the browser, or share them to the installed app from other apps.
+- 🪝 **Download tools**: qBittorrent, slskd and Lidarr tell Dubplate when a download finishes, with API tokens made for them.
+- 🎤 **Lyrics**: from LRCLIB, timed where possible, written into the file and optionally a `.lrc`.
+- 🩹 **Broken files**: wrong extensions (fixed when cutting), downloads that stopped short, damaged audio and long silences.
 - 📱 **Review on a phone**: swipe right to approve, left to leave as-is; **Approve all** clears a queue with Undo.
 - 🎧 **Audio preview** in the review screen, with streaming and seeking.
 - 👯 **Duplicates**: identical audio by fingerprint, plus different files that would get the same name. Keep the best copy and set the rest aside, never deleted.

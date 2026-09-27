@@ -1,6 +1,7 @@
-// Dubplate's service worker: just enough to install it as an app and to say so
-// when the server can't be reached. Nothing is cached - your music, the API and
-// the app itself always come fresh from the server.
+// Dubplate's service worker: just enough to install it as an app, to take audio
+// shared to it from other apps, and to say so when the server can't be reached.
+// Nothing is cached - your music, the API and the app itself always come fresh
+// from the server.
 
 const OFFLINE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Dubplate - offline</title><style>
@@ -13,7 +14,41 @@ h1{font-size:22px;margin:16px 0 4px}p{color:#b3a79b;margin:0 0 20px}button{font:
 self.addEventListener("install", () => self.skipWaiting())
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()))
 
+// Audio shared to the installed app from another one (Android's share sheet) arrives as a
+// form POST. The files are parked in IndexedDB and the Upload page picks them up.
+const SHARE_DB = "dubplate-share"
+
+function parkFiles(files) {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open(SHARE_DB, 1)
+    open.onupgradeneeded = () => open.result.createObjectStore("files", { autoIncrement: true })
+    open.onerror = () => reject(open.error)
+    open.onsuccess = () => {
+      const tx = open.result.transaction("files", "readwrite")
+      for (const f of files) tx.objectStore("files").add(f)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    }
+  })
+}
+
+async function receiveShare(request) {
+  try {
+    const form = await request.formData()
+    const files = form.getAll("audio").filter((f) => typeof f === "object" && f.size > 0)
+    await parkFiles(files)
+    return Response.redirect("/upload?shared=1", 303)
+  } catch {
+    return Response.redirect("/upload?shared=0", 303)
+  }
+}
+
 self.addEventListener("fetch", (event) => {
+  const url = new URL(event.request.url)
+  if (event.request.method === "POST" && url.origin === self.location.origin && url.pathname === "/share") {
+    event.respondWith(receiveShare(event.request))
+    return
+  }
   // Only page loads: everything else goes straight to the network as usual.
   if (event.request.mode !== "navigate") return
   event.respondWith(fetch(event.request).catch(() => new Response(OFFLINE, { headers: { "content-type": "text/html; charset=utf-8" } })))

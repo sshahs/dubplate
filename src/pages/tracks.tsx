@@ -4,7 +4,9 @@ import {
   Alert02Icon,
   Cancel01Icon,
   Download04Icon,
+  FileCorruptIcon,
   Image01Icon,
+  MusicNote03Icon,
   MoreHorizontalIcon,
   PencilEdit02Icon,
   RefreshIcon,
@@ -17,6 +19,7 @@ import { addTransitionType, memo, startTransition, useCallback, useEffect, useLa
 import { useSearchParams } from "react-router"
 import { toast } from "sonner"
 import { formatBpm, toCamelot } from "@shared/keys"
+import { fileProblems } from "@shared/problems"
 import type { TrackStatus, TrackSummary } from "@shared/types"
 import { TRACK_STATUSES } from "@shared/types"
 import { PageHeader } from "@/components/app-shell"
@@ -84,6 +87,18 @@ function SkeletonRow({ index }: { index: number }) {
 }
 
 /** One row. Memoised: scrolling re-renders the page, but rows already on screen stay put. */
+/** A mark for a file with something wrong with it (the worst thing, as a tooltip). */
+function ProblemMark({ track }: { track: TrackSummary }) {
+  const p = fileProblems(track).find((x) => x.severity !== "info")
+  if (!p) return null
+  return (
+    <span className={cn("shrink-0", p.severity === "error" ? "text-destructive" : "text-rasta-gold")} title={`${p.label}: ${p.detail}`}>
+      <HugeiconsIcon icon={FileCorruptIcon} strokeWidth={2} className="size-3.5" />
+      <span className="sr-only">{p.label}</span>
+    </span>
+  )
+}
+
 const TrackRow = memo(function TrackRow({
   t,
   index,
@@ -126,6 +141,7 @@ const TrackRow = memo(function TrackRow({
               <span className="sr-only">Sounds made from a lower-quality file</span>
             </span>
           )}
+          <ProblemMark track={t} />
         </div>
         {t.relDir && <div className="text-muted-foreground truncate text-[11px]">{t.relDir}</div>}
       </TableCell>
@@ -172,6 +188,7 @@ export default function TracksPage() {
   const libraryId = params.get("libraryId") ? Number(params.get("libraryId")) : undefined
   const crateId = params.get("crate") ? Number(params.get("crate")) : undefined
   const quality = params.get("quality") === "suspect" ? ("suspect" as const) : undefined
+  const problems = params.get("problems") === "1" || undefined
   const [exporting, setExporting] = useState(false)
   const [sort, setSort] = useState<Sort>("filename")
   const [dir, setDir] = useState<"asc" | "desc">("asc")
@@ -183,9 +200,9 @@ export default function TracksPage() {
   const shiftHeld = useRef(false)
 
   const filter: TrackFilter = useMemo(
-    () => ({ q: debouncedQ || undefined, status: status.length ? status : undefined, libraryId, crate: crateId, quality, sort, dir }),
+    () => ({ q: debouncedQ || undefined, status: status.length ? status : undefined, libraryId, crate: crateId, quality, problems, sort, dir }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [debouncedQ, params.get("status"), libraryId, crateId, quality, sort, dir]
+    [debouncedQ, params.get("status"), libraryId, crateId, quality, problems, sort, dir]
   )
   const filterKey = JSON.stringify(filter)
   useEffect(() => {
@@ -279,7 +296,8 @@ export default function TracksPage() {
     onError: (e) => toast.error(e.message),
   })
   const job = useMutation({
-    mutationFn: (kind: "analyze" | "reanalyze" | "artwork") => (kind === "artwork" ? api.findArtwork(selection!) : api.analyze(selection!, kind === "reanalyze")),
+    mutationFn: (kind: "analyze" | "reanalyze" | "artwork" | "lyrics") =>
+      kind === "artwork" ? api.findArtwork(selection!) : kind === "lyrics" ? api.findLyrics(selection!, true) : api.analyze(selection!, kind === "reanalyze"),
     onSuccess: (j) => toast(j.label, { description: "Runs in the background - watch the job dock." }),
     onError: (e) => toast.error(e.message),
   })
@@ -321,6 +339,12 @@ export default function TracksPage() {
     const next = new URLSearchParams(params)
     if (quality) next.delete("quality")
     else next.set("quality", "suspect")
+    setParams(next)
+  }
+  const toggleProblems = () => {
+    const next = new URLSearchParams(params)
+    if (problems) next.delete("problems")
+    else next.set("problems", "1")
     setParams(next)
   }
   const setLibrary = (id: string) => {
@@ -449,6 +473,10 @@ export default function TracksPage() {
           <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} data-icon="inline-start" />
           Sounds re-encoded
         </Button>
+        <Button variant={problems ? "default" : "outline"} size="sm" aria-pressed={!!problems} onClick={toggleProblems} title="Damaged, cut short, the wrong extension, long silences">
+          <HugeiconsIcon icon={FileCorruptIcon} strokeWidth={2} data-icon="inline-start" />
+          File problems
+        </Button>
         {crateId && (
           <span className="bg-primary/10 text-primary inline-flex h-7 items-center gap-1 rounded-full pr-1 pl-3 text-xs font-medium">
             Crate: {crate?.name ?? "…"}
@@ -519,6 +547,10 @@ export default function TracksPage() {
                     <DropdownMenuItem onClick={() => job.mutate("artwork")}>
                       <HugeiconsIcon icon={Image01Icon} strokeWidth={2} />
                       Find artwork
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => job.mutate("lyrics")}>
+                      <HugeiconsIcon icon={MusicNote03Icon} strokeWidth={2} />
+                      Find lyrics
                     </DropdownMenuItem>
                   </DropdownMenuGroup>
                   <DropdownMenuSeparator />

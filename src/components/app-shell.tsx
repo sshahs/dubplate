@@ -6,6 +6,7 @@ import {
   DashboardSquare01Icon,
   DatabaseIcon,
   FolderLibraryIcon,
+  CloudUploadIcon,
   FolderTreeIcon,
   HealthIcon,
   Moon02Icon,
@@ -56,6 +57,7 @@ import { cn } from "@/lib/utils"
 export const NAV = [
   { to: "/", label: "Dashboard", icon: DashboardSquare01Icon, group: "Selector" },
   { to: "/libraries", label: "Libraries", icon: FolderLibraryIcon, group: "Selector" },
+  { to: "/upload", label: "Upload", icon: CloudUploadIcon, group: "Selector" },
   { to: "/tracks", label: "Tracks", icon: MusicNote03Icon, group: "Selector", badge: "pending" as const },
   { to: "/review", label: "Review", icon: CheckListIcon, group: "Selector", badge: "review" as const },
   { to: "/execute", label: "Cut & Tag", icon: Scissor01Icon, group: "Selector", badge: "approved" as const },

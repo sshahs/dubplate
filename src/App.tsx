@@ -12,6 +12,7 @@ const PAGES = {
   duplicates: () => import("@/pages/duplicates"),
   execute: () => import("@/pages/execute"),
   health: () => import("@/pages/health"),
+  upload: () => import("@/pages/upload"),
   libraries: () => import("@/pages/libraries"),
   organise: () => import("@/pages/organise"),
   review: () => import("@/pages/review"),
@@ -33,6 +34,7 @@ const SettingsPage = lazy(PAGES.settings)
 const SourcesPage = lazy(PAGES.sources)
 const TracksPage = lazy(PAGES.tracks)
 const UntanglerPage = lazy(PAGES.untangler)
+const UploadPage = lazy(PAGES.upload)
 
 function PageFallback() {
   return (
@@ -110,6 +112,7 @@ export default function App() {
                 <Route path="/sources" element={<SourcesPage />} />
                 <Route path="/duplicates" element={<DuplicatesPage />} />
                 <Route path="/health" element={<HealthPage />} />
+                <Route path="/upload" element={<UploadPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="*" element={<DashboardPage />} />
               </Routes>

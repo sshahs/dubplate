@@ -4,9 +4,11 @@
 import { createHash } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
-import { parseFile } from "music-metadata"
-import type { ArtRef, ExistingTags, Library, Settings } from "../shared/types"
+import { parseFile, parseStream, type IAudioMetadata } from "music-metadata"
+import type { ArtRef, ExistingTags, FileCheck, Library, Settings } from "../shared/types"
 import { parseKey } from "../shared/keys"
+import { lyricsSummary } from "../shared/lyrics"
+import { mismatch, sniffFile } from "./sniff"
 import { describeArt, pickFrontCover } from "./art"
 import { parseFilename } from "./core/filename-parser"
 import { getDb } from "./db"
@@ -17,7 +19,7 @@ import type { Track } from "../shared/types"
 
 const HASH_CHUNK = 64 * 1024
 /** Bump when readAudio starts collecting something new, so unchanged files get re-read once. */
-export const TAGS_VERSION = 3
+export const TAGS_VERSION = 4
 
 /** Fast content fingerprint: size + first and last 64 KiB. Enough to spot
  *  duplicates and follow files that were moved outside Dubplate. */
@@ -81,9 +83,25 @@ function firstString(v: unknown): string | undefined {
   return undefined
 }
 
+/** A file's lyrics tag, as one text (timed lyrics as LRC lines). */
+function lyricsText(c: IAudioMetadata["common"]): string | undefined {
+  for (const l of c.lyrics ?? []) {
+    if (l.text?.trim()) return l.text
+    if (l.syncText?.length) return l.syncText.map((x) => x.text).join("\n")
+  }
+  return undefined
+}
+
 export async function readAudio(file: string) {
+  const opts = { duration: false, skipCovers: false }
+  let fileCheck: FileCheck | null = null
   try {
-    const meta = await parseFile(file, { duration: false, skipCovers: false })
+    const wrong = mismatch(file, await sniffFile(file).catch(() => null))
+    if (wrong) fileCheck = { realExt: wrong.ext, realFormat: wrong.label }
+    const size = (await fs.promises.stat(file)).size
+    if (!size) fileCheck = { ...fileCheck, empty: true }
+    // Named as something it isn't: let the content decide how it's read.
+    const meta = wrong ? await parseStream(fs.createReadStream(file), { size, mimeType: wrong.mime }, opts) : await parseFile(file, opts)
     const c = meta.common
     // Only a description of the cover is kept (hash, size); the bytes stay in the file.
     const cover = pickFrontCover(c.picture)
@@ -108,6 +126,7 @@ export async function readAudio(file: string) {
       discogsReleaseId: c.discogs_release_id ? String(c.discogs_release_id) : undefined,
       replayGainTrackGain: Number.isFinite(c.replaygain_track_gain?.dB) ? Math.round(c.replaygain_track_gain!.dB * 100) / 100 : undefined,
       replayGainTrackPeak: Number.isFinite(c.replaygain_track_peak?.ratio) ? Math.round(c.replaygain_track_peak!.ratio * 1e6) / 1e6 : undefined,
+      lyrics: lyricsSummary(lyricsText(c)),
     }
     return {
       tags,
@@ -116,10 +135,12 @@ export async function readAudio(file: string) {
       bitrate: meta.format.bitrate ? Math.round(meta.format.bitrate) : null,
       sampleRate: meta.format.sampleRate ?? null,
       codec: meta.format.codec ?? meta.format.container ?? null,
+      fileCheck,
       error: null as string | null,
     }
   } catch (err) {
-    return { tags: {}, art: null, duration: null, bitrate: null, sampleRate: null, codec: null, error: err instanceof Error ? err.message : String(err) }
+    const error = err instanceof Error ? err.message : String(err)
+    return { tags: {}, art: null, duration: null, bitrate: null, sampleRate: null, codec: null, fileCheck: { ...fileCheck, unreadable: error }, error }
   }
 }
 
@@ -206,8 +227,8 @@ export async function scanLibrary(lib: Library, settings: Settings, ctx: JobCont
   // (duplicates set aside are missing on purpose - a new copy of the same audio is a new track)
   const findMissingByHash = db.prepare("SELECT id FROM tracks WHERE hash = ? AND missing = 1 AND aside_json IS NULL LIMIT 1")
   const insert = db.prepare(
-    `INSERT INTO tracks (library_id, path, original_path, rel_dir, filename, ext, size, mtime_ms, hash, duration, bitrate, sample_rate, codec, tags_json, status, note, art_json, bpm, musical_key, tags_version)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ${TAGS_VERSION}) RETURNING id`
+    `INSERT INTO tracks (library_id, path, original_path, rel_dir, filename, ext, size, mtime_ms, hash, duration, bitrate, sample_rate, codec, tags_json, status, note, art_json, bpm, musical_key, file_check_json, tags_version)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ${TAGS_VERSION}) RETURNING id`
   )
   const markRead = db.prepare(`UPDATE tracks SET tags_version = ${TAGS_VERSION} WHERE id = ?`)
   const insertData = db.prepare("INSERT INTO track_data (track_id, heuristic_json) VALUES (?, ?)")
@@ -240,6 +261,7 @@ export async function scanLibrary(lib: Library, settings: Settings, ctx: JobCont
           codec: audio.codec,
           tags: audio.tags,
           art: audio.art,
+          fileCheck: audio.fileCheck,
           ...tempoAndKeyFromTags(prevTrack(prev.id), audio.tags),
           heuristic,
           missing: false,
@@ -254,7 +276,7 @@ export async function scanLibrary(lib: Library, settings: Settings, ctx: JobCont
         const movedTrack = movedRow ? getTrack(movedRow.id) : null
         if (movedTrack) {
           const t = movedTrack
-          updateTrack(t.id, { path: file, filename, ext, relDir, mtimeMs: st.mtimeMs, missing: false, heuristic, tags: audio.tags, art: audio.art, ...tempoAndKeyFromTags(t, audio.tags) })
+          updateTrack(t.id, { path: file, filename, ext, relDir, mtimeMs: st.mtimeMs, missing: false, heuristic, tags: audio.tags, art: audio.art, fileCheck: audio.fileCheck, ...tempoAndKeyFromTags(t, audio.tags) })
           markRead.run(t.id)
           db.prepare("UPDATE tracks SET library_id = ? WHERE id = ?").run(lib.id, t.id)
           seen.add(t.id)
@@ -279,7 +301,8 @@ export async function scanLibrary(lib: Library, settings: Settings, ctx: JobCont
             audio.error ? `Tag read failed: ${audio.error}` : null,
             audio.art ? JSON.stringify(audio.art) : null,
             audio.tags.bpm ?? null,
-            parseKey(audio.tags.key)
+            parseKey(audio.tags.key),
+            audio.fileCheck ? JSON.stringify(audio.fileCheck) : null
           ) as { id: number }
           insertData.run(r.id, JSON.stringify(heuristic))
           seen.add(r.id)
