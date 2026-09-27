@@ -220,11 +220,12 @@ npm run dev
 
 **First session**
 
-1. **Libraries**: add a folder. It's scanned read-only. Switch on **Watch for new files** to have new rips picked up and identified as they land.
-2. **Settings → AI interpreter**: pick a provider and model, then hit **Test**.
-3. **Dashboard → Process new**: interpret → scour → score.
-4. **Review**: listen, check the evidence, fix anything that's off and approve.
-5. **Cut & Tag**: do a dry run, switch off read-only mode, then cut. **Rewind** undoes any batch.
+1. **Welcome screen**: optionally pick what's in your crates (genres, plus kinds of recording like sound clashes or radio rips, or add your own). Skip it and Dubplate reads any genre. Change it later in **Settings → Your crates**.
+2. **Libraries**: add a folder. It's scanned read-only. Switch on **Watch for new files** to have new rips picked up and identified as they land.
+3. **Settings → AI interpreter**: pick a provider and model, then hit **Test**.
+4. **Dashboard → Process new**: interpret → scour → score.
+5. **Review**: listen, check the evidence, fix anything that's off and approve.
+6. **Cut & Tag**: do a dry run, switch off read-only mode, then cut. **Rewind** undoes any batch.
 
 **Keyboard**
 

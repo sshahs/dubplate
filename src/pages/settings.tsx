@@ -11,6 +11,7 @@ import {
   Target02Icon,
   TestTube01Icon,
   Timer02Icon,
+  Vynil01Icon,
 } from "@hugeicons/core-free-icons"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
@@ -19,6 +20,7 @@ import { toast } from "sonner"
 import { renderTemplate } from "@core/naming"
 import type { LlmProviderConfig, Settings } from "@shared/types"
 import { PageHeader } from "@/components/app-shell"
+import { GenrePicker } from "@/components/genre-picker"
 import { QueryError } from "@/components/query-error"
 import { SectionNav, SettingRow, SettingRows, type SectionItem } from "@/components/settings-layout"
 import { Badge } from "@/components/ui/badge"
@@ -37,17 +39,18 @@ import { api, type PublicSettings } from "@/lib/api"
 import { disableNotify, enableNotify, notifyEnabled, notifySupport } from "@/lib/notify"
 import { cn } from "@/lib/utils"
 
-type SectionId = "ai" | "confidence" | "naming" | "extras" | "automation" | "safety" | "learning"
+type SectionId = "ai" | "crates" | "confidence" | "naming" | "extras" | "automation" | "safety" | "learning"
 
-/** Sections, and the parts of the settings each one edits (for the unsaved-changes dots). */
-const SECTIONS: { id: SectionId; label: string; icon: SectionItem["icon"]; keys: (keyof Settings)[] }[] = [
-  { id: "ai", label: "AI interpreter", icon: AiBrain01Icon, keys: ["llm"] },
-  { id: "confidence", label: "Matching", icon: Target02Icon, keys: ["confidence"] },
-  { id: "naming", label: "Naming & tags", icon: FileEditIcon, keys: ["naming"] },
-  { id: "extras", label: "Artwork & tempo", icon: Image01Icon, keys: ["artwork", "analysis"] },
-  { id: "automation", label: "Automation", icon: Timer02Icon, keys: ["automation"] },
-  { id: "safety", label: "Safety & scanner", icon: Shield01Icon, keys: ["safety", "scanner", "contact"] },
-  { id: "learning", label: "Learning", icon: BookOpen01Icon, keys: [] },
+/** Sections, and the part of the settings each one edits (for the unsaved-changes dots). */
+const SECTIONS: { id: SectionId; label: string; icon: SectionItem["icon"]; edits: (s: Settings) => unknown }[] = [
+  { id: "ai", label: "AI interpreter", icon: AiBrain01Icon, edits: (s) => ({ ...s.llm, genres: undefined, sceneHint: undefined }) },
+  { id: "crates", label: "Your crates", icon: Vynil01Icon, edits: (s) => [s.llm.genres, s.llm.sceneHint] },
+  { id: "confidence", label: "Matching", icon: Target02Icon, edits: (s) => s.confidence },
+  { id: "naming", label: "Naming & tags", icon: FileEditIcon, edits: (s) => s.naming },
+  { id: "extras", label: "Artwork & tempo", icon: Image01Icon, edits: (s) => [s.artwork, s.analysis] },
+  { id: "automation", label: "Automation", icon: Timer02Icon, edits: (s) => s.automation },
+  { id: "safety", label: "Safety & scanner", icon: Shield01Icon, edits: (s) => [s.safety, s.scanner, s.contact] },
+  { id: "learning", label: "Learning", icon: BookOpen01Icon, edits: () => null },
 ]
 /** Older deep links that now live inside another section. */
 const HASH_ALIASES: Record<string, SectionId> = { notifications: "automation", scanner: "safety" }
@@ -493,8 +496,8 @@ export default function SettingsPage() {
     fn(next)
     setEdit(next)
   }
-  const changed = (keys: (keyof Settings)[]) => !!edit && !!data && keys.some((k) => JSON.stringify(edit[k]) !== JSON.stringify(data[k]))
-  const navItems: SectionItem[] = SECTIONS.map((s) => ({ id: s.id, label: s.label, icon: s.icon, dirty: changed(s.keys) }))
+  const changed = (edits: (s: Settings) => unknown) => !!edit && !!data && JSON.stringify(edits(edit)) !== JSON.stringify(edits(data))
+  const navItems: SectionItem[] = SECTIONS.map((s) => ({ id: s.id, label: s.label, icon: s.icon, dirty: changed(s.edits) }))
 
   return (
     <>
@@ -529,13 +532,37 @@ export default function SettingsPage() {
                     <SettingRow title="Learn from my corrections" description="Show the AI your past approvals as examples for similar filenames.">
                       <Switch checked={draft.llm.useCorrections} onCheckedChange={(v) => set((d) => void (d.llm.useCorrections = v))} aria-label="Learn from my corrections" />
                     </SettingRow>
-                    <SettingRow stack htmlFor="scene-hint" title="What's in your crates" description="A sentence or two about the collection - it shapes how ambiguous names are read.">
-                      <Textarea id="scene-hint" value={draft.llm.sceneHint} onChange={(e) => set((d) => void (d.llm.sceneHint = e.target.value))} rows={2} />
-                    </SettingRow>
                   </SettingRows>
                 </CardContent>
               </Card>
             </>
+          )}
+
+          {section === "crates" && (
+            <Card>
+              <CardHeader>
+                <CardTitle>What's in your crates</CardTitle>
+                <CardDescription>
+                  Pick the genres and kinds of recording you've got. It tells the AI what to expect when a name could be read more than one way. Nothing picked means any genre.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <SettingRows>
+                  <div className="pb-4">
+                    <GenrePicker value={draft.llm.genres} onChange={(genres) => set((d) => void (d.llm.genres = genres))} />
+                  </div>
+                  <SettingRow stack htmlFor="scene-hint" title="Anything else" description="Optional. A sentence about the collection, e.g. where most of it came from.">
+                    <Textarea
+                      id="scene-hint"
+                      value={draft.llm.sceneHint}
+                      onChange={(e) => set((d) => void (d.llm.sceneHint = e.target.value))}
+                      rows={2}
+                      placeholder="e.g. Mostly 90s pirate radio tapes and CD-R rips"
+                    />
+                  </SettingRow>
+                </SettingRows>
+              </CardContent>
+            </Card>
           )}
 
           {section === "confidence" && (

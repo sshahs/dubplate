@@ -113,6 +113,9 @@ function sel(s: Selection) {
 
 export type PublicSettings = Settings & { secretsFromEnv: string[]; zdrFromEnv: boolean }
 
+/** What a settings save may send: any top-level part, and objects only in part (the server merges them). */
+export type SettingsPatch = { [K in keyof Settings]?: Settings[K] extends unknown[] ? Settings[K] : Settings[K] extends object ? Partial<Settings[K]> : Settings[K] }
+
 export interface SourceStatus {
   id: string
   label: string
@@ -186,7 +189,7 @@ export const api = {
   cancelJob: (id: string) => post<{ ok: boolean }>(`/api/jobs/${id}/cancel`),
 
   settings: () => get<PublicSettings>("/api/settings"),
-  saveSettings: (patch: Partial<Settings>) => put<PublicSettings>("/api/settings", patch),
+  saveSettings: (patch: SettingsPatch) => put<PublicSettings>("/api/settings", patch),
 
   models: (provider: string) => get<{ models: string[]; error?: string }>(`/api/llm/models?provider=${encodeURIComponent(provider)}`),
   testLlm: (providerId: string) => post<{ ok: boolean; message: string; latencyMs: number }>("/api/llm/test", { providerId }),

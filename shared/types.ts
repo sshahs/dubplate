@@ -384,6 +384,9 @@ export interface Settings {
     temperature: number
     concurrency: number
     useCorrections: boolean
+    /** Genres and kinds of recording in the collection, as picked by the owner. Empty = any genre. */
+    genres: string[]
+    /** Free-text notes about the collection, added to what the genres say. */
     sceneHint: string
   }
   sources: Record<string, SourceConfig>
