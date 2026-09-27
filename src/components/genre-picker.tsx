@@ -65,7 +65,7 @@ export function GenrePicker({ value, onChange, className }: { value: string[]; o
             add()
           }}
         >
-          <Input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Something else? e.g. Bhangra" aria-label="Add a genre" maxLength={40} />
+          <Input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Something else?" aria-label="Add a genre" maxLength={40} />
           <Button type="submit" variant="outline" disabled={!draft.trim()}>
             <HugeiconsIcon icon={Add01Icon} strokeWidth={2} data-icon="inline-start" />
             Add
