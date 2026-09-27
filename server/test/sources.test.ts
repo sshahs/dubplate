@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { completeJson, extractJson } from "../ai/providers"
-import { sanitizeAi, similarCorrections } from "../ai/interpreter"
-import { openDb, setDb } from "../db"
+import { collectionContext, sanitizeAi, similarCorrections, systemPrompt } from "../ai/interpreter"
+import { getDb, openDb, setDb } from "../db"
 import { runScraper } from "../sources/scraper"
 import { readCombined } from "../sources/underground"
 import { musicbrainz } from "../sources/catalog"
@@ -161,5 +161,34 @@ describe("environment credentials", () => {
     expect(saved.sources.discogs.apiKey).toBeUndefined()
     expect(saved.llm.providers.find((p) => p.id === "commandcode")?.apiKey).toBeUndefined()
     expect(publicSettings().secretsFromEnv).toEqual(expect.arrayContaining(["llm:commandcode", "source:discogs"]))
+  })
+})
+
+describe("what's in the crates", () => {
+  it("assumes no genre until the owner picks some", () => {
+    const llm = loadSettings().llm
+    expect(llm.genres).toEqual([])
+    expect(collectionContext(llm)).toMatch(/^Any genre/)
+    expect(systemPrompt(collectionContext(llm))).toContain("Collection context: Any genre")
+    expect(collectionContext({ genres: ["House", "Techno"], sceneHint: "Berlin warehouse tapes." })).toBe("Mostly House, Techno. Berlin warehouse tapes.")
+    expect(collectionContext({ genres: [], sceneHint: " Mostly 90s jungle tapes. " })).toBe("Mostly 90s jungle tapes.")
+  })
+
+  it("turns the old sound-system note into picked genres, and leaves custom notes alone", () => {
+    const store = (llm: object) =>
+      getDb().prepare("INSERT INTO settings (key, value_json) VALUES ('app', ?) ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json").run(JSON.stringify({ llm }))
+    store({ activeProvider: "openai", sceneHint: "Reggae, dancehall, dub, sound clash, grime, UK garage, jungle and dubstep collections." })
+    expect(loadSettings().llm).toMatchObject({ activeProvider: "openai", sceneHint: "", genres: ["Reggae", "Dancehall", "Dub", "Sound clashes", "Grime", "UK garage", "Jungle", "Dubstep"] })
+    store({ sceneHint: "Northern soul 45s." })
+    expect(loadSettings().llm).toMatchObject({ sceneHint: "Northern soul 45s.", genres: [] })
+  })
+
+  it("saves picked genres tidied, without touching the rest of the AI settings", () => {
+    const before = loadSettings().llm
+    saveSettings({ llm: { genres: [" House ", "house", "", "Drum  &  bass", 7] } } as never)
+    const after = loadSettings().llm
+    expect(after.genres).toEqual(["House", "Drum & bass"])
+    expect(after.providers).toEqual(before.providers)
+    expect(after.activeProvider).toBe(before.activeProvider)
   })
 })

@@ -113,7 +113,9 @@ export const DEFAULT_SETTINGS: Settings = {
     temperature: 0.1,
     concurrency: 2,
     useCorrections: true,
-    sceneHint: "Reggae, dancehall, dub, sound clash, grime, UK garage, jungle and dubstep collections.",
+    // Nothing picked: the AI doesn't assume a genre. Owners narrow it in onboarding or Settings.
+    genres: [],
+    sceneHint: "",
   },
   sources: DEFAULT_SOURCES,
   scrapers: SCRAPER_PRESETS,
@@ -160,6 +162,25 @@ function deepMerge<T>(base: T, patch: unknown): T {
   return out as T
 }
 
+/** The collection note every install shipped with before genres could be picked. */
+const LEGACY_SCENE_HINT = "Reggae, dancehall, dub, sound clash, grime, UK garage, jungle and dubstep collections."
+const LEGACY_GENRES = ["Reggae", "Dancehall", "Dub", "Sound clashes", "Grime", "UK garage", "Jungle", "Dubstep"]
+
+/** Trimmed, de-duplicated and bounded: these go into every AI prompt. */
+export function cleanGenres(genres: unknown): string[] {
+  if (!Array.isArray(genres)) return []
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const g of genres) {
+    if (typeof g !== "string") continue
+    const name = g.replace(/\s+/g, " ").trim().slice(0, 40)
+    if (!name || seen.has(name.toLowerCase())) continue
+    seen.add(name.toLowerCase())
+    out.push(name)
+  }
+  return out.slice(0, 40)
+}
+
 function mergeProviders(stored: LlmProviderConfig[] | undefined): LlmProviderConfig[] {
   const byId = new Map((stored ?? []).map((p) => [p.id, p]))
   const merged = DEFAULT_PROVIDERS.map((d) => ({ ...d, ...byId.get(d.id) }))
@@ -175,6 +196,12 @@ export function loadSettings(): Settings {
   s.llm.providers = mergeProviders(stored.llm?.providers)
   s.scrapers = stored.scrapers ?? structuredClone(SCRAPER_PRESETS)
   s.sources = deepMerge(structuredClone(DEFAULT_SOURCES), stored.sources ?? {})
+  // Installs saved before genres existed still carry the old sound-system note; keep that
+  // behaviour, but as picked genres the owner can now see and change.
+  if (stored.llm && stored.llm.genres === undefined && stored.llm.sceneHint?.trim() === LEGACY_SCENE_HINT) {
+    s.llm.genres = [...LEGACY_GENRES]
+    s.llm.sceneHint = ""
+  }
   return s
 }
 
@@ -256,6 +283,7 @@ export function saveSettings(patch: Partial<Settings>): Settings {
     }
   }
   if (patch.scrapers) next.scrapers = patch.scrapers
+  if (patch.llm && "genres" in patch.llm) next.llm.genres = cleanGenres(patch.llm.genres)
   // Guard against inverted thresholds.
   next.confidence.reviewThreshold = Math.min(next.confidence.reviewThreshold, next.confidence.autoThreshold)
   getDb()

@@ -52,21 +52,29 @@ export const AI_SCHEMA = {
   },
 } as const
 
-export function systemPrompt(sceneHint: string) {
-  return `You are the music librarian inside "Dubplate", a tagger for sound-system collections. You know Jamaican and UK sound-system culture deeply - reggae, roots, dub, dancehall, lovers rock, sound clash, UK grime, garage, jungle, drum & bass, dubstep, bassline and UK funky - and you are expert at untangling messy digital filenames.
+/** What the owner told us about the collection, as one line for the prompt. */
+export function collectionContext(llm: Pick<Settings["llm"], "genres" | "sceneHint">): string {
+  const genres = llm.genres ?? []
+  const note = llm.sceneHint?.trim() ?? ""
+  if (!genres.length) return note || "Any genre. Don't assume a particular scene; go by what the file says."
+  return `Mostly ${genres.join(", ")}.${note ? ` ${note}` : ""}`
+}
 
-Collection context: ${sceneHint || "general music library"}
+export function systemPrompt(context: string) {
+  return `You are the music librarian inside "Dubplate", a tagger for DJ and collector libraries. You know music across every genre (reggae, dub and dancehall, UK grime, garage, jungle and dubstep, house, techno and disco, hip-hop, R&B and soul, jazz, rock, pop, Latin, African and classical), Jamaican and UK sound-system culture especially deeply, and you are expert at untangling messy digital filenames.
+
+Collection context: ${context}
 
 Given one audio file's name, folder path and any embedded tags, work out who performed it and what it is.
 
 Rules:
-- artists: the main performer(s) in their commonly credited spelling and capitalisation (e.g. "Buju Banton", "Beenie Man", "Dizzee Rascal", "JME", "Sizzla"). Featured guests go in "featuring", not "artists".
+- artists: the main performer(s) in their commonly credited spelling and capitalisation (e.g. "Buju Banton", "Dizzee Rascal", "JME", "Daft Punk", "Beyoncé", "A Tribe Called Quest"). Featured guests go in "featuring", not "artists".
 - relation: "vs" for clashes / versus, "&" for collaborations, "x" when the name uses " x ", null for a single artist.
-- title: the song name only - no version, year, bitrate or featuring text. If there is no song name (a live clash, radio set or session), write a short descriptive title such as "Live Clash" or "Live at Sting".
-- version: e.g. "Dubplate", "Special", "Live", "Remix", "Skepta Remix", "VIP", "Dub", "Instrumental", "Refix", "Freestyle". null for the original release.
+- title: the song name only - no version, year, bitrate or featuring text. If there is no song name (a live clash, DJ set, radio show or session), write a short descriptive title such as "Live Clash" or "Live at Sting".
+- version: e.g. "Dubplate", "Special", "Live", "Remix", "Skepta Remix", "Extended Mix", "Radio Edit", "VIP", "Dub", "Instrumental", "Acoustic", "Demo", "Freestyle". null for the original release.
 - riddim: the riddim name if referenced (e.g. "Sleng Teng", "Diwali"), else null.
 - year: four-digit year if stated or clearly implied ("live 93" means 1993), else null.
-- event: clash, session or show name if relevant (e.g. "Sting", "Fire in the Booth", "Rinse FM"), else null.
+- event: clash, session, show or festival name if relevant (e.g. "Sting", "Fire in the Booth", "Rinse FM", "Boiler Room", "Glastonbury"), else null.
 - Ignore rip-site names, bitrates, track numbers, "official video" and similar noise.
 - Never invent facts. When a filename is genuinely ambiguous (e.g. order could be Title - Artist), give your best reading in the main fields and the others in "alternatives".
 - confidence: 0 to 1 - how sure you are of artists + title together.
@@ -188,7 +196,7 @@ export async function interpretTrack(
   if (!provider) throw new Error("No AI provider is enabled - pick one in Settings")
   const examples = settings.llm.useCorrections ? similarCorrections(track.filename, opts.corrections) : []
   const raw = await completeJson(provider, {
-    system: systemPrompt(settings.llm.sceneHint),
+    system: systemPrompt(collectionContext(settings.llm)),
     user: buildUserPrompt(track, examples),
     schema: AI_SCHEMA as unknown as Record<string, unknown>,
     schemaName: "identify_track",
