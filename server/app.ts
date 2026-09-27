@@ -8,14 +8,18 @@ import { compress } from "hono/compress"
 import { deleteCookie, getCookie, setCookie } from "hono/cookie"
 import { streamSSE } from "hono/streaming"
 import { parseKey } from "../shared/keys"
-import type { DjFormat, FinalMeta, Library, MediaServerConfig, PathMapping, ScraperDefinition, ServerEvent, Settings, Track, TrackStatus } from "../shared/types"
+import type { ApiToken, DjFormat, FinalMeta, Library, MediaServerConfig, PathMapping, ScraperDefinition, ServerEvent, Settings, Track, TrackStatus } from "../shared/types"
 import { TRACK_STATUSES } from "../shared/types"
 import { activeProvider, interpretTrack } from "./ai/interpreter"
 import { listModels, testProvider } from "./ai/providers"
 import { usageReport } from "./ai/usage"
 import { analyzeTracks } from "./analysis"
 import { findArtwork, thumbnail } from "./art"
+import { lyricsForTrack, lyricsTracks, topUpLyrics } from "./lyrics"
 import * as auth from "./auth"
+import * as tokens from "./tokens"
+import { readHook, recentHookCalls, runHook } from "./hooks"
+import { saveUpload, UploadError } from "./uploads"
 import { config, VERSION } from "./config"
 import { cleanRules, crateFacets, createCrate, deleteCrate, getCrate, listCrates, mixSuggestionIds, updateCrate } from "./crates"
 import { exportPlaylists, type Playlist } from "./dj-export"
@@ -23,7 +27,7 @@ import { healthReport } from "./health"
 import { parseFilename } from "./core/filename-parser"
 import { normArtist } from "./core/normalize"
 import { buildPlan, executePlan, metaFor, proposedFilename, rewind } from "./executor"
-import { activeJobs, cancelJob, emit, enqueueJob, listJobs, recentLogEvents, subscribe } from "./jobs"
+import { activeJobs, cancelJob, emit, enqueueJob, listJobs, log, recentLogEvents, subscribe } from "./jobs"
 import { isBackup, makeBackup, restoreBackup } from "./backup"
 import { duplicateGroups, setAside, setAsideCount, validResolutions, type Resolution } from "./duplicates"
 import { sendChat, type ChatChannel } from "./integrations/chat"
@@ -39,7 +43,7 @@ import { allAdapters, buildQuery, sourceStatus } from "./sources"
 import { collectionStatus, syncCollection } from "./sources/discogs-collection"
 import { runScraper } from "./sources/scraper"
 import { restore, snapshot } from "./undo"
-import { syncWatchers } from "./watcher"
+import { scanSoon, syncWatchers } from "./watcher"
 
 const AUDIO_MIME: Record<string, string> = {
   mp3: "audio/mpeg",
@@ -79,6 +83,7 @@ function parseQuery(c: Context): repo.TrackQuery {
     includeMissing: q.missing === "1",
     crateId: q.crate ? Number(q.crate) : undefined,
     quality: q.quality === "suspect" || q.quality === "ok" ? q.quality : undefined,
+    problems: q.problems === "1" || undefined,
     sort: (q.sort as repo.TrackQuery["sort"]) || undefined,
     dir: q.dir === "desc" ? "desc" : "asc",
     limit: q.limit ? Number(q.limit) : undefined,
@@ -145,10 +150,22 @@ function clientAddress(c: Context): string {
 }
 
 export function createApp() {
-  const app = new Hono()
+  const app = new Hono<{ Variables: { token?: ApiToken } }>()
 
   // ---- local-app security: DNS-rebinding + CSRF guards ----
   app.use("/api/*", async (c, next) => {
+    // Scripts and download tools come with an API token instead of a browser session. The
+    // Host and X-Dubplate checks guard browsers against other sites; a token can't be forged
+    // by one, so it's enough on its own.
+    const raw = tokens.tokenFromRequest({ authorization: c.req.header("authorization"), xToken: c.req.header("x-dubplate-token") }, c.req.query("token"))
+    if (raw) {
+      const tok = tokens.checkToken(raw)
+      if (!tok) return c.json({ error: "That API token isn't valid - it may have been deleted" }, 401)
+      if (tokens.tokensMayNotCall(c.req.path)) return c.json({ error: "API tokens can't sign in or manage tokens" }, 403)
+      if (tok.scope === "hooks" && !tokens.hooksMayCall(c.req.path)) return c.json({ error: `"${tok.name}" can only report downloads and upload files` }, 403)
+      c.set("token", tok)
+      return next()
+    }
     const host = (c.req.header("host") ?? "").replace(/:\d+$/, "").replace(/^\[|\]$/g, "")
     const okHosts = new Set(["localhost", "127.0.0.1", "::1", config.host, ...config.allowedHosts])
     if (host && !okHosts.has(host) && !config.allowedHosts.includes("*")) {
@@ -544,6 +561,93 @@ export function createApp() {
     return c.json(enqueueJob("artwork", `Find artwork for ${ids.length} track${ids.length === 1 ? "" : "s"}`, (ctx) => artworkTracks(ids, settingsNow(), { force: !!body.force }, ctx)))
   })
 
+  // ---- API tokens (a browser session only: tokens can't make tokens) ----
+  app.get("/api/tokens", (c) => c.json(tokens.listTokens()))
+
+  app.post("/api/tokens", async (c) => {
+    const body = await c.req.json<{ name?: string; scope?: string }>().catch(() => ({}) as { name?: string; scope?: string })
+    try {
+      return c.json(tokens.createToken(body.name ?? "", body.scope === "full" ? "full" : "hooks"))
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
+
+  app.delete("/api/tokens/:id", (c) => (tokens.deleteToken(Number(c.req.param("id"))) ? c.json({ ok: true }) : c.json({ error: "No such token" }, 404)))
+
+  // ---- download tools ----
+  /** "This finished downloading": scan the library it's in and identify what's new. */
+  app.post("/api/hooks/import", async (c) => {
+    const type = c.req.header("content-type") ?? ""
+    const body: unknown = type.includes("json")
+      ? await c.req.json().catch(() => null)
+      : type.includes("form")
+        ? await c.req.parseBody().catch(() => null)
+        : await c.req.text().catch(() => "")
+    const req = readHook(body, c.req.query(), c.req.header("user-agent"))
+    const who = c.get("token")?.name ?? "Signed-in browser"
+    const res = runHook(req, settingsNow().hooks.pathMap, who)
+    if (req.test) return c.json({ ok: true, test: true, ...res })
+    if (!res.queued.length) return c.json({ error: res.ignored[0]?.reason ?? 'No path given - send {"path": "/where/it/downloaded"}', ...res }, 422)
+    log("info", `${req.from} (${who}): new downloads in ${res.queued.map((l) => l.name).join(", ")} - scanning shortly`)
+    return c.json({ ok: true, ...res }, 202)
+  })
+
+  app.get("/api/hooks/recent", (c) => c.json(recentHookCalls()))
+
+  // ---- uploads ----
+  /** The file's bytes as the body; ?library=&name= (and optionally &dir=). */
+  app.put("/api/upload", async (c) => {
+    const lib = repo.getLibrary(Number(c.req.query("library")))
+    if (!lib) return c.json({ error: "Choose a library to upload into" }, 400)
+    try {
+      const result = await saveUpload({
+        lib,
+        name: c.req.query("name") ?? "",
+        dir: c.req.query("dir"),
+        body: c.req.raw.body,
+        size: Number(c.req.header("content-length")) || undefined,
+        settings: settingsNow(),
+      })
+      scanSoon(lib.id, `Uploaded files in ${lib.name}`)
+      return c.json(result)
+    } catch (err) {
+      if (err instanceof UploadError) return c.json({ error: err.message }, err.status)
+      throw err
+    }
+  })
+
+  /** Sharing to the installed app lands here only without its service worker (which handles it): say so. */
+  app.post("/share", (c) => c.redirect("/upload?shared=0", 303))
+
+  // ---- lyrics ----
+  app.post("/api/lyrics", async (c) => {
+    const body = await c.req.json<Selection & { force?: boolean }>()
+    const ids = resolveIds(body, { status: ["matched", "review", "conflict", "approved", "done"] })
+    if (!ids.length) return c.json({ error: "Nothing to look up" }, 400)
+    return c.json(enqueueJob("lyrics", `Find lyrics for ${ids.length} track${ids.length === 1 ? "" : "s"}`, (ctx) => lyricsTracks(ids, { force: !!body.force }, ctx)))
+  })
+
+  /** Look again now (and wait for it), or turn down the words found. */
+  app.post("/api/tracks/:id/lyrics", async (c) => {
+    const t = repo.getTrack(Number(c.req.param("id")))
+    if (!t) return c.json({ error: "Track not found" }, 404)
+    const body = await c.req.json<{ action: "find" | "reject" }>().catch(() => ({ action: "find" as const }))
+    if (body.action === "reject") {
+      if (!t.lyrics) return c.json({ error: "No lyrics to turn down" }, 400)
+      repo.updateTrack(t.id, { lyrics: { ...t.lyrics, rejected: true } })
+    } else {
+      try {
+        const found = await lyricsForTrack(t, undefined, true)
+        if (!found) return c.json({ error: "Approve an artist and title first" }, 400)
+      } catch (err) {
+        return c.json({ error: `LRCLIB didn't answer: ${err instanceof Error ? err.message : err}` }, 502)
+      }
+    }
+    emit({ type: "tracks", ids: [t.id] })
+    return c.json(repo.getTrack(t.id))
+  })
+
   // ---- BPM & key ----
   app.post("/api/analyze", async (c) => {
     const body = await c.req.json<Selection & { force?: boolean }>()
@@ -585,7 +689,10 @@ export function createApp() {
     if (!runnable) return c.json({ error: "Nothing runnable in this plan" }, 400)
     return c.json(
       enqueueJob("execute", `${dryRun ? "Dry run" : "Rename & tag"} ${runnable} files`, async (ctx) => {
-        const batchId = await executePlan(plan, settingsNow(), { dryRun }, ctx)
+        const settings = settingsNow()
+        // Lyrics for readings edited since they were looked up, so what's written fits.
+        const looked = await topUpLyrics(repo.getTracks(ids), settings, ctx)
+        const batchId = await executePlan(looked ? buildPlan(repo.getTracks(ids), settings) : plan, settings, { dryRun }, ctx)
         ctx.log("success", `${dryRun ? "Dry run" : "Batch"} ${batchId.slice(0, 8)} complete - ${ctx.job.done} ok, ${ctx.job.failed} failed`)
       })
     )

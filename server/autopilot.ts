@@ -8,6 +8,7 @@ import { decisionToFinal } from "./core/naming"
 import { buildPlan, executePlan, proposedFilename } from "./executor"
 import { enqueueJob, type JobContext } from "./jobs"
 import { librarySettings } from "./library-settings"
+import { topUpLyrics } from "./lyrics"
 import { getLibrary, getTrack, getTracks, updateTrack } from "./repo"
 import { settingsNow } from "./settings"
 
@@ -45,8 +46,9 @@ export function handsOff(ids: number[], settings: Settings, ctx: Pick<JobContext
 /** Cut whichever of these are still approved; the rest (name clashes and so on) wait in Cut & Tag. */
 export async function cutApproved(ids: number[], ctx: JobContext) {
   const settings = settingsNow()
-  const still = ids.map((id) => getTrack(id)).filter((t): t is Track => !!t && t.status === "approved")
-  const plan = buildPlan(still, settings)
+  const approved = () => ids.map((id) => getTrack(id)).filter((t): t is Track => !!t && t.status === "approved")
+  await topUpLyrics(approved(), settings, ctx)
+  const plan = buildPlan(approved(), settings)
   const runnable = plan.filter((p) => !p.blocked)
   const held = plan.length - runnable.length
   if (runnable.length) await executePlan(runnable, settings, { dryRun: false, label: "Hands-off" }, ctx)

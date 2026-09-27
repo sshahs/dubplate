@@ -203,6 +203,22 @@ export const MIGRATIONS: string[] = [
     added_at TEXT
   );
   `,
+  // 5: lyrics (bulky, so with the other per-track JSON), what reading a file found out about
+  // it, and keys for scripts and download tools (only their hashes).
+  `
+  ALTER TABLE track_data ADD COLUMN lyrics_json TEXT;
+  ALTER TABLE tracks ADD COLUMN file_check_json TEXT;
+
+  CREATE TABLE api_tokens (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    prefix TEXT NOT NULL,
+    scope TEXT NOT NULL DEFAULT 'hooks',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_used_at TEXT
+  );
+  `,
 ]
 
 export type Db = DatabaseSync

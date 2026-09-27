@@ -19,7 +19,17 @@ export function proposedFilename(t: Track, settings: Settings): string | null {
   if (!meta || !meta.title || !meta.artists.length) return null
   const s = settingsForLibrary(settings, placementLibraryId(t.libraryId))
   const base = renderTemplate(s.naming.template, meta, s.naming)
-  return base ? `${base}.${t.ext.toLowerCase()}` : null
+  return base ? `${base}.${extFor(t, settings)}` : null
+}
+
+/**
+ * The extension a track is cut with: its own, or - when it's really another
+ * format and fixing that is on - the right one (if scans still pick that up).
+ */
+export function extFor(t: Pick<Track, "ext" | "fileCheck">, settings: Settings): string {
+  const real = t.fileCheck?.realExt
+  if (real && settings.naming.fixExtensions && settings.scanner.extensions.includes(real)) return real
+  return t.ext.toLowerCase()
 }
 
 /**

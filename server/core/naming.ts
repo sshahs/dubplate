@@ -1,6 +1,7 @@
 // Turns approved metadata into a filename and a set of tags.
 
 import type { Decision, ExistingTags, ExternalIds, FinalMeta, LoudnessMeasure, Settings } from "../../shared/types"
+import { lyricsSummary } from "../../shared/lyrics"
 import { collapseSpaces } from "./normalize"
 
 type Naming = Settings["naming"]
@@ -93,6 +94,10 @@ export interface TagExtras {
   ids?: ExternalIds
   /** measured loudness, written as ReplayGain */
   replayGain?: LoudnessMeasure | null
+  /** lyrics to write */
+  lyrics?: string | null
+  /** replace lyrics the file already has */
+  replaceLyrics?: boolean
 }
 
 /**
@@ -117,6 +122,8 @@ export function tagsFor(meta: FinalMeta, current: ExistingTags, naming: Naming, 
   if (ids.mbReleaseId && ids.mbReleaseId !== current.mbReleaseId) out.mbReleaseId = ids.mbReleaseId
   if (ids.mbArtistIds?.[0] && ids.mbArtistIds[0] !== current.mbArtistId) out.mbArtistId = ids.mbArtistIds[0]
   if (ids.discogsReleaseId && ids.discogsReleaseId !== current.discogsReleaseId) out.discogsReleaseId = ids.discogsReleaseId
+  // Lyrics go into a file without any, unless replacing is allowed (the stored value is only a summary).
+  if (extras.lyrics && (!current.lyrics || (extras.replaceLyrics && lyricsSummary(extras.lyrics) !== current.lyrics))) out.lyrics = extras.lyrics
   const rg = extras.replayGain
   if (rg && Number.isFinite(rg.gain) && Number.isFinite(rg.peak)) {
     const gain = Math.round(rg.gain * 100) / 100

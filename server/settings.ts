@@ -1,4 +1,4 @@
-import type { LlmProviderConfig, MediaServerConfig, ScraperDefinition, Settings, SourceConfig } from "../shared/types"
+import type { LlmProviderConfig, MediaServerConfig, PathMapping, ScraperDefinition, Settings, SourceConfig } from "../shared/types"
 import { sanitizeFilename } from "./core/naming"
 import { getDb } from "./db"
 import { setContact } from "./sources/http"
@@ -240,6 +240,7 @@ export const DEFAULT_SETTINGS: Settings = {
     writeTags: true,
     tagComment: false,
     writeIds: true,
+    fixExtensions: true,
   },
   organise: { template: "{artist}", onCut: false, missing: "skip", tidy: true, sidecars: true },
   duplicates: { holdingFolder: "Duplicates set aside" },
@@ -257,9 +258,12 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   safety: { readOnly: true },
   artwork: { fetch: true, embed: true, replaceExisting: false },
-  analysis: { onProcess: true, writeTags: true, keyNotation: "musical", bpmMin: 88, quality: true, loudness: true, writeReplayGain: true },
+  analysis: { onProcess: true, writeTags: true, keyNotation: "musical", bpmMin: 88, quality: true, loudness: true, writeReplayGain: true, integrity: true },
   automation: { autoProcess: true, pollMinutes: 15, nightly: false, nightlyAt: "03:00", handsOffMin: 95 },
   exports: { pathMap: [], traktorVolume: "Macintosh HD" },
+  lyrics: { fetch: true, embed: true, embedSynced: false, lrcFile: false, replaceExisting: false },
+  uploads: { maxMb: 2048 },
+  hooks: { pathMap: [] },
   contact: "",
 }
 
@@ -422,6 +426,13 @@ function keepSecret(incoming: string | undefined, previous: string | undefined) 
   return incoming.trim() || undefined
 }
 
+function cleanPathMap(map: PathMapping[] | undefined): PathMapping[] {
+  return (Array.isArray(map) ? map : [])
+    .map((m) => ({ from: String(m?.from ?? "").trim(), to: String(m?.to ?? "").trim() }))
+    .filter((m) => m.from)
+    .slice(0, 10)
+}
+
 export function saveSettings(patch: Partial<Settings>): Settings {
   const current = loadSettings()
   const next = deepMerge(current, patch)
@@ -437,12 +448,11 @@ export function saveSettings(patch: Partial<Settings>): Settings {
   }
   if (patch.automation) next.automation.handsOffMin = Math.min(100, Math.max(50, Math.round(Number(next.automation.handsOffMin) || DEFAULT_SETTINGS.automation.handsOffMin)))
   if (patch.exports) {
-    next.exports.pathMap = (next.exports.pathMap ?? [])
-      .map((m) => ({ from: String(m?.from ?? "").trim(), to: String(m?.to ?? "").trim() }))
-      .filter((m) => m.from)
-      .slice(0, 10)
+    next.exports.pathMap = cleanPathMap(next.exports.pathMap)
     next.exports.traktorVolume = String(next.exports.traktorVolume ?? "").trim() || DEFAULT_SETTINGS.exports.traktorVolume
   }
+  if (patch.hooks) next.hooks.pathMap = cleanPathMap(next.hooks.pathMap)
+  if (patch.uploads) next.uploads.maxMb = Math.min(20_000, Math.max(1, Math.round(Number(next.uploads.maxMb) || DEFAULT_SETTINGS.uploads.maxMb)))
   if (patch.sources) {
     for (const [id, cfg] of Object.entries(patch.sources)) {
       const prev = current.sources[id]

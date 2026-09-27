@@ -9,8 +9,10 @@ import type {
   CrateRules,
   Correction,
   ExistingTags,
+  FileCheck,
   Library,
   LibrarySettings,
+  LyricsFound,
   Operation,
   OperationBatch,
   SetAside,
@@ -20,6 +22,8 @@ import type {
   TrackSummary,
 } from "../shared/types"
 import { parseKey } from "../shared/keys"
+import { lyricsSummary } from "../shared/lyrics"
+import { SILENCE_END_S, SILENCE_START_S } from "../shared/problems"
 import { TRACK_STATUSES } from "../shared/types"
 import { normArtist } from "./core/normalize"
 import { crateConditions, crateRules } from "./crates"
@@ -125,13 +129,15 @@ export function rowToTrack(r: Row): Track {
     art: parseJson<ArtRef | null>(r.art_json, null),
     artFound: parseJson<ArtRef | null>(r.art_found_json, null),
     aside: parseJson<SetAside | null>(r.aside_json, null),
+    fileCheck: parseJson<FileCheck | null>(r.file_check_json, null),
+    lyrics: parseJson<LyricsFound | null>(r.lyrics_json, null),
     createdAt: r.created_at as string,
     updatedAt: r.updated_at as string,
   }
 }
 
 export function toSummary(t: Track): TrackSummary {
-  const { candidates: _c, decision, heuristic, ai, ...rest } = t
+  const { candidates: _c, decision, heuristic, ai, lyrics: _l, ...rest } = t
   const reading = t.final ?? decision ?? ai ?? heuristic
   return {
     ...rest,
@@ -143,7 +149,7 @@ export function toSummary(t: Track): TrackSummary {
 }
 
 /** A full track: its row plus the bulky readings/hits/decision kept in track_data. */
-const FULL_TRACK = "SELECT t.*, d.heuristic_json, d.ai_json, d.candidates_json, d.decision_json FROM tracks t LEFT JOIN track_data d ON d.track_id = t.id"
+const FULL_TRACK = "SELECT t.*, d.heuristic_json, d.ai_json, d.candidates_json, d.decision_json, d.lyrics_json FROM tracks t LEFT JOIN track_data d ON d.track_id = t.id"
 
 export function getTrack(id: number): Track | null {
   const r = getDb().prepare(`${FULL_TRACK} WHERE t.id = ?`).get(id) as Row | undefined
@@ -176,11 +182,19 @@ export interface TrackQuery {
   rules?: CrateRules
   /** "suspect": files that sound made from something worse than they claim */
   quality?: "suspect" | "ok"
+  /** only files with something wrong with the file itself (see shared/problems.ts) */
+  problems?: boolean
   sort?: TrackSort
   dir?: "asc" | "desc"
   limit?: number
   offset?: number
 }
+
+/** Tracks with a file problem, the same ones fileProblems() lists. */
+export const PROBLEMS_SQL = `(json_extract(file_check_json, '$.realExt') IS NOT NULL OR json_extract(file_check_json, '$.unreadable') IS NOT NULL
+  OR json_extract(file_check_json, '$.empty') = 1 OR json_extract(analysis_json, '$.integrity.truncated') = 1
+  OR json_extract(analysis_json, '$.integrity.damagedAt') IS NOT NULL
+  OR json_extract(analysis_json, '$.integrity.silenceStart') >= ${SILENCE_START_S} OR json_extract(analysis_json, '$.integrity.silenceEnd') >= ${SILENCE_END_S})`
 
 function whereFor(q: TrackQuery): { sql: string; params: SQLInputValue[] } {
   const where: string[] = []
@@ -207,6 +221,7 @@ function whereFor(q: TrackQuery): { sql: string; params: SQLInputValue[] } {
     where.push("confidence <= ?")
     params.push(q.maxConfidence)
   }
+  if (q.problems) where.push(PROBLEMS_SQL)
   const rules = { ...(q.crateId ? (crateRules(q.crateId) ?? { libraryId: -1 }) : {}), ...q.rules, ...(q.quality ? { quality: q.quality } : {}) }
   if (Object.keys(rules).length) {
     const c = crateConditions(rules)
@@ -230,7 +245,7 @@ const SUMMARY = `SELECT t.*,
 
 function rowToSummary(r: Row): TrackSummary {
   const t = rowToTrack(r)
-  const { candidates: _c, decision: _d, heuristic: _h, ai: _a, ...rest } = t
+  const { candidates: _c, decision: _d, heuristic: _h, ai: _a, lyrics: _l, ...rest } = t
   // Same precedence as toSummary: approved → decision → AI → rule-based parser.
   const reading = t.final
     ? { artists: t.final.artists, title: t.final.title }
@@ -287,13 +302,14 @@ export function queryTrackIds(q: TrackQuery): number[] {
   return (getDb().prepare(`SELECT id FROM tracks ${sql} ORDER BY id`).all(...params) as { id: number }[]).map((r) => r.id)
 }
 
-const JSON_COLS = new Set(["tags", "heuristic", "ai", "candidates", "decision", "final", "analysis", "art", "artFound", "aside"])
+const JSON_COLS = new Set(["tags", "heuristic", "ai", "candidates", "decision", "final", "analysis", "art", "artFound", "aside", "fileCheck", "lyrics"])
 /** Kept in track_data rather than on the track row. */
 const DATA_COLS: Record<string, string> = {
   heuristic: "heuristic_json",
   ai: "ai_json",
   candidates: "candidates_json",
   decision: "decision_json",
+  lyrics: "lyrics_json",
 }
 const COLS: Record<string, string> = {
   libraryId: "library_id",
@@ -321,6 +337,7 @@ const COLS: Record<string, string> = {
   art: "art_json",
   artFound: "art_found_json",
   aside: "aside_json",
+  fileCheck: "file_check_json",
 }
 
 export function updateTrack(id: number, patch: Partial<Track>) {
@@ -328,7 +345,9 @@ export function updateTrack(id: number, patch: Partial<Track>) {
   const params: SQLInputValue[] = []
   const dataCols: string[] = []
   const dataParams: SQLInputValue[] = []
-  for (const [k, v] of Object.entries(patch)) {
+  for (const [k, raw] of Object.entries(patch)) {
+    // Lyrics stay in the file; the row only says there are some.
+    const v = k === "tags" && raw && (raw as ExistingTags).lyrics ? { ...(raw as ExistingTags), lyrics: lyricsSummary((raw as ExistingTags).lyrics) } : raw
     const value = JSON_COLS.has(k) ? (v === null || v === undefined ? null : JSON.stringify(v)) : typeof v === "boolean" ? (v ? 1 : 0) : ((v ?? null) as SQLInputValue)
     if (DATA_COLS[k]) {
       dataCols.push(DATA_COLS[k])

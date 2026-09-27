@@ -143,11 +143,15 @@ export function followableSidecars(dir: string, movingAudio: Set<string>): strin
     return null
   }
   const sidecars: string[] = []
+  const noExt = (f: string) => f.slice(0, f.length - path.extname(f).length).toLowerCase()
+  // A track's own .lrc goes with the track itself, so it doesn't hold the folder back.
+  const movingBases = new Set([...movingAudio].map(noExt))
   for (const e of entries) {
     const full = path.join(dir, e.name)
     if (e.isDirectory()) return null
     if (!e.isFile() || isJunk(e.name)) continue
     if (movingAudio.has(full)) continue
+    if (path.extname(e.name).toLowerCase() === ".lrc" && movingBases.has(noExt(full))) continue
     if (isSidecar(e.name)) sidecars.push(full)
     else return null
   }

@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
 import type { Library, OrganiseMove, OrganisePreview, Settings, Track, TrackStatus } from "../shared/types"
-import { relDirOf, MoveTracker } from "./executor"
+import { followLrc, relDirOf, MoveTracker } from "./executor"
 import { ensureDir, followableSidecars, isInside, moveFile, sameFile } from "./fsops"
 import { getDb } from "./db"
 import type { JobContext } from "./jobs"
@@ -156,7 +156,10 @@ export async function executeOrganise(settings: Settings, req: OrganiseRequest, 
       if (m.trackId && (!t || t.path !== m.from)) throw new Error("The track moved since the plan was made")
       createdDirs = await ensureDir(path.dirname(m.to))
       await moveFile(m.from, m.to)
-      if (!m.sidecar) tracker.add(m.from, m.to, lib.id)
+      if (!m.sidecar) {
+        tracker.add(m.from, m.to, lib.id)
+        await followLrc(m.from, m.to, { batchId, label }, ctx)
+      }
       if (t) {
         const st = await fs.promises.stat(m.to)
         const filename = path.basename(m.to)

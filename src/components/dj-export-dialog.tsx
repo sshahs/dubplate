@@ -33,24 +33,26 @@ const DJ_FORMATS: { id: DjFormat; label: string; file: string; how: string; mult
   { id: "m3u", label: "M3U playlist", file: "M3U8", how: "Opens in VirtualDJ, Engine DJ, djay, Mixxx and most music players.", multi: false },
 ]
 
+const DJ_LABELS = { from: "Folder Dubplate sees", to: "The same folder on the DJ computer", fromHint: "/music", toHint: "D:\\Music or /Volumes/Music" }
+
 /** Folder-prefix rewrites, e.g. /music → D:\Music for a laptop that sees the files elsewhere. */
-export function PathMapEditor({ value, onChange }: { value: PathMapping[]; onChange: (v: PathMapping[]) => void }) {
+export function PathMapEditor({ value, onChange, labels = DJ_LABELS }: { value: PathMapping[]; onChange: (v: PathMapping[]) => void; labels?: typeof DJ_LABELS }) {
   return (
     <div className="space-y-2">
       {value.map((m, i) => (
         <div key={i} className="flex items-center gap-2">
           <Input
-            aria-label="Folder Dubplate sees"
+            aria-label={labels.from}
             className="font-mono text-xs"
-            placeholder="/music"
+            placeholder={labels.fromHint}
             value={m.from}
             onChange={(e) => onChange(value.map((x, j) => (j === i ? { ...x, from: e.target.value } : x)))}
           />
           <HugeiconsIcon icon={ArrowRight02Icon} strokeWidth={2} className="text-muted-foreground size-4 shrink-0" />
           <Input
-            aria-label="The same folder on the DJ computer"
+            aria-label={labels.to}
             className="font-mono text-xs"
-            placeholder="D:\Music or /Volumes/Music"
+            placeholder={labels.toHint}
             value={m.to}
             onChange={(e) => onChange(value.map((x, j) => (j === i ? { ...x, to: e.target.value } : x)))}
           />

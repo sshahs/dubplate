@@ -6,6 +6,7 @@ import { overBudget } from "./ai/usage"
 import { analyseTrack, needsAnalysis } from "./analysis"
 import { handsOff } from "./autopilot"
 import { findArtwork } from "./art"
+import { lyricsForTrack, needsLyrics } from "./lyrics"
 import { scoreTrack } from "./core/confidence"
 import { parseFilename } from "./core/filename-parser"
 import { decisionToFinal } from "./core/naming"
@@ -146,7 +147,7 @@ export async function processTracks(ids: number[], settings: Settings, opts: Pro
   }
 }
 
-/** The optional steps after scoring: cover art and BPM/key. Failures only log. */
+/** The optional steps after scoring: cover art, lyrics and BPM/key. Failures only log. */
 async function extras(track: Track, settings: Settings, opts: ProcessOptions, ctx: JobContext) {
   const wantArt = settings.artwork.fetch && opts.scour && (opts.force || !track.artFound) && (!track.art || settings.artwork.replaceExisting)
   if (wantArt && track.decision && track.decision.status !== "unmatched") {
@@ -155,6 +156,14 @@ async function extras(track: Track, settings: Settings, opts: ProcessOptions, ct
       if (art && art.hash !== track.art?.hash) updateTrack(track.id, { artFound: art })
     } catch (err) {
       if (!ctx.signal.aborted) ctx.log("warn", `Artwork for ${track.filename}: ${err instanceof Error ? err.message : err}`)
+    }
+  }
+  const identified = track.decision && track.decision.status !== "unmatched"
+  if (settings.lyrics.fetch && opts.scour && identified && (opts.force || needsLyrics(track))) {
+    try {
+      await lyricsForTrack(getTrack(track.id) ?? track, ctx.signal)
+    } catch (err) {
+      if (!ctx.signal.aborted) ctx.log("warn", `Lyrics for ${track.filename}: ${err instanceof Error ? err.message : err}`)
     }
   }
   if (settings.analysis.onProcess && needsAnalysis(track, settings, opts.force)) {

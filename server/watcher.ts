@@ -26,6 +26,10 @@ interface Watched {
 const watched = new Map<number, Watched>()
 /** Libraries with an automatic scan already queued, so events don't pile up duplicates. */
 const queued = new Set<number>()
+/** Libraries whose next scan identifies what it finds whatever the setting (files someone just sent in). */
+const identifyNext = new Set<number>()
+/** Scans asked for by uploads and download tools, held a moment so a batch becomes one scan. */
+const soon = new Map<number, ReturnType<typeof setTimeout>>()
 let clock: ReturnType<typeof setInterval> | null = null
 let lastNightly = ""
 /** Refreshed every minute; file events can arrive by the thousand during a copy. */
@@ -85,19 +89,42 @@ async function check(libraryId: number, reason: "watch" | "poll" | "nightly") {
     log("warn", `Couldn't check ${lib.name} for new files: ${err instanceof Error ? err.message : err}`)
     return
   }
+  queueScan(lib, reason === "nightly" ? `Nightly scan of ${lib.name}` : `New files in ${lib.name}`)
+}
+
+function queueScan(lib: Library, label: string) {
+  if (queued.has(lib.id)) return
   queued.add(lib.id)
-  enqueueJob("scan", reason === "nightly" ? `Nightly scan of ${lib.name}` : `New files in ${lib.name}`, async (ctx) => {
+  enqueueJob("scan", label, async (ctx) => {
     queued.delete(lib.id)
+    const identify = identifyNext.delete(lib.id)
     const settings = settingsNow()
     const fresh = getLibrary(lib.id)
     if (!fresh) return
     const { added } = await scanLibrary(fresh, settings, ctx)
-    if (added.length && settings.automation.autoProcess) {
+    if (added.length && (settings.automation.autoProcess || identify)) {
       enqueueJob("process", `Identify ${added.length} new track${added.length === 1 ? "" : "s"} in ${fresh.name}`, (c) =>
         processTracks(added, settingsNow(), { interpret: true, scour: true, force: false }, c)
       )
     }
   })
+}
+
+/**
+ * Scan a library shortly and identify whatever's new in it, whatever the
+ * automation setting says - for files someone just sent in (an upload, a
+ * download tool's hook). Calls within a few seconds of each other make one scan.
+ */
+export function scanSoon(libraryId: number, label: string, delayMs = 3000) {
+  identifyNext.add(libraryId)
+  clearTimeout(soon.get(libraryId))
+  const timer = setTimeout(() => {
+    soon.delete(libraryId)
+    const lib = getLibrary(libraryId)
+    if (lib?.exists) queueScan(lib, label)
+  }, delayMs)
+  timer.unref?.()
+  soon.set(libraryId, timer)
 }
 
 function minuteTick() {

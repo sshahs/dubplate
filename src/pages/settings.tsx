@@ -15,6 +15,7 @@ import {
   Target02Icon,
   TestTube01Icon,
   Timer02Icon,
+  CloudUploadIcon,
   Vynil01Icon,
 } from "@hugeicons/core-free-icons"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -31,6 +32,7 @@ import { PasswordSettings } from "@/components/settings-password"
 import { AiUsageCard } from "@/components/settings-usage"
 import { ChatSettings, MediaServerSettings } from "@/components/settings-integrations"
 import { DjSoftwareSettings } from "@/components/dj-export-dialog"
+import { ToolsSettings } from "@/components/settings-tools"
 import { SectionNav, SettingRow, SettingRows, type SectionItem } from "@/components/settings-layout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -48,16 +50,17 @@ import { api, type PublicSettings } from "@/lib/api"
 import { disableNotify, enableNotify, notifyEnabled, notifySupport } from "@/lib/notify"
 import { cn } from "@/lib/utils"
 
-type SectionId = "ai" | "crates" | "confidence" | "naming" | "extras" | "automation" | "exports" | "notifications" | "servers" | "safety" | "learning" | "backup"
+type SectionId = "ai" | "crates" | "confidence" | "naming" | "extras" | "automation" | "tools" | "exports" | "notifications" | "servers" | "safety" | "learning" | "backup"
 
 /** Sections, and the part of the settings each one edits (for the unsaved-changes dots). */
 const SECTIONS: { id: SectionId; label: string; icon: SectionItem["icon"]; edits: (s: Settings) => unknown }[] = [
   { id: "ai", label: "AI interpreter", icon: AiBrain01Icon, edits: (s) => ({ ...s.llm, genres: undefined, sceneHint: undefined }) },
   { id: "crates", label: "Your crates", icon: Vynil01Icon, edits: (s) => [s.llm.genres, s.llm.sceneHint] },
   { id: "confidence", label: "Matching", icon: Target02Icon, edits: (s) => s.confidence },
-  { id: "naming", label: "Naming & tags", icon: FileEditIcon, edits: (s) => s.naming },
-  { id: "extras", label: "Artwork & audio", icon: Image01Icon, edits: (s) => [s.artwork, s.analysis] },
+  { id: "naming", label: "Naming & tags", icon: FileEditIcon, edits: (s) => ({ ...s.naming, fixExtensions: undefined }) },
+  { id: "extras", label: "Artwork, lyrics & audio", icon: Image01Icon, edits: (s) => [s.artwork, s.lyrics, s.analysis, s.naming.fixExtensions] },
   { id: "automation", label: "Automation", icon: Timer02Icon, edits: (s) => s.automation },
+  { id: "tools", label: "Uploads & download tools", icon: CloudUploadIcon, edits: (s) => [s.uploads, s.hooks] },
   { id: "exports", label: "DJ software", icon: HeadphonesIcon, edits: (s) => s.exports },
   { id: "notifications", label: "Notifications", icon: Notification03Icon, edits: (s) => [s.integrations.discord, s.integrations.telegram, s.integrations.notify, s.integrations.publicUrl] },
   { id: "servers", label: "Media servers", icon: ServerStack01Icon, edits: (s) => s.integrations.mediaServers },
@@ -66,7 +69,7 @@ const SECTIONS: { id: SectionId; label: string; icon: SectionItem["icon"]; edits
   { id: "backup", label: "Backup & restore", icon: DatabaseRestoreIcon, edits: () => null },
 ]
 /** Older deep links that now live inside another section. */
-const HASH_ALIASES: Record<string, SectionId> = { scanner: "safety", password: "safety", usage: "ai" }
+const HASH_ALIASES: Record<string, SectionId> = { scanner: "safety", password: "safety", usage: "ai", lyrics: "extras", hooks: "tools", tokens: "tools", uploads: "tools" }
 
 const one = (v: number | readonly number[]) => (Array.isArray(v) ? v[0] : (v as number))
 
@@ -766,6 +769,38 @@ export default function SettingsPage() {
               </Card>
               <Card>
                 <CardHeader>
+                  <CardTitle>Lyrics</CardTitle>
+                  <CardDescription>
+                    From{" "}
+                    <a href="https://lrclib.net" target="_blank" rel="noreferrer" className="underline underline-offset-2">
+                      LRCLIB
+                    </a>
+                    , a free lyrics library, timed to the music where it can be. Only looked up for tracks the sources identified; dubplates, specials and dubs are skipped, as the
+                    original's words wouldn't fit.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <SettingRows>
+                    <SettingRow title="Look for lyrics" description="While identifying tracks, or for a selection from Tracks.">
+                      <Switch checked={draft.lyrics.fetch} onCheckedChange={(v) => set((d) => void (d.lyrics.fetch = v))} aria-label="Look for lyrics" />
+                    </SettingRow>
+                    <SettingRow title="Write them into the file" description="When cutting. Rewind takes them out again.">
+                      <Switch checked={draft.lyrics.embed} onCheckedChange={(v) => set((d) => void (d.lyrics.embed = v))} aria-label="Write lyrics into the file" />
+                    </SettingRow>
+                    <SettingRow title="Timed lyrics in the tag" description="Navidrome, Jellyfin, Plex and most phone players scroll along with them; some other players show the timestamps as text.">
+                      <Switch checked={draft.lyrics.embedSynced} disabled={!draft.lyrics.embed} onCheckedChange={(v) => set((d) => void (d.lyrics.embedSynced = v))} aria-label="Write timed lyrics in the tag" />
+                    </SettingRow>
+                    <SettingRow title="Save a .lrc file next to the track" description="For players that read timed lyrics from a separate file. It follows the track when it's renamed or moved.">
+                      <Switch checked={draft.lyrics.lrcFile} onCheckedChange={(v) => set((d) => void (d.lyrics.lrcFile = v))} aria-label="Save a .lrc file" />
+                    </SettingRow>
+                    <SettingRow title="Replace lyrics files already have" description="Off: files with their own words keep them.">
+                      <Switch checked={draft.lyrics.replaceExisting} onCheckedChange={(v) => set((d) => void (d.lyrics.replaceExisting = v))} aria-label="Replace existing lyrics" />
+                    </SettingRow>
+                  </SettingRows>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
                   <CardTitle>Tempo & key</CardTitle>
                   <CardDescription>Worked out by listening to the audio. Tags already in the file and your own edits always win.</CardDescription>
                 </CardHeader>
@@ -788,7 +823,7 @@ export default function SettingsPage() {
               </Card>
               <Card>
                 <CardHeader>
-                  <CardTitle>Quality & loudness</CardTitle>
+                  <CardTitle>Quality, loudness & file check</CardTitle>
                   <CardDescription>Measured over the whole file while it's analysed. Tracks analysed before these were switched on get measured the next time analysis runs.</CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -809,6 +844,12 @@ export default function SettingsPage() {
                         onCheckedChange={(v) => set((d) => void (d.analysis.writeReplayGain = v))}
                         aria-label="Write ReplayGain tags"
                       />
+                    </SettingRow>
+                    <SettingRow title="Check files are whole" description="Finds downloads that stopped short, audio that breaks off partway, and long silences at either end.">
+                      <Switch checked={draft.analysis.integrity} onCheckedChange={(v) => set((d) => void (d.analysis.integrity = v))} aria-label="Check files are whole" />
+                    </SettingRow>
+                    <SettingRow title="Fix wrong extensions when cutting" description="A .mp3 that's really an M4A, say (common from YouTube rippers), is renamed .m4a so every player opens it. Scans always spot them.">
+                      <Switch checked={draft.naming.fixExtensions} onCheckedChange={(v) => set((d) => void (d.naming.fixExtensions = v))} aria-label="Fix wrong extensions when cutting" />
                     </SettingRow>
                   </SettingRows>
                 </CardContent>
@@ -869,6 +910,8 @@ export default function SettingsPage() {
               </Card>
             </>
           )}
+
+          {section === "tools" && <ToolsSettings draft={draft} set={set} />}
 
           {section === "exports" && <DjSoftwareSettings draft={draft} set={set} />}
 

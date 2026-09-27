@@ -15,7 +15,7 @@ import { config, VERSION } from "./config"
 import { getDb } from "./db"
 import { testMediaServer } from "./integrations/media-servers"
 import { networkMessage } from "./net"
-import { listLibraries } from "./repo"
+import { listLibraries, PROBLEMS_SQL } from "./repo"
 import { SOURCE_META } from "./settings"
 import { allAdapters } from "./sources"
 import { findFpcalc } from "./sources/acoustid"
@@ -151,6 +151,32 @@ function libraryChecks(settings: Settings): HealthCheck[] {
   })
 }
 
+/** Files that are broken, cut short or named as the wrong format. */
+function fileChecks(): HealthCheck[] {
+  const db = getDb()
+  const count = (where: string) => (db.prepare(`SELECT COUNT(*) AS n FROM tracks WHERE missing = 0 AND ${where}`).get() as { n: number }).n
+  const any = count(PROBLEMS_SQL)
+  if (!any) return []
+  const broken = count(
+    "(json_extract(analysis_json, '$.integrity.truncated') = 1 OR json_extract(analysis_json, '$.integrity.damagedAt') IS NOT NULL OR json_extract(file_check_json, '$.empty') = 1)"
+  )
+  const wrongExt = count("json_extract(file_check_json, '$.realExt') IS NOT NULL")
+  const n = (k: number, one: string, many = `${one}s`) => `${k} ${k === 1 ? one : many}`
+  const bits = [broken && `${n(broken, "file")} damaged or cut short`, wrongExt && `${n(wrongExt, "file")} with the wrong extension`].filter(Boolean)
+  const rest = any - broken - wrongExt
+  if (rest > 0) bits.push(`${n(rest, "other")} worth a look (long silences, unreadable tags)`)
+  return [
+    {
+      id: "files",
+      group: "Libraries",
+      label: "Files",
+      status: broken ? "warn" : "info",
+      detail: `${bits.join(", ")}.${wrongExt ? " Cutting gives files their right extension." : ""}`,
+      fix: { label: "Show them", to: "/tracks?problems=1" },
+    },
+  ]
+}
+
 async function aiChecks(settings: Settings): Promise<HealthCheck[]> {
   const out: HealthCheck[] = []
   const p = activeProvider(settings)
@@ -280,7 +306,7 @@ export async function healthReport(settings: Settings, fresh = false): Promise<H
   const [ai, sources, integrations] = await Promise.all([aiChecks(settings), sourceChecks(settings), integrationChecks(settings)])
   const report: HealthReport = {
     checkedAt: new Date().toISOString(),
-    checks: [...serverChecks(settings), ...securityChecks(settings), ...libraryChecks(settings), ...ai, ...sources, ...integrations],
+    checks: [...serverChecks(settings), ...securityChecks(settings), ...libraryChecks(settings), ...fileChecks(), ...ai, ...sources, ...integrations],
     system: {
       version: VERSION,
       node: process.version,

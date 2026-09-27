@@ -20,6 +20,7 @@ import {
 import type { ExistingTags } from "../shared/types"
 import { cachedArt, storeArt } from "./art"
 import { sniffImage } from "./art-image"
+import { mismatch, sniffFileSync } from "./sniff"
 
 const TAG_TYPE_BY_EXT: Record<string, TagTypes> = {
   mp3: TagTypes.Id3v2,
@@ -44,14 +45,24 @@ const TAG_TYPE_BY_EXT: Record<string, TagTypes> = {
 /** The field name most taggers (Mp3tag, foobar2000, Picard plugins) use for a Discogs release. */
 const DISCOGS_RELEASE = "DISCOGS_RELEASE_ID"
 
+/**
+ * Open a file with TagLib as what it really is: a .mp3 that's really an M4A is
+ * opened as an M4A, so its tags go where players look for them (and it isn't
+ * damaged by an MP3 tag). Returns the extension its content goes by.
+ */
+function openTagFile(file: string): { f: TagFile; ext: string } {
+  const real = mismatch(file, sniffFileSync(file))
+  return { f: TagFile.createFromPath(file, real ? `taglib/${real.ext}` : undefined), ext: real?.ext ?? path.extname(file).slice(1).toLowerCase() }
+}
+
 /** The file's own tag of the kind Dubplate writes into, for fields TagLib has no property for. */
-function nativeTag(f: TagFile, create: boolean) {
-  const type = TAG_TYPE_BY_EXT[path.extname(f.name).slice(1).toLowerCase()]
+function nativeTag(f: TagFile, ext: string, create: boolean) {
+  const type = TAG_TYPE_BY_EXT[ext]
   return type === undefined ? undefined : f.getTag(type, create)
 }
 
-function readCustom(f: TagFile, key: string): string | undefined {
-  const t = nativeTag(f, false)
+function readCustom(f: TagFile, ext: string, key: string): string | undefined {
+  const t = nativeTag(f, ext, false)
   let v: string | undefined
   if (t instanceof Id3v2Tag) {
     const frames = t.getFramesByClassType<Id3v2UserTextInformationFrame>(Id3v2FrameClassType.UserTextInformationFrame)
@@ -63,8 +74,8 @@ function readCustom(f: TagFile, key: string): string | undefined {
   return v?.trim() || undefined
 }
 
-function writeCustom(f: TagFile, key: string, value: string | undefined) {
-  const t = nativeTag(f, true)
+function writeCustom(f: TagFile, ext: string, key: string, value: string | undefined) {
+  const t = nativeTag(f, ext, true)
   if (t instanceof Id3v2Tag) {
     const frames = t.getFramesByClassType<Id3v2UserTextInformationFrame>(Id3v2FrameClassType.UserTextInformationFrame)
     const frame = Id3v2UserTextInformationFrame.findUserTextInformationFrame(frames, key, false)
@@ -95,7 +106,7 @@ function frontCover(pictures: IPicture[]): IPicture | undefined {
  * front cover is copied into the artwork cache so a rewind can put it back.
  */
 export function readManagedTags(file: string): ExistingTags {
-  const f = TagFile.createFromPath(file)
+  const { f, ext } = openTagFile(file)
   try {
     const t = f.tag
     const cover = frontCover(t.pictures ?? [])
@@ -113,9 +124,10 @@ export function readManagedTags(file: string): ExistingTags {
       mbRecordingId: t.musicBrainzTrackId || undefined,
       mbReleaseId: t.musicBrainzReleaseId || undefined,
       mbArtistId: t.musicBrainzArtistId || undefined,
-      discogsReleaseId: readCustom(f, DISCOGS_RELEASE),
+      discogsReleaseId: readCustom(f, ext, DISCOGS_RELEASE),
       replayGainTrackGain: Number.isFinite(t.replayGainTrackGain) ? t.replayGainTrackGain : undefined,
       replayGainTrackPeak: Number.isFinite(t.replayGainTrackPeak) ? t.replayGainTrackPeak : undefined,
+      lyrics: t.lyrics?.trim() ? t.lyrics : undefined,
     }
   } finally {
     f.dispose()
@@ -127,9 +139,8 @@ export function readManagedTags(file: string): ExistingTags {
  * (used when rewinding a field that was previously empty).
  */
 export function writeTags(file: string, changes: Partial<Record<keyof ExistingTags, unknown>>) {
-  const f = TagFile.createFromPath(file)
+  const { f, ext } = openTagFile(file)
   try {
-    const ext = path.extname(file).slice(1).toLowerCase()
     const type = TAG_TYPE_BY_EXT[ext]
     // Make sure there's a tag of the right kind to write into.
     if (type !== undefined) f.getTag(type, true)
@@ -148,7 +159,8 @@ export function writeTags(file: string, changes: Partial<Record<keyof ExistingTa
     if ("mbRecordingId" in changes) t.musicBrainzTrackId = str(changes.mbRecordingId)
     if ("mbReleaseId" in changes) t.musicBrainzReleaseId = str(changes.mbReleaseId)
     if ("mbArtistId" in changes) t.musicBrainzArtistId = str(changes.mbArtistId)
-    if ("discogsReleaseId" in changes) writeCustom(f, DISCOGS_RELEASE, str(changes.discogsReleaseId))
+    if ("discogsReleaseId" in changes) writeCustom(f, ext, DISCOGS_RELEASE, str(changes.discogsReleaseId))
+    if ("lyrics" in changes) t.lyrics = str(changes.lyrics)
     // NaN clears a ReplayGain field.
     const num = (v: unknown) => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? NaN : Number(v))
     if ("replayGainTrackGain" in changes) t.replayGainTrackGain = num(changes.replayGainTrackGain)

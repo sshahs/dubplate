@@ -18,7 +18,7 @@ import { AudioPlayer } from "@/components/audio-player"
 import { ConfidenceDial, StatusBadge } from "@/components/confidence"
 import { fromDraft, MetaEditor, toDraft, type MetaDraft } from "@/components/meta-editor"
 import { QueryError } from "@/components/query-error"
-import { ArtworkPanel, AudioQualityPanel, MixesPanel, TempoKeyPanel } from "@/components/track-extras"
+import { ArtworkPanel, AudioQualityPanel, FileProblemsPanel, LyricsPanel, MixesPanel, TempoKeyPanel } from "@/components/track-extras"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -169,7 +169,9 @@ export function TrackDetail({
       <div className={cn("grid gap-3", !compact && "sm:grid-cols-2")}>
         <ArtworkPanel track={track} embed={settings?.artwork.embed ?? true} replace={settings?.artwork.replaceExisting ?? false} />
         <TempoKeyPanel track={track} notation={settings?.analysis.keyNotation ?? "musical"} />
+        <FileProblemsPanel track={track} fixExtensions={settings?.naming.fixExtensions ?? true} />
         <AudioQualityPanel track={track} />
+        {settings?.lyrics.fetch !== false && <LyricsPanel track={track} settings={settings?.lyrics ?? { fetch: true, embed: true, embedSynced: false, lrcFile: false, replaceExisting: false }} />}
         <MixesPanel track={track} notation={settings?.analysis.keyNotation ?? "musical"} onOpenTrack={onOpenTrack} />
       </div>
 

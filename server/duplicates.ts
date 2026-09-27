@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
+import { fileProblems } from "../shared/problems"
 import type { DuplicateGroup, Settings, TrackSummary } from "../shared/types"
 import { estimatedKbps, likelySource } from "./analysis/quality"
 import { getDb } from "./db"
@@ -27,7 +28,7 @@ function fmtTime(sec: number) {
 
 /**
  * Rank copies of the same tune: lossless over lossy, then bitrate, never a
- * clipped copy, then one that's already cut and tagged, then artwork. Returns
+ * damaged or clipped copy, then one that's already cut and tagged, then artwork. Returns
  * the best copy and a short reason for each.
  */
 export function rankCopies(tracks: TrackSummary[]): { best: number; reasons: Record<number, string>; order: number[] } {
@@ -48,6 +49,12 @@ export function rankCopies(tracks: TrackSummary[]): { best: number; reasons: Rec
         why.push(`${Math.round(t.bitrate / 1000)}k`)
       }
       score += Math.min(t.bitrate ?? 0, 3_000_000) / 1000
+    }
+    // A copy that's broken or cut short is never the one to keep.
+    const broken = fileProblems(t).find((p) => p.severity === "error")
+    if (broken) {
+      score -= 10_000
+      why.push(broken.label.toLowerCase())
     }
     if (longest && t.duration && t.duration < longest * 0.85) {
       score -= 800
