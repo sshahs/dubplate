@@ -1,6 +1,6 @@
 import { HugeiconsIcon } from "@hugeicons/react"
-import { Image01Icon, RefreshIcon } from "@hugeicons/core-free-icons"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { ArrowDown01Icon, Image01Icon, RefreshIcon } from "@hugeicons/core-free-icons"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { toast } from "sonner"
 import { formatBpm, parseKey, toCamelot } from "@shared/keys"
@@ -155,6 +155,117 @@ export function TempoKeyPanel({ track, notation }: { track: Track; notation: "mu
           {a ? "Re-analyse" : "Analyse"}
         </Button>
       </div>
+    </div>
+  )
+}
+
+const dbfs = (linear: number) => (linear > 0 ? 20 * Math.log10(linear) : -Infinity)
+
+/** Is the file really the quality it claims, and how loud is it. */
+export function AudioQualityPanel({ track }: { track: Track }) {
+  const analyse = useMutation({
+    mutationFn: () => api.analyze({ ids: [track.id] }, true),
+    onSuccess: () => toast("Listening to the whole file…", { description: "Quality and loudness show here when it's done." }),
+    onError: (e) => toast.error(e.message),
+  })
+  const q = track.analysis?.quality
+  const l = track.analysis?.loudness
+  const measured = q !== undefined || l !== undefined
+  const tone = q?.verdict === "suspect" ? "text-rasta-gold" : q?.verdict === "ok" ? "text-rasta-green" : "text-muted-foreground"
+  const verdict = q ? { ok: "Sounds as good as it claims", suspect: "Sounds made from a lower-quality file", unknown: "Can't tell" }[q.verdict] : null
+  return (
+    <div className={cn("bg-card/60 rounded-2xl border p-3", q?.verdict === "suspect" && "border-rasta-gold/40")}>
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium">Quality & loudness</div>
+          {!measured ? (
+            <p className="text-muted-foreground text-xs">Not measured yet.</p>
+          ) : (
+            <div className="mt-1 space-y-1.5 text-xs">
+              {q && (
+                <p>
+                  <span className={cn("font-medium", tone)}>{verdict}.</span> <span className="text-muted-foreground">{q.detail}</span>
+                </p>
+              )}
+              {l ? (
+                <p className="text-muted-foreground tabular-nums">
+                  <span className="text-foreground font-medium">{l.lufs.toFixed(1)} LUFS</span> · peak {dbfs(l.peak).toFixed(1)} dBFS · ReplayGain {l.gain > 0 ? "+" : ""}
+                  {l.gain.toFixed(2)} dB
+                </p>
+              ) : (
+                l === null && <p className="text-muted-foreground">Too quiet to measure loudness.</p>
+              )}
+            </div>
+          )}
+        </div>
+        <Button size="xs" variant="outline" onClick={() => analyse.mutate()} disabled={analyse.isPending}>
+          <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} data-icon="inline-start" />
+          {measured ? "Measure again" : "Measure"}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+const RELATION: Record<string, string> = { same: "same key", up: "one step up", down: "one step down", relative: "relative major/minor", boost: "energy boost (+2)" }
+
+/** Tracks that mix well after this one: compatible key on the Camelot wheel, tempo within reach. */
+export function MixesPanel({ track, notation, onOpenTrack }: { track: Track; notation: "musical" | "camelot"; onOpenTrack?: (id: number) => void }) {
+  const [open, setOpen] = useState(false)
+  const has = !!(track.bpm || track.key)
+  const { data, isLoading } = useQuery({ queryKey: ["mixes", track.id, track.bpm, track.key], queryFn: () => api.mixes(track.id), enabled: has && open })
+  if (!has) return null
+  const keyText = (k: string | null) => (k ? (notation === "camelot" ? toCamelot(k) : k) : null)
+  return (
+    <div className="bg-card/60 rounded-2xl border">
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="flex w-full items-center justify-between gap-3 p-3 text-left">
+        <span>
+          <span className="text-sm font-medium">Mixes well with</span>
+          <span className="text-muted-foreground block text-xs">
+            {track.key ? `Keys next to ${keyText(track.key)} on the Camelot wheel` : "Similar tempo"}
+            {track.bpm ? `, within 6% of ${formatBpm(track.bpm)} BPM (or half/double)` : ""}
+          </span>
+        </span>
+        <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} className={cn("text-muted-foreground size-4 shrink-0 transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="border-t px-3 pt-2 pb-3">
+          {isLoading ? (
+            <Spinner className="size-4" />
+          ) : !data?.length ? (
+            <p className="text-muted-foreground text-xs">Nothing in your libraries mixes with it yet.</p>
+          ) : (
+            <ul className="-mx-1 space-y-0.5">
+              {data.map((m) => {
+                const row = (
+                  <>
+                    <span className="min-w-0 flex-1 truncate">
+                      <span className="font-medium">{m.track.proposedTitle ?? m.track.filename}</span>
+                      {m.track.proposedArtist && <span className="text-muted-foreground"> · {m.track.proposedArtist}</span>}
+                    </span>
+                    <span className="text-muted-foreground shrink-0 font-mono tabular-nums" title={m.keyRelation ? RELATION[m.keyRelation] : undefined}>
+                      {keyText(m.track.key)}
+                      {m.track.bpm ? ` · ${formatBpm(m.track.bpm)}${m.halfDouble ? "×½/2" : ""}` : ""}
+                      {m.bpmDiff ? ` (${m.bpmDiff > 0 ? "+" : ""}${m.bpmDiff}%)` : ""}
+                    </span>
+                  </>
+                )
+                return (
+                  <li key={m.track.id}>
+                    {onOpenTrack ? (
+                      <button type="button" onClick={() => onOpenTrack(m.track.id)} className="hover:bg-muted/60 flex w-full items-center gap-3 rounded-lg px-1 py-1 text-left text-xs">
+                        {row}
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-3 px-1 py-1 text-xs">{row}</div>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   )
 }

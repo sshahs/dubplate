@@ -6,6 +6,7 @@ import {
   DatabaseRestoreIcon,
   Delete02Icon,
   FileEditIcon,
+  HeadphonesIcon,
   Image01Icon,
   Notification03Icon,
   RefreshIcon,
@@ -26,7 +27,10 @@ import { PageHeader } from "@/components/app-shell"
 import { GenrePicker } from "@/components/genre-picker"
 import { QueryError } from "@/components/query-error"
 import { BackupSettings } from "@/components/settings-backup"
+import { PasswordSettings } from "@/components/settings-password"
+import { AiUsageCard } from "@/components/settings-usage"
 import { ChatSettings, MediaServerSettings } from "@/components/settings-integrations"
+import { DjSoftwareSettings } from "@/components/dj-export-dialog"
 import { SectionNav, SettingRow, SettingRows, type SectionItem } from "@/components/settings-layout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -44,7 +48,7 @@ import { api, type PublicSettings } from "@/lib/api"
 import { disableNotify, enableNotify, notifyEnabled, notifySupport } from "@/lib/notify"
 import { cn } from "@/lib/utils"
 
-type SectionId = "ai" | "crates" | "confidence" | "naming" | "extras" | "automation" | "notifications" | "servers" | "safety" | "learning" | "backup"
+type SectionId = "ai" | "crates" | "confidence" | "naming" | "extras" | "automation" | "exports" | "notifications" | "servers" | "safety" | "learning" | "backup"
 
 /** Sections, and the part of the settings each one edits (for the unsaved-changes dots). */
 const SECTIONS: { id: SectionId; label: string; icon: SectionItem["icon"]; edits: (s: Settings) => unknown }[] = [
@@ -52,16 +56,17 @@ const SECTIONS: { id: SectionId; label: string; icon: SectionItem["icon"]; edits
   { id: "crates", label: "Your crates", icon: Vynil01Icon, edits: (s) => [s.llm.genres, s.llm.sceneHint] },
   { id: "confidence", label: "Matching", icon: Target02Icon, edits: (s) => s.confidence },
   { id: "naming", label: "Naming & tags", icon: FileEditIcon, edits: (s) => s.naming },
-  { id: "extras", label: "Artwork & tempo", icon: Image01Icon, edits: (s) => [s.artwork, s.analysis] },
+  { id: "extras", label: "Artwork & audio", icon: Image01Icon, edits: (s) => [s.artwork, s.analysis] },
   { id: "automation", label: "Automation", icon: Timer02Icon, edits: (s) => s.automation },
+  { id: "exports", label: "DJ software", icon: HeadphonesIcon, edits: (s) => s.exports },
   { id: "notifications", label: "Notifications", icon: Notification03Icon, edits: (s) => [s.integrations.discord, s.integrations.telegram, s.integrations.notify, s.integrations.publicUrl] },
   { id: "servers", label: "Media servers", icon: ServerStack01Icon, edits: (s) => s.integrations.mediaServers },
-  { id: "safety", label: "Safety & scanner", icon: Shield01Icon, edits: (s) => [s.safety, s.scanner, s.contact, s.duplicates] },
+  { id: "safety", label: "Sign-in & safety", icon: Shield01Icon, edits: (s) => [s.safety, s.scanner, s.contact, s.duplicates] },
   { id: "learning", label: "Learning", icon: BookOpen01Icon, edits: () => null },
   { id: "backup", label: "Backup & restore", icon: DatabaseRestoreIcon, edits: () => null },
 ]
 /** Older deep links that now live inside another section. */
-const HASH_ALIASES: Record<string, SectionId> = { scanner: "safety" }
+const HASH_ALIASES: Record<string, SectionId> = { scanner: "safety", password: "safety", usage: "ai" }
 
 const one = (v: number | readonly number[]) => (Array.isArray(v) ? v[0] : (v as number))
 
@@ -130,6 +135,7 @@ function ProviderItem({
   onChange,
   fromEnv,
   zdrFromEnv,
+  currency,
 }: {
   p: LlmProviderConfig
   active: boolean
@@ -139,6 +145,7 @@ function ProviderItem({
   onChange: (p: LlmProviderConfig) => void
   fromEnv: boolean
   zdrFromEnv: boolean
+  currency: string
 }) {
   const [models, setModels] = useState<string[] | null>(null)
   const fetchModels = useMutation({
@@ -211,6 +218,25 @@ function ProviderItem({
               </Field>
             )}
           </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {(["priceIn", "priceOut"] as const).map((k) => (
+              <Field key={k}>
+                <FieldLabel htmlFor={`${k}-${p.id}`}>
+                  {currency} per million {k === "priceIn" ? "input" : "output"} tokens <span className="text-muted-foreground font-normal">(for cost estimates)</span>
+                </FieldLabel>
+                <Input
+                  id={`${k}-${p.id}`}
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  inputMode="decimal"
+                  value={p[k] ?? ""}
+                  placeholder={p.kind === "ollama" ? "0 - runs on your machine" : "not set"}
+                  onChange={(e) => onChange({ ...p, [k]: e.target.value === "" ? undefined : Math.max(0, Number(e.target.value)) })}
+                />
+              </Field>
+            ))}
+          </div>
           {p.kind === "commandcode" && (
             <label className="flex items-start gap-3 rounded-xl border border-dashed p-3 text-sm">
               <Switch checked={zdrFromEnv || !!p.zdr} disabled={zdrFromEnv} onCheckedChange={(v) => onChange({ ...p, zdr: v })} className="mt-0.5" />
@@ -246,6 +272,7 @@ function ProviderList({ draft, set }: { draft: PublicSettings; set: (fn: (d: Pub
           onOpenChange={(o) => setOpenId(o ? p.id : null)}
           fromEnv={draft.secretsFromEnv.includes(`llm:${p.id}`)}
           zdrFromEnv={draft.zdrFromEnv}
+          currency={draft.llm.currency || "$"}
           onActivate={() => {
             set((d) => void (d.llm.activeProvider = p.id))
             setOpenId(p.id)
@@ -467,6 +494,8 @@ export default function SettingsPage() {
       setEdit(null)
       void qc.invalidateQueries({ queryKey: ["health"] })
       void qc.invalidateQueries({ queryKey: ["sources"] })
+      // Prices and the budget change what usage costs.
+      void qc.invalidateQueries({ queryKey: ["ai-usage"] })
       toast.success("Settings saved")
     },
     onError: (e) => toast.error(e.message),
@@ -543,6 +572,7 @@ export default function SettingsPage() {
                   </SettingRows>
                 </CardContent>
               </Card>
+              <AiUsageCard draft={draft} set={set} />
             </>
           )}
 
@@ -756,6 +786,33 @@ export default function SettingsPage() {
                   </SettingRows>
                 </CardContent>
               </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Quality & loudness</CardTitle>
+                  <CardDescription>Measured over the whole file while it's analysed. Tracks analysed before these were switched on get measured the next time analysis runs.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <SettingRows>
+                    <SettingRow
+                      title="Check the real quality"
+                      description="Flags FLAC, WAV and high-bitrate files whose high frequencies stop like an encoder's filter - a 320 kbps rip of a 128 kbps file, say. Duplicates keeps the honest copy."
+                    >
+                      <Switch checked={draft.analysis.quality} onCheckedChange={(v) => set((d) => void (d.analysis.quality = v))} aria-label="Check the real quality" />
+                    </SettingRow>
+                    <SettingRow title="Measure loudness" description="Integrated loudness (EBU R128) and peak, shown on each track.">
+                      <Switch checked={draft.analysis.loudness} onCheckedChange={(v) => set((d) => void (d.analysis.loudness = v))} aria-label="Measure loudness" />
+                    </SettingRow>
+                    <SettingRow title="Write ReplayGain tags" description="When cutting, so players and DJ software can even the volume out. The audio itself is never changed.">
+                      <Switch
+                        checked={draft.analysis.writeReplayGain}
+                        disabled={!draft.analysis.loudness}
+                        onCheckedChange={(v) => set((d) => void (d.analysis.writeReplayGain = v))}
+                        aria-label="Write ReplayGain tags"
+                      />
+                    </SettingRow>
+                  </SettingRows>
+                </CardContent>
+              </Card>
             </>
           )}
 
@@ -780,6 +837,20 @@ export default function SettingsPage() {
                     <SettingRow title="Re-check watched folders" description="A safety net for network shares and Docker mounts that don't report new files.">
                       <Choice value={String(draft.automation.pollMinutes)} items={POLL_OPTIONS} onChange={(v) => set((d) => void (d.automation.pollMinutes = Number(v)))} />
                     </SettingRow>
+                    <SettingRow
+                      title="Hands-off: how sure to be"
+                      description="In libraries set to hands-off (Libraries → Customise), matches the sources agree on at least this much are approved and cut without asking."
+                    >
+                      <SliderControl
+                        label="Hands-off confidence"
+                        value={draft.automation.handsOffMin}
+                        min={80}
+                        max={100}
+                        step={1}
+                        format={(v) => `${v}%`}
+                        onChange={(v) => set((d) => void (d.automation.handsOffMin = v))}
+                      />
+                    </SettingRow>
                     <SettingRow title="Nightly scan" description="Rescans every library once a night, watched or not.">
                       <div className="flex items-center gap-3">
                         <Input
@@ -799,6 +870,8 @@ export default function SettingsPage() {
             </>
           )}
 
+          {section === "exports" && <DjSoftwareSettings draft={draft} set={set} />}
+
           {section === "notifications" && (
             <>
               <NotificationsCard />
@@ -810,6 +883,7 @@ export default function SettingsPage() {
 
           {section === "safety" && (
             <>
+              <PasswordSettings />
               <Card className={cn(!draft.safety.readOnly && "border-rasta-red/40")}>
                 <CardHeader>
                   <CardTitle>Safety</CardTitle>

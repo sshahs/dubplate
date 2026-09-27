@@ -20,6 +20,8 @@ services:
     environment:
       # Hostnames you'll browse to besides localhost (e.g. your NAS name or IP).
       DUBPLATE_ALLOWED_HOSTS: ${DUBPLATE_ALLOWED_HOSTS:-}
+      # Ask for this password in every browser (or set one in Settings instead).
+      DUBPLATE_PASSWORD: ${DUBPLATE_PASSWORD:-}
       # Your time zone (e.g. Europe/London), so the nightly scan runs at your 3 am, not UTC's.
       TZ: ${TZ:-UTC}
       # Ollama running on the Docker host; use http://ollama:11434 with the

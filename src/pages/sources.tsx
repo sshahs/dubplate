@@ -9,12 +9,13 @@ import {
   FingerPrintIcon,
   LinkSquare02Icon,
   MoreHorizontalIcon,
+  RefreshIcon,
   SourceCodeIcon,
   TestTube01Icon,
   Vynil01Icon,
 } from "@hugeicons/core-free-icons"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Link, useLocation, useNavigate } from "react-router"
 import { toast } from "sonner"
 import type { Candidate, ScraperDefinition, SourceConfig } from "@shared/types"
@@ -35,6 +36,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { api, type PublicSettings, type SourceStatus } from "@/lib/api"
+import { useActiveJobs } from "@/lib/events"
+import { fmtAgo } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 type GroupId = "catalogues" | "underground" | "fingerprint" | "scrapers"
@@ -169,6 +172,8 @@ function SourceRow({
   })
   const meta = s.meta
   const needs = meta?.needs ?? []
+  const { data: settingsData } = useQuery({ queryKey: ["settings"], queryFn: api.settings })
+  const settingsSources = settingsData?.sources
   const keysChanged = key !== (cfg.apiKey ?? "") || secret !== (cfg.apiSecret ?? "")
   return (
     <Collapsible open={open} onOpenChange={onOpenChange}>
@@ -239,6 +244,7 @@ function SourceRow({
                 </form>
               </SettingRow>
             )}
+            {s.id === "discogs-collection" && <CollectionSync hasToken={!!settingsSources?.discogs?.apiKey} />}
             <SettingRow title="Trust weight" description="How much a hit here counts towards the consensus. 1 is a solid source; above 1 is near-certain.">
               <div className="flex w-full items-center gap-3 sm:w-64">
                 <Slider
@@ -272,6 +278,40 @@ function SourceRow({
         </div>
       </CollapsibleContent>
     </Collapsible>
+  )
+}
+
+/** Your Discogs collection: how much is synced, and a button to fetch it again. */
+function CollectionSync({ hasToken }: { hasToken: boolean }) {
+  const qc = useQueryClient()
+  const syncing = useActiveJobs().some((j) => j.kind === "sync")
+  const { data } = useQuery({ queryKey: ["discogs-collection"], queryFn: api.collection })
+  const wasSyncing = useRef(false)
+  useEffect(() => {
+    // A sync just finished: show the new count.
+    if (wasSyncing.current && !syncing) {
+      void qc.invalidateQueries({ queryKey: ["discogs-collection"] })
+      void qc.invalidateQueries({ queryKey: ["sources"] })
+    }
+    wasSyncing.current = syncing
+  }, [syncing, qc])
+  const sync = useMutation({ mutationFn: api.syncCollection, onSuccess: (j) => toast(j.label, { description: "A page of 100 releases a second." }), onError: (e) => toast.error(e.message) })
+  return (
+    <SettingRow
+      title="Your collection"
+      description={
+        !hasToken
+          ? "Save a Discogs personal access token on Discogs above first."
+          : data?.count
+            ? `${data.count.toLocaleString()} release${data.count === 1 ? "" : "s"} from ${data.username}'s collection, synced ${fmtAgo(data.syncedAt)}.`
+            : "Not synced yet."
+      }
+    >
+      <Button size="sm" variant="outline" onClick={() => sync.mutate()} disabled={!hasToken || syncing || sync.isPending}>
+        {syncing || sync.isPending ? <Spinner data-icon="inline-start" /> : <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} data-icon="inline-start" />}
+        {data?.count ? "Sync again" : "Sync now"}
+      </Button>
+    </SettingRow>
   )
 }
 

@@ -1,0 +1,21 @@
+{
+  "name": "Dubplate",
+  "short_name": "Dubplate",
+  "description": "AI-assisted music tagger and renamer for sound-system collections.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#1a1613",
+  "theme_color": "#1a1613",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Review", "short_name": "Review", "url": "/review", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Tracks", "short_name": "Tracks", "url": "/tracks", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Crates", "short_name": "Crates", "url": "/crates", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

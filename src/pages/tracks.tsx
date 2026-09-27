@@ -1,6 +1,7 @@
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
   AiMagicIcon,
+  Alert02Icon,
   Cancel01Icon,
   Download04Icon,
   Image01Icon,
@@ -22,6 +23,7 @@ import { PageHeader } from "@/components/app-shell"
 import { BulkEditDialog } from "@/components/bulk-edit"
 import { ConfidenceMeter, StatusBadge } from "@/components/confidence"
 import { Cover } from "@/components/cover"
+import { DjExportDialog } from "@/components/dj-export-dialog"
 import { QueryError } from "@/components/query-error"
 import { TrackDetail } from "@/components/track-detail"
 import { Button } from "@/components/ui/button"
@@ -114,8 +116,16 @@ const TrackRow = memo(function TrackRow({
         <Cover track={t} size={40} />
       </TableCell>
       <TableCell>
-        <div className="truncate font-mono text-xs" title={t.filename}>
-          {t.filename}
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate font-mono text-xs" title={t.filename}>
+            {t.filename}
+          </span>
+          {t.analysis?.quality?.verdict === "suspect" && (
+            <span className="text-rasta-gold shrink-0" title={t.analysis.quality.detail}>
+              <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} className="size-3.5" />
+              <span className="sr-only">Sounds made from a lower-quality file</span>
+            </span>
+          )}
         </div>
         {t.relDir && <div className="text-muted-foreground truncate text-[11px]">{t.relDir}</div>}
       </TableCell>
@@ -160,6 +170,9 @@ export default function TracksPage() {
   const debouncedQ = useDebounced(q)
   const status = (params.get("status")?.split(",").filter((s) => TRACK_STATUSES.includes(s as TrackStatus)) ?? []) as TrackStatus[]
   const libraryId = params.get("libraryId") ? Number(params.get("libraryId")) : undefined
+  const crateId = params.get("crate") ? Number(params.get("crate")) : undefined
+  const quality = params.get("quality") === "suspect" ? ("suspect" as const) : undefined
+  const [exporting, setExporting] = useState(false)
   const [sort, setSort] = useState<Sort>("filename")
   const [dir, setDir] = useState<"asc" | "desc">("asc")
   const [selected, setSelected] = useState<Set<number>>(new Set())
@@ -170,9 +183,9 @@ export default function TracksPage() {
   const shiftHeld = useRef(false)
 
   const filter: TrackFilter = useMemo(
-    () => ({ q: debouncedQ || undefined, status: status.length ? status : undefined, libraryId, sort, dir }),
+    () => ({ q: debouncedQ || undefined, status: status.length ? status : undefined, libraryId, crate: crateId, quality, sort, dir }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [debouncedQ, params.get("status"), libraryId, sort, dir]
+    [debouncedQ, params.get("status"), libraryId, crateId, quality, sort, dir]
   )
   const filterKey = JSON.stringify(filter)
   useEffect(() => {
@@ -184,6 +197,7 @@ export default function TracksPage() {
   const { data: libraries } = useQuery({ queryKey: ["libraries"], queryFn: api.libraries })
   const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: api.stats })
   const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: api.settings })
+  const { data: crate } = useQuery({ queryKey: ["crate", crateId], queryFn: () => api.crate(crateId!), enabled: !!crateId })
   const keyNotation = settings?.analysis.keyNotation ?? "musical"
   const busy = useActiveJobs().length > 0
 
@@ -298,6 +312,17 @@ export default function TracksPage() {
     else next.set("status", s)
     setParams(next)
   }
+  const clearParam = (key: string) => {
+    const next = new URLSearchParams(params)
+    next.delete(key)
+    setParams(next)
+  }
+  const toggleQuality = () => {
+    const next = new URLSearchParams(params)
+    if (quality) next.delete("quality")
+    else next.set("quality", "suspect")
+    setParams(next)
+  }
   const setLibrary = (id: string) => {
     const next = new URLSearchParams(params)
     if (id === "all") next.delete("libraryId")
@@ -359,11 +384,20 @@ export default function TracksPage() {
               }
             />
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setExporting(true)}>For DJ software…</DropdownMenuItem>
               <DropdownMenuItem render={<a href={api.exportUrl(exportFilter, "csv")} />}>CSV report</DropdownMenuItem>
               <DropdownMenuItem render={<a href={api.exportUrl(exportFilter, "json")} />}>JSON report</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         }
+      />
+
+      <DjExportDialog
+        open={exporting}
+        onOpenChange={setExporting}
+        selection={selection ?? { filter: exportFilter }}
+        count={selection ? selectionCount : total}
+        defaultName={crate?.name ?? "Dubplate"}
       />
 
       <div className="mb-3 flex flex-wrap gap-1.5">
@@ -410,6 +444,18 @@ export default function TracksPage() {
               ))}
             </SelectContent>
           </Select>
+        )}
+        <Button variant={quality ? "default" : "outline"} size="sm" aria-pressed={!!quality} onClick={toggleQuality} title="Files that sound made from a lower-quality file than they claim">
+          <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} data-icon="inline-start" />
+          Sounds re-encoded
+        </Button>
+        {crateId && (
+          <span className="bg-primary/10 text-primary inline-flex h-7 items-center gap-1 rounded-full pr-1 pl-3 text-xs font-medium">
+            Crate: {crate?.name ?? "…"}
+            <button type="button" aria-label="Show all tracks, not just this crate" className="hover:bg-primary/15 rounded-full p-1" onClick={() => clearParam("crate")}>
+              <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} className="size-3" />
+            </button>
+          </span>
         )}
         <span className="text-muted-foreground ml-auto flex items-center gap-1.5 text-xs tabular-nums">
           <Spinner className={cn("size-3 transition-opacity", isFetching ? "opacity-100" : "opacity-0")} />
@@ -575,7 +621,10 @@ export default function TracksPage() {
                   <TrackDetail
                     trackId={open.id}
                     onUndone={() => setOpen(open)}
+                    onOpenTrack={(id) => setOpen({ id, index: -1 })}
                     onAdvance={() => {
+                      // Opened from "mixes well with": it isn't in the list, so there's no next.
+                      if (open.index < 0) return setOpen(null)
                       const next = rowAt(open.index + 1)
                       if (!next) return setOpen(null)
                       startTransition(() => {

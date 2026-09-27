@@ -33,8 +33,15 @@ export interface DecodedWindow {
   seconds: number
 }
 
+/** Something that wants the decoded audio, chunk by chunk, from the start of the file. */
+export interface PcmSink {
+  push(channels: Float32Array[], sampleRate: number): void
+  /** has everything it needs, so decoding can stop early once every sink is done */
+  readonly done: boolean
+}
+
 /** Downmixes, decimates (box filter) and keeps only [from, from + seconds). */
-class WindowCollector {
+export class WindowCollector implements PcmSink {
   private out: Float32Array | null = null
   private filled = 0
   private factor = 1
@@ -47,7 +54,7 @@ class WindowCollector {
     private seconds: number
   ) {}
 
-  get full() {
+  get done() {
     return !!this.out && this.filled >= this.out.length
   }
 
@@ -93,19 +100,18 @@ async function oggFlavour(file: string): Promise<ChunkFormat> {
 }
 
 /**
- * Decode `seconds` of audio starting `from` seconds in. If the file is shorter
- * than that, whatever exists after `from` comes back.
+ * Decode the file, handing every chunk to each sink until they're all done (or
+ * the file ends). Streamed where the format allows.
  */
-export async function decodeWindow(file: string, ext: string, from: number, seconds: number): Promise<DecodedWindow> {
-  const collector = new WindowCollector(from, seconds)
+export async function decodeInto(file: string, ext: string, sinks: PcmSink[]): Promise<void> {
   const e = ext.toLowerCase()
   const format = e === "ogg" ? await oggFlavour(file) : CHUNKED[e]
   if (format) {
     const stream = fs.createReadStream(file, { highWaterMark: 256 * 1024 })
     try {
       for await (const pcm of decodeChunked(stream, format)) {
-        collector.push(pcm.channelData, pcm.sampleRate)
-        if (collector.full) break
+        for (const sink of sinks) if (!sink.done) sink.push(pcm.channelData, pcm.sampleRate)
+        if (sinks.every((s) => s.done)) break
       }
     } finally {
       stream.destroy()
@@ -114,7 +120,16 @@ export async function decodeWindow(file: string, ext: string, from: number, seco
     const { size } = await fs.promises.stat(file)
     if (size > MAX_WHOLE_FILE) throw new Error(`Too large to analyse (${Math.round(size / 1048576)} MB .${e})`)
     const pcm = await decode(await fs.promises.readFile(file))
-    collector.push(pcm.channelData, pcm.sampleRate)
+    for (const sink of sinks) sink.push(pcm.channelData, pcm.sampleRate)
   }
+}
+
+/**
+ * Decode `seconds` of audio starting `from` seconds in. If the file is shorter
+ * than that, whatever exists after `from` comes back.
+ */
+export async function decodeWindow(file: string, ext: string, from: number, seconds: number): Promise<DecodedWindow> {
+  const collector = new WindowCollector(from, seconds)
+  await decodeInto(file, ext, [collector])
   return collector.result()
 }

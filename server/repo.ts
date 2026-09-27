@@ -1,10 +1,12 @@
 // Data access for the staging database.
 
 import fs from "node:fs"
+import path from "node:path"
 import type { SQLInputValue } from "node:sqlite"
 import type {
   Alias,
   ArtRef,
+  CrateRules,
   Correction,
   ExistingTags,
   Library,
@@ -20,6 +22,7 @@ import type {
 import { parseKey } from "../shared/keys"
 import { TRACK_STATUSES } from "../shared/types"
 import { normArtist } from "./core/normalize"
+import { crateConditions, crateRules } from "./crates"
 import { getDb, parseJson } from "./db"
 import { cleanLibrarySettings, forgetLibrarySettings } from "./library-settings"
 import { watchState } from "./watch-state"
@@ -68,6 +71,12 @@ export function updateLibrary(id: number, patch: { name?: string; watch?: boolea
     getDb().prepare("UPDATE libraries SET settings_json = ? WHERE id = ?").run(Object.keys(clean).length ? JSON.stringify(clean) : null, id)
     forgetLibrarySettings()
   }
+}
+
+/** The library a file lives in (the deepest one containing it). */
+export function libraryForPath(file: string): Library | null {
+  const libs = listLibraries().filter((l) => file === l.path || file.startsWith(l.path.endsWith(path.sep) ? l.path : l.path + path.sep))
+  return libs.sort((a, b) => b.path.length - a.path.length)[0] ?? null
 }
 
 export function removeLibrary(id: number) {
@@ -161,6 +170,12 @@ export interface TrackQuery {
   minConfidence?: number
   maxConfidence?: number
   includeMissing?: boolean
+  /** only tracks in this smart crate */
+  crateId?: number
+  /** or matching these crate rules (a crate being edited) */
+  rules?: CrateRules
+  /** "suspect": files that sound made from something worse than they claim */
+  quality?: "suspect" | "ok"
   sort?: TrackSort
   dir?: "asc" | "desc"
   limit?: number
@@ -191,6 +206,12 @@ function whereFor(q: TrackQuery): { sql: string; params: SQLInputValue[] } {
   if (q.maxConfidence !== undefined) {
     where.push("confidence <= ?")
     params.push(q.maxConfidence)
+  }
+  const rules = { ...(q.crateId ? (crateRules(q.crateId) ?? { libraryId: -1 }) : {}), ...q.rules, ...(q.quality ? { quality: q.quality } : {}) }
+  if (Object.keys(rules).length) {
+    const c = crateConditions(rules)
+    where.push(...c.where)
+    params.push(...c.params)
   }
   return { sql: where.length ? `WHERE ${where.join(" AND ")}` : "", params }
 }
@@ -229,7 +250,7 @@ function rowToSummary(r: Row): TrackSummary {
   }
 }
 
-function summariesById(ids: number[]): TrackSummary[] {
+export function summariesById(ids: number[]): TrackSummary[] {
   if (!ids.length) return []
   const rows = getDb().prepare(`${SUMMARY} WHERE t.id IN (${ids.map(() => "?").join(",")})`).all(...ids) as Row[]
   const byId = new Map(rows.map((r) => [r.id as number, r]))
@@ -275,6 +296,7 @@ const DATA_COLS: Record<string, string> = {
   decision: "decision_json",
 }
 const COLS: Record<string, string> = {
+  libraryId: "library_id",
   path: "path",
   filename: "filename",
   ext: "ext",

@@ -3,6 +3,7 @@
 
 import type { LlmProviderConfig } from "../../shared/types"
 import { networkMessage } from "../net"
+import { recordUsage } from "./usage"
 
 export interface JsonRequest {
   system: string
@@ -119,6 +120,7 @@ async function ollamaJson(p: LlmProviderConfig, req: JsonRequest) {
     req.timeoutMs ?? 180_000
   )
   const j = JSON.parse(text)
+  recordUsage(p, { input: j.prompt_eval_count ?? 0, output: j.eval_count ?? 0 })
   return extractJson(j.message?.content ?? "")
 }
 
@@ -163,6 +165,7 @@ async function openAiJson(p: LlmProviderConfig, req: JsonRequest) {
         req.timeoutMs
       )
       const j = JSON.parse(text)
+      recordUsage(p, { input: j.usage?.prompt_tokens ?? j.usage?.input_tokens ?? 0, output: j.usage?.completion_tokens ?? j.usage?.output_tokens ?? 0 })
       return extractJson(j.choices?.[0]?.message?.content ?? "")
     } catch (err) {
       lastErr = err
@@ -192,6 +195,8 @@ async function anthropicJson(p: LlmProviderConfig, req: JsonRequest) {
     req.timeoutMs
   )
   const j = JSON.parse(text)
+  const u = j.usage ?? {}
+  recordUsage(p, { input: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0), output: u.output_tokens ?? 0 })
   const block = (j.content as { type: string; input?: unknown; text?: string }[] | undefined)?.find((b) => b.type === "tool_use")
   if (block?.input) return block.input
   const textBlock = (j.content as { type: string; text?: string }[] | undefined)?.find((b) => b.type === "text")

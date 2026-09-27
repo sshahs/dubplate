@@ -68,3 +68,45 @@ export function formatBpm(bpm: number | null | undefined): string | null {
   const r = Math.round(bpm)
   return Math.abs(bpm - r) < 0.15 ? String(r) : bpm.toFixed(1)
 }
+
+/** Every key, majors then minors, in Dubplate's notation. */
+export const ALL_KEYS = [...MAJOR, ...MINOR]
+
+/** A key's place on the Camelot wheel: 1-12 and A (minor) or B (major). */
+export function camelotOf(key: string | null | undefined): { n: number; letter: "A" | "B" } | null {
+  const c = toCamelot(key)
+  return c ? { n: Number(c.slice(0, -1)), letter: c.slice(-1) as "A" | "B" } : null
+}
+
+export function fromCamelot(n: number, letter: "A" | "B"): string {
+  const wrapped = ((((n - 1) % 12) + 12) % 12) + 1
+  const minor = letter === "A"
+  return keyName((minor ? CAMELOT_MINOR : CAMELOT_MAJOR).indexOf(wrapped), minor)
+}
+
+export type MixRelation = "same" | "up" | "down" | "relative" | "boost"
+
+/**
+ * Keys that mix with `key` on the Camelot wheel: the same key, one step either
+ * way, its relative major/minor, and two steps up for an energy lift.
+ */
+export function mixingKeys(key: string | null | undefined): { key: string; relation: MixRelation }[] {
+  const c = camelotOf(key)
+  if (!c) return []
+  const other = c.letter === "A" ? "B" : "A"
+  return [
+    { key: fromCamelot(c.n, c.letter), relation: "same" },
+    { key: fromCamelot(c.n + 1, c.letter), relation: "up" },
+    { key: fromCamelot(c.n - 1, c.letter), relation: "down" },
+    { key: fromCamelot(c.n, other), relation: "relative" },
+    { key: fromCamelot(c.n + 2, c.letter), relation: "boost" },
+  ]
+}
+
+/** Pitch class of the tonic (0 = C) and mode, for software that numbers keys (Traktor). */
+export function keyIndex(key: string | null | undefined): { pc: number; minor: boolean } | null {
+  const k = parseKey(key)
+  if (!k) return null
+  const minor = k.endsWith("m")
+  return { pc: (minor ? MINOR : MAJOR).indexOf(k), minor }
+}

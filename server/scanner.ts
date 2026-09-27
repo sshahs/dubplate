@@ -17,7 +17,7 @@ import type { Track } from "../shared/types"
 
 const HASH_CHUNK = 64 * 1024
 /** Bump when readAudio starts collecting something new, so unchanged files get re-read once. */
-export const TAGS_VERSION = 2
+export const TAGS_VERSION = 3
 
 /** Fast content fingerprint: size + first and last 64 KiB. Enough to spot
  *  duplicates and follow files that were moved outside Dubplate. */
@@ -106,6 +106,8 @@ export async function readAudio(file: string) {
       mbReleaseId: c.musicbrainz_albumid || undefined,
       mbArtistId: c.musicbrainz_artistid?.[0] || undefined,
       discogsReleaseId: c.discogs_release_id ? String(c.discogs_release_id) : undefined,
+      replayGainTrackGain: Number.isFinite(c.replaygain_track_gain?.dB) ? Math.round(c.replaygain_track_gain!.dB * 100) / 100 : undefined,
+      replayGainTrackPeak: Number.isFinite(c.replaygain_track_peak?.ratio) ? Math.round(c.replaygain_track_peak!.ratio * 1e6) / 1e6 : undefined,
     }
     return {
       tags,

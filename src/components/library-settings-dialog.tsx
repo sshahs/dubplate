@@ -1,6 +1,6 @@
 import { HugeiconsIcon } from "@hugeicons/react"
 import { Settings02Icon } from "@hugeicons/core-free-icons"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState, type ReactNode } from "react"
 import { Link } from "react-router"
 import { toast } from "sonner"
@@ -11,6 +11,7 @@ import { GenrePicker } from "@/components/genre-picker"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { api, type PublicSettings } from "@/lib/api"
@@ -35,6 +36,7 @@ function Section({ title, own, onOwn, same, children }: { title: string; own: bo
 
 export function LibrarySettingsDialog({ lib, settings }: { lib: Library; settings: PublicSettings }) {
   const qc = useQueryClient()
+  const { data: libraries } = useQuery({ queryKey: ["libraries"], queryFn: api.libraries })
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState<LibrarySettings>(lib.settings)
   const save = useMutation({
@@ -58,6 +60,10 @@ export function LibrarySettingsDialog({ lib, settings }: { lib: Library; setting
   const naming = { ...settings.naming, template: draft.template ?? settings.naming.template }
   const folderTemplate = draft.folderTemplate ?? settings.organise.template
   const unknown = unknownFolderTokens(draft.folderTemplate ?? "")
+  // An inbox feeds a library that isn't an inbox itself; a library something feeds can't be one.
+  const fedBy = (libraries ?? []).filter((l) => l.id !== lib.id && l.settings.inboxFor === lib.id)
+  const targets = (libraries ?? []).filter((l) => l.id !== lib.id && !l.settings.inboxFor)
+  const inboxItems = [{ value: "none", label: "Keep them in this library" }, ...targets.map((l) => ({ value: String(l.id), label: `Move them into ${l.name}` }))]
 
   return (
     <Dialog
@@ -126,6 +132,44 @@ export function LibrarySettingsDialog({ lib, settings }: { lib: Library; setting
               Move files into place when cutting
             </label>
           </Section>
+          <section className="space-y-4 rounded-2xl border p-4">
+            <label className="flex items-start justify-between gap-4">
+              <span>
+                <span className="font-medium">Hands-off</span>
+                <span className="text-muted-foreground block text-sm text-pretty">
+                  Matches the sources are at least {settings.automation.handsOffMin}% sure of are approved and cut without asking. Anything less certain waits in Review, and Rewind undoes any cut.
+                </span>
+              </span>
+              <Switch checked={!!draft.handsOff} onCheckedChange={(v) => (v ? set({ handsOff: true }) : drop("handsOff"))} aria-label="Hands-off" />
+            </label>
+            <div className="space-y-2">
+              <div>
+                <div className="font-medium">When tracks are cut</div>
+                <p className="text-muted-foreground text-sm text-pretty">
+                  {fedBy.length
+                    ? `${fedBy.map((l) => l.name).join(" and ")} ${fedBy.length === 1 ? "feeds" : "feed"} this library, so it can't be an inbox itself.`
+                    : "Make this an inbox (a Downloads folder, say): cut tracks move into another library, named and filed by that library's templates."}
+                </p>
+              </div>
+              <Select
+                items={inboxItems}
+                value={draft.inboxFor ? String(draft.inboxFor) : "none"}
+                disabled={fedBy.length > 0}
+                onValueChange={(v) => (v === "none" ? drop("inboxFor") : set({ inboxFor: Number(v) }))}
+              >
+                <SelectTrigger className="w-full sm:w-80" aria-label="When tracks are cut">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {inboxItems.map((i) => (
+                    <SelectItem key={i.value} value={i.value}>
+                      {i.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </section>
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => setOpen(false)}>

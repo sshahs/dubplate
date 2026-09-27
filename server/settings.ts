@@ -31,6 +31,12 @@ export const SOURCE_META: Record<
   mixcloud: { label: "Mixcloud", needs: [], about: "Radio shows and sets - useful for clash and pirate-radio recordings.", suits: ["DJ mixes", "Radio rips", "Live sets", "Sound clashes"] },
   youtube: { label: "YouTube", needs: ["apiKey"], keyLabel: "Data API v3 key", env: ["YOUTUBE_API_KEY"], about: "Many specials and dubplates only exist as uploads. Low weight - titles are messy.", signup: "https://console.cloud.google.com/apis/library/youtube.googleapis.com", suits: ["Dubplates & specials", "Sound clashes", "Edits & bootlegs", "Radio rips", "Live sets", "Afrobeats", "Amapiano", "Soca"] },
   acoustid: { label: "AcoustID fingerprint", needs: ["apiKey"], keyLabel: "Application API key", env: ["ACOUSTID_API_KEY"], about: "Identifies audio by fingerprint (needs fpcalc / Chromaprint installed). Strongest signal when it hits.", signup: "https://acoustid.org/new-application" },
+  "discogs-collection": {
+    label: "Your Discogs collection",
+    needs: [],
+    about: "Releases you own on Discogs. A track that matches a record in your collection is trusted highly - ideal for vinyl rips. Uses the Discogs token above.",
+    signup: "https://www.discogs.com/settings/developers",
+  },
 }
 
 const DEFAULT_SOURCES: Record<string, SourceConfig> = {
@@ -45,6 +51,7 @@ const DEFAULT_SOURCES: Record<string, SourceConfig> = {
   mixcloud: { enabled: true, weight: 0.45 },
   youtube: { enabled: true, weight: 0.4 },
   acoustid: { enabled: true, weight: 1.3 },
+  "discogs-collection": { enabled: true, weight: 1.2 },
 }
 
 const DEFAULT_PROVIDERS: LlmProviderConfig[] = [
@@ -211,6 +218,8 @@ export const DEFAULT_SETTINGS: Settings = {
     // Nothing picked: the AI doesn't assume a genre. Owners narrow it in onboarding or Settings.
     genres: [],
     sceneHint: "",
+    monthlyBudget: 0,
+    currency: "$",
   },
   sources: DEFAULT_SOURCES,
   scrapers: SCRAPER_PRESETS,
@@ -248,8 +257,9 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   safety: { readOnly: true },
   artwork: { fetch: true, embed: true, replaceExisting: false },
-  analysis: { onProcess: true, writeTags: true, keyNotation: "musical", bpmMin: 88 },
-  automation: { autoProcess: true, pollMinutes: 15, nightly: false, nightlyAt: "03:00" },
+  analysis: { onProcess: true, writeTags: true, keyNotation: "musical", bpmMin: 88, quality: true, loudness: true, writeReplayGain: true },
+  automation: { autoProcess: true, pollMinutes: 15, nightly: false, nightlyAt: "03:00", handsOffMin: 95 },
+  exports: { pathMap: [], traktorVolume: "Macintosh HD" },
   contact: "",
 }
 
@@ -400,6 +410,12 @@ export function isMasked(v: string | undefined): boolean {
   return !!v?.startsWith(MASK)
 }
 
+/** A price per million tokens: a positive number, or unset. */
+function price(v: unknown): number | undefined {
+  const n = Number(v)
+  return v === undefined || v === null || v === "" || !Number.isFinite(n) || n < 0 ? undefined : Math.round(n * 10000) / 10000
+}
+
 function keepSecret(incoming: string | undefined, previous: string | undefined) {
   if (incoming === undefined) return previous
   if (incoming.startsWith(MASK)) return previous
@@ -412,8 +428,20 @@ export function saveSettings(patch: Partial<Settings>): Settings {
   if (patch.llm?.providers) {
     next.llm.providers = patch.llm.providers.map((p) => {
       const prev = current.llm.providers.find((c) => c.id === p.id)
-      return { ...prev, ...p, apiKey: keepSecret(p.apiKey, prev?.apiKey) }
+      return { ...prev, ...p, apiKey: keepSecret(p.apiKey, prev?.apiKey), priceIn: price(p.priceIn), priceOut: price(p.priceOut) }
     })
+  }
+  if (patch.llm) {
+    next.llm.monthlyBudget = Math.max(0, Number(next.llm.monthlyBudget) || 0)
+    next.llm.currency = String(next.llm.currency ?? "").trim().slice(0, 4) || "$"
+  }
+  if (patch.automation) next.automation.handsOffMin = Math.min(100, Math.max(50, Math.round(Number(next.automation.handsOffMin) || DEFAULT_SETTINGS.automation.handsOffMin)))
+  if (patch.exports) {
+    next.exports.pathMap = (next.exports.pathMap ?? [])
+      .map((m) => ({ from: String(m?.from ?? "").trim(), to: String(m?.to ?? "").trim() }))
+      .filter((m) => m.from)
+      .slice(0, 10)
+    next.exports.traktorVolume = String(next.exports.traktorVolume ?? "").trim() || DEFAULT_SETTINGS.exports.traktorVolume
   }
   if (patch.sources) {
     for (const [id, cfg] of Object.entries(patch.sources)) {

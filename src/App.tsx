@@ -7,9 +7,11 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 
 const PAGES = {
+  crates: () => import("@/pages/crates"),
   dashboard: () => import("@/pages/dashboard"),
   duplicates: () => import("@/pages/duplicates"),
   execute: () => import("@/pages/execute"),
+  health: () => import("@/pages/health"),
   libraries: () => import("@/pages/libraries"),
   organise: () => import("@/pages/organise"),
   review: () => import("@/pages/review"),
@@ -19,9 +21,11 @@ const PAGES = {
   untangler: () => import("@/pages/untangler"),
 }
 
+const CratesPage = lazy(PAGES.crates)
 const DashboardPage = lazy(PAGES.dashboard)
 const DuplicatesPage = lazy(PAGES.duplicates)
 const ExecutePage = lazy(PAGES.execute)
+const HealthPage = lazy(PAGES.health)
 const LibrariesPage = lazy(PAGES.libraries)
 const OrganisePage = lazy(PAGES.organise)
 const ReviewPage = lazy(PAGES.review)
@@ -101,9 +105,11 @@ export default function App() {
                 <Route path="/review" element={<ReviewPage />} />
                 <Route path="/execute" element={<ExecutePage />} />
                 <Route path="/organise" element={<OrganisePage />} />
+                <Route path="/crates" element={<CratesPage />} />
                 <Route path="/untangler" element={<UntanglerPage />} />
                 <Route path="/sources" element={<SourcesPage />} />
                 <Route path="/duplicates" element={<DuplicatesPage />} />
+                <Route path="/health" element={<HealthPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="*" element={<DashboardPage />} />
               </Routes>

@@ -25,10 +25,31 @@ export function applyAnalysis(t: Track, analysis: TrackAnalysis): Partial<Track>
   return patch
 }
 
+/**
+ * Whether a track still needs listening to: never analysed, the last try failed
+ * (and `retryFailed`), or a measurement switched on since hasn't been taken.
+ */
+export function needsAnalysis(t: Track, settings: Settings, retryFailed = false): boolean {
+  const a = t.analysis
+  if (!a) return true
+  if (a.error) return retryFailed
+  return (settings.analysis.loudness && a.loudness === undefined) || (settings.analysis.quality && a.quality === undefined)
+}
+
 /** Analyse one track and save the result; returns the updated fields. */
 export async function analyseTrack(t: Track, settings: Settings): Promise<Partial<Track>> {
   try {
-    const analysis = await analyse({ file: t.path, ext: t.ext, duration: t.duration, bpmMin: settings.analysis.bpmMin })
+    const analysis = await analyse({
+      file: t.path,
+      ext: t.ext,
+      duration: t.duration,
+      bpmMin: settings.analysis.bpmMin,
+      quality: settings.analysis.quality,
+      loudness: settings.analysis.loudness,
+      codec: t.codec,
+      bitrate: t.bitrate,
+      sampleRate: t.sampleRate,
+    })
     const patch = applyAnalysis(t, analysis)
     updateTrack(t.id, patch)
     return patch
@@ -46,12 +67,13 @@ export async function analyzeTracks(ids: number[], settings: Settings, opts: { f
   await mapLimit(ids, POOL_SIZE, ctx.signal, async (id) => {
     const t = getTrack(id)
     if (!t || t.missing) return ctx.tick(false)
-    if (!opts.force && t.analysis && !t.analysis.error) return ctx.tick(true)
+    if (!opts.force && !needsAnalysis(t, settings)) return ctx.tick(true)
     try {
       const patch = await analyseTrack(t, settings)
       changed.push(id)
       const a = patch.analysis!
-      ctx.tick(true, `${t.filename} → ${[a.bpm && `${a.bpm} BPM`, a.key].filter(Boolean).join(" · ") || "no clear pulse or key"}`)
+      const said = [a.bpm && `${a.bpm} BPM`, a.key, a.quality?.verdict === "suspect" && "sounds re-encoded"].filter(Boolean).join(" · ")
+      ctx.tick(true, `${t.filename} → ${said || "no clear pulse or key"}`)
     } catch (err) {
       if (ctx.signal.aborted) return
       changed.push(id)

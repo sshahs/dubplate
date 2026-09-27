@@ -2,17 +2,24 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { Readable } from "node:stream"
+import { getConnInfo } from "@hono/node-server/conninfo"
 import { Hono, type Context } from "hono"
 import { compress } from "hono/compress"
+import { deleteCookie, getCookie, setCookie } from "hono/cookie"
 import { streamSSE } from "hono/streaming"
 import { parseKey } from "../shared/keys"
-import type { FinalMeta, Library, MediaServerConfig, ScraperDefinition, ServerEvent, Settings, Track, TrackStatus } from "../shared/types"
+import type { DjFormat, FinalMeta, Library, MediaServerConfig, PathMapping, ScraperDefinition, ServerEvent, Settings, Track, TrackStatus } from "../shared/types"
 import { TRACK_STATUSES } from "../shared/types"
 import { activeProvider, interpretTrack } from "./ai/interpreter"
 import { listModels, testProvider } from "./ai/providers"
+import { usageReport } from "./ai/usage"
 import { analyzeTracks } from "./analysis"
 import { findArtwork, thumbnail } from "./art"
+import * as auth from "./auth"
 import { config, VERSION } from "./config"
+import { cleanRules, crateFacets, createCrate, deleteCrate, getCrate, listCrates, mixSuggestionIds, updateCrate } from "./crates"
+import { exportPlaylists, type Playlist } from "./dj-export"
+import { healthReport } from "./health"
 import { parseFilename } from "./core/filename-parser"
 import { normArtist } from "./core/normalize"
 import { buildPlan, executePlan, metaFor, proposedFilename, rewind } from "./executor"
@@ -29,6 +36,7 @@ import { isMasked, publicSettings, saveSettings, settingsNow } from "./settings"
 import { findFpcalc } from "./sources/acoustid"
 import { clearHttpCache } from "./sources/http"
 import { allAdapters, buildQuery, sourceStatus } from "./sources"
+import { collectionStatus, syncCollection } from "./sources/discogs-collection"
 import { runScraper } from "./sources/scraper"
 import { restore, snapshot } from "./undo"
 import { syncWatchers } from "./watcher"
@@ -69,6 +77,8 @@ function parseQuery(c: Context): repo.TrackQuery {
     minConfidence: q.min ? Number(q.min) : undefined,
     maxConfidence: q.max ? Number(q.max) : undefined,
     includeMissing: q.missing === "1",
+    crateId: q.crate ? Number(q.crate) : undefined,
+    quality: q.quality === "suspect" || q.quality === "ok" ? q.quality : undefined,
     sort: (q.sort as repo.TrackQuery["sort"]) || undefined,
     dir: q.dir === "desc" ? "desc" : "asc",
     limit: q.limit ? Number(q.limit) : undefined,
@@ -118,6 +128,22 @@ function sanitizeFinal(input: Partial<FinalMeta>): FinalMeta {
   }
 }
 
+/** Reachable without signing in, even with a password set. */
+const OPEN_PATHS = new Set(["/api/health", "/api/auth/status", "/api/auth/login", "/api/auth/logout"])
+
+function isHttps(c: Context) {
+  return c.req.url.startsWith("https:") || c.req.header("x-forwarded-proto")?.split(",")[0].trim() === "https"
+}
+
+/** Who's signing in, for throttling guesses (behind a proxy, everyone shares its address). */
+function clientAddress(c: Context): string {
+  try {
+    return getConnInfo(c).remote.address ?? "unknown"
+  } catch {
+    return "unknown"
+  }
+}
+
 export function createApp() {
   const app = new Hono()
 
@@ -131,7 +157,71 @@ export function createApp() {
     if (c.req.method !== "GET" && c.req.method !== "HEAD" && c.req.header("x-dubplate") !== "1") {
       return c.json({ error: "Missing X-Dubplate header" }, 403)
     }
+    // With a password set, only signing in (and the bare health check) works without a session.
+    if (!OPEN_PATHS.has(c.req.path) && auth.authEnabled() && !auth.validSession(getCookie(c, auth.SESSION_COOKIE))) {
+      return c.json({ error: "Sign in to Dubplate first" }, 401)
+    }
     await next()
+  })
+
+  // ---- sign-in ----
+  const startSession = (c: Context) =>
+    setCookie(c, auth.SESSION_COOKIE, auth.issueSession(), {
+      httpOnly: true,
+      sameSite: "Strict",
+      secure: isHttps(c),
+      path: "/",
+      maxAge: auth.SESSION_DAYS * 86400,
+    })
+
+  app.get("/api/auth/status", (c) => c.json(auth.authStatus(getCookie(c, auth.SESSION_COOKIE))))
+
+  app.post("/api/auth/login", async (c) => {
+    const { password } = await c.req.json<{ password?: string }>().catch(() => ({ password: undefined }))
+    const who = clientAddress(c)
+    const wait = auth.lockedFor(who)
+    if (wait) return c.json({ error: `Too many wrong passwords - try again in ${Math.ceil(wait / 1000)} s` }, 429)
+    if (!auth.authEnabled()) return c.json({ ok: true })
+    const ok = !!password && auth.checkPassword(password)
+    auth.recordAttempt(who, ok)
+    if (!ok) return c.json({ error: "That's not the password" }, 401)
+    startSession(c)
+    return c.json({ ok: true })
+  })
+
+  app.post("/api/auth/logout", (c) => {
+    deleteCookie(c, auth.SESSION_COOKIE, { path: "/" })
+    return c.json({ ok: true })
+  })
+
+  /** Set or change the password (the current one is needed to change it). */
+  app.post("/api/auth/password", async (c) => {
+    if (auth.passwordFromEnv()) return c.json({ error: "The password is set with DUBPLATE_PASSWORD - change it there" }, 409)
+    const body = await c.req.json<{ current?: string; next?: string }>()
+    if (auth.authEnabled() && !auth.checkPassword(body.current ?? "")) return c.json({ error: "The current password isn't right" }, 403)
+    try {
+      auth.setPassword(body.next ?? "")
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+    // Everyone else is signed out; this browser carries on.
+    startSession(c)
+    return c.json(auth.authStatus(auth.issueSession()))
+  })
+
+  app.post("/api/auth/password/remove", async (c) => {
+    if (auth.passwordFromEnv()) return c.json({ error: "The password is set with DUBPLATE_PASSWORD - remove it there" }, 409)
+    const body = await c.req.json<{ current?: string }>()
+    if (!auth.checkPassword(body.current ?? "")) return c.json({ error: "The current password isn't right" }, 403)
+    auth.removePassword()
+    deleteCookie(c, auth.SESSION_COOKIE, { path: "/" })
+    return c.json(auth.authStatus(undefined))
+  })
+
+  app.post("/api/auth/logout-everywhere", (c) => {
+    auth.signOutEverywhere()
+    startSession(c)
+    return c.json({ ok: true })
   })
 
   // Gzip JSON (a page of tracks shrinks ~8×) - but never the event stream, audio or images.
@@ -145,9 +235,12 @@ export function createApp() {
 
   // ---- health, events, stats ----
   app.get("/api/health", (c) => {
+    // Enough for a container health check; the rest waits until you've signed in.
+    if (auth.authEnabled() && !auth.validSession(getCookie(c, auth.SESSION_COOKIE))) return c.json({ auth: true, version: VERSION })
     const s = settingsNow()
     const p = activeProvider(s)
     return c.json({
+      auth: auth.authEnabled(),
       version: VERSION,
       dataDir: config.dataDir,
       readOnly: s.safety.readOnly,
@@ -156,6 +249,8 @@ export function createApp() {
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     })
   })
+
+  app.get("/api/health/checks", async (c) => c.json(await healthReport(settingsNow(), c.req.query("fresh") === "1")))
 
   app.get("/api/events", (c) =>
     streamSSE(c, async (stream) => {
@@ -204,6 +299,13 @@ export function createApp() {
     const id = Number(c.req.param("id"))
     if (!repo.getLibrary(id)) return c.json({ error: "Library not found" }, 404)
     const body = await c.req.json<{ name?: string; watch?: boolean; settings?: Library["settings"] }>()
+    const inbox = body.settings?.inboxFor
+    if (inbox !== undefined && inbox !== null) {
+      const target = repo.getLibrary(Number(inbox))
+      if (!target || target.id === id) return c.json({ error: "Pick another library for the inbox to feed" }, 400)
+      if (target.settings.inboxFor) return c.json({ error: `${target.name} is an inbox itself - point this one at the library it feeds` }, 400)
+      if (repo.listLibraries().some((l) => l.id !== id && l.settings.inboxFor === id)) return c.json({ error: "Another inbox feeds this library, so it can't be an inbox itself" }, 400)
+    }
     repo.updateLibrary(id, { name: body.name?.trim() || undefined, watch: typeof body.watch === "boolean" ? body.watch : undefined, settings: body.settings })
     syncWatchers()
     return c.json(repo.getLibrary(id))
@@ -371,6 +473,15 @@ export function createApp() {
     return c.json({ restored: done.ids.length, label: done.label })
   })
 
+  // Tracks that mix well after this one (Camelot key and tempo).
+  app.get("/api/tracks/:id/mixes", (c) => {
+    const t = repo.getTrack(Number(c.req.param("id")))
+    if (!t) return c.json({ error: "Not found" }, 404)
+    const hits = mixSuggestionIds(t)
+    const byId = new Map(repo.summariesById(hits.map((h) => h.id)).map((s) => [s.id, s]))
+    return c.json(hits.flatMap(({ id, ...rest }) => (byId.has(id) ? [{ ...rest, track: byId.get(id)! }] : [])))
+  })
+
   app.post("/api/tracks/:id/rescore", (c) => {
     const t = repo.getTrack(Number(c.req.param("id")))
     if (!t) return c.json({ error: "Not found" }, 404)
@@ -513,6 +624,8 @@ export function createApp() {
     }
   })
 
+  app.get("/api/llm/usage", (c) => c.json(usageReport(settingsNow())))
+
   app.post("/api/llm/test", async (c) => {
     const { providerId } = await c.req.json<{ providerId: string }>()
     const p = settingsNow().llm.providers.find((x) => x.id === providerId)
@@ -564,6 +677,12 @@ export function createApp() {
     }
   })
 
+  app.get("/api/sources/discogs-collection", (c) => c.json(collectionStatus()))
+  app.post("/api/sources/discogs-collection/sync", (c) => {
+    if (!settingsNow().sources.discogs?.apiKey) return c.json({ error: "Add your Discogs personal access token first" }, 400)
+    return c.json(enqueueJob("sync", "Sync your Discogs collection", (ctx) => syncCollection(settingsNow(), ctx)))
+  })
+
   app.post("/api/scrapers/test", async (c) => {
     const { definition, query } = await c.req.json<{ definition: ScraperDefinition; query: string }>()
     try {
@@ -591,6 +710,39 @@ export function createApp() {
   app.get("/api/corrections", (c) => c.json(repo.listCorrections()))
   app.delete("/api/corrections/:id", (c) => {
     repo.deleteCorrection(Number(c.req.param("id")))
+    return c.json({ ok: true })
+  })
+
+  // ---- smart crates ----
+  app.get("/api/crates", (c) => c.json(listCrates()))
+  app.get("/api/crates/facets", (c) => c.json(crateFacets(c.req.query("libraryId") ? Number(c.req.query("libraryId")) : undefined)))
+  app.post("/api/crates/preview", async (c) => {
+    const { rules } = await c.req.json<{ rules: unknown }>()
+    return c.json(repo.queryTracks({ rules: cleanRules(rules), limit: 8, sort: "updated", dir: "desc" }))
+  })
+  app.post("/api/crates", async (c) => {
+    const body = await c.req.json<{ name?: string; rules?: unknown }>()
+    try {
+      return c.json(createCrate(body.name, body.rules))
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
+  app.get("/api/crates/:id", (c) => {
+    const crate = getCrate(Number(c.req.param("id")))
+    return crate ? c.json(crate) : c.json({ error: "No such crate" }, 404)
+  })
+  app.patch("/api/crates/:id", async (c) => {
+    const body = await c.req.json<{ name?: string; rules?: unknown }>()
+    try {
+      const crate = updateCrate(Number(c.req.param("id")), body)
+      return crate ? c.json(crate) : c.json({ error: "No such crate" }, 404)
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
+  app.delete("/api/crates/:id", (c) => {
+    deleteCrate(Number(c.req.param("id")))
     return c.json({ ok: true })
   })
 
@@ -634,9 +786,14 @@ export function createApp() {
   })
 
   app.post("/api/restore", async (c) => {
-    const body = await c.req.json<{ backup: unknown; parts?: { settings?: boolean; learnings?: boolean; libraries?: boolean } }>()
+    const body = await c.req.json<{ backup: unknown; parts?: { settings?: boolean; learnings?: boolean; libraries?: boolean; crates?: boolean } }>()
     if (!isBackup(body.backup)) return c.json({ error: "That isn't a Dubplate backup file" }, 400)
-    const result = restoreBackup(body.backup, { settings: body.parts?.settings !== false, learnings: body.parts?.learnings !== false, libraries: body.parts?.libraries !== false })
+    const result = restoreBackup(body.backup, {
+      settings: body.parts?.settings !== false,
+      learnings: body.parts?.learnings !== false,
+      libraries: body.parts?.libraries !== false,
+      crates: body.parts?.crates !== false,
+    })
     syncWatchers()
     emit({ type: "stats" })
     return c.json(result)
@@ -662,6 +819,30 @@ export function createApp() {
     draft.integrations.publicUrl = (integrations?.publicUrl ?? s.integrations.publicUrl ?? "").trim().replace(/\/+$/, "")
     const [r] = await sendChat(draft, { title: "Dubplate is connected", lines: ["Messages about finished jobs and tracks to review will arrive here."], link: { label: "Open Dubplate", path: "/" }, tone: "ok" }, channel)
     return c.json(r ?? { channel, ok: false, message: channel === "discord" ? "Needs a webhook URL" : "Needs a bot token and a chat ID" })
+  })
+
+  // ---- DJ software ----
+  app.post("/api/export/dj", async (c) => {
+    const body = await c.req.json<Selection & { format?: DjFormat; name?: string; crateIds?: number[]; pathMap?: PathMapping[]; traktorVolume?: string }>()
+    const s = settingsNow()
+    const format: DjFormat = body.format === "rekordbox" || body.format === "traktor" || body.format === "serato" ? body.format : "m3u"
+    const playlists: Playlist[] = body.crateIds?.length
+      ? body.crateIds.flatMap((id) => {
+          const crate = getCrate(Number(id))
+          return crate ? [{ name: crate.name, tracks: repo.getTracks(repo.queryTrackIds({ crateId: crate.id })) }] : []
+        })
+      : [{ name: body.name?.trim() || "Dubplate", tracks: repo.getTracks(resolveIds(body)).filter((t) => !t.missing) }]
+    if (!playlists.some((p) => p.tracks.length)) return c.json({ error: "Nothing to export" }, 400)
+    const file = exportPlaylists(format, playlists, {
+      pathMap: Array.isArray(body.pathMap) ? body.pathMap.filter((m) => m?.from?.trim()) : s.exports.pathMap,
+      traktorVolume: body.traktorVolume?.trim() || s.exports.traktorVolume,
+      naming: s.naming,
+    })
+    const ascii = file.filename.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "'")
+    return c.body(file.body as Uint8Array<ArrayBuffer> | string, 200, {
+      "content-type": file.contentType,
+      "content-disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(file.filename)}`,
+    })
   })
 
   // ---- reports ----

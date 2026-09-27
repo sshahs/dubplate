@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
 import type { DuplicateGroup, Settings, TrackSummary } from "../shared/types"
+import { estimatedKbps, likelySource } from "./analysis/quality"
 import { getDb } from "./db"
 import { MoveTracker, relDirOf } from "./executor"
 import { ensureDir, moveFile } from "./fsops"
@@ -34,13 +35,20 @@ export function rankCopies(tracks: TrackSummary[]): { best: number; reasons: Rec
   const scored = tracks.map((t) => {
     const why: string[] = []
     let score = 0
-    if (lossless(t)) {
-      score += 1000
-      why.push(t.ext.toUpperCase())
-    } else if (t.bitrate) {
-      why.push(`${Math.round(t.bitrate / 1000)}k`)
+    const q = t.analysis?.quality
+    if (q?.verdict === "suspect" && q.cutoffHz) {
+      // Made from something worse: it counts as what it really is, not what it claims.
+      score += estimatedKbps(q.cutoffHz) - 50
+      why.push(`${t.ext.toUpperCase()}, but sounds like ${likelySource(q.cutoffHz)}`)
+    } else {
+      if (lossless(t)) {
+        score += 1000
+        why.push(t.ext.toUpperCase())
+      } else if (t.bitrate) {
+        why.push(`${Math.round(t.bitrate / 1000)}k`)
+      }
+      score += Math.min(t.bitrate ?? 0, 3_000_000) / 1000
     }
-    score += Math.min(t.bitrate ?? 0, 3_000_000) / 1000
     if (longest && t.duration && t.duration < longest * 0.85) {
       score -= 800
       why.push(`shorter (${fmtTime(t.duration)} vs ${fmtTime(longest)})`)
