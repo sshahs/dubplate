@@ -12,9 +12,9 @@ import { idsFor } from "./core/ids"
 import { tagDiff, tagsFor, type TagExtras } from "./core/naming"
 import { ensureDir, followableSidecars, isInside, moveFile, removeCreatedDirs, removeEmptyDirs, sameFile } from "./fsops"
 import type { JobContext } from "./jobs"
-import { settingsForLibrary } from "./library-settings"
+import { placementLibraryId, settingsForLibrary } from "./library-settings"
 import { metaFor, proposedFilename, targetFolder } from "./placement"
-import { getLibrary, getTrack, insertOperation, listLibraries, listOperations, markOperationReverted, updateTrack } from "./repo"
+import { getLibrary, getTrack, insertOperation, libraryForPath, listLibraries, listOperations, markOperationReverted, updateTrack } from "./repo"
 import { readManagedTags, writeTags } from "./tagger"
 
 export { metaFor, proposedFilename } from "./placement"
@@ -28,6 +28,7 @@ export function extrasFor(t: Track, settings: Settings): TagExtras {
   }
   out.cover = artToEmbed(t, settings)?.hash ?? null
   if (settings.naming.writeIds) out.ids = idsFor(t.decision, metaFor(t))
+  if (settings.analysis.writeReplayGain) out.replayGain = t.analysis?.loudness ?? null
   return out
 }
 
@@ -41,18 +42,22 @@ export function buildPlan(tracks: Track[], settings: Settings): PlanItem[] {
   const libs = new Map(listLibraries().map((l) => [l.id, l]))
   const targets = new Map<string, number>()
   const items: PlanItem[] = tracks.map((t) => {
-    const s = settingsForLibrary(settings, t.libraryId)
     const lib = libs.get(t.libraryId)
+    // An inbox's tracks go to the library it feeds, into that library's layout.
+    const dest = libs.get(placementLibraryId(t.libraryId)) ?? lib
+    const inbox = !!dest && dest.id !== t.libraryId
+    const s = settingsForLibrary(settings, dest?.id ?? t.libraryId)
     const issues: string[] = []
     const meta = metaFor(t)
     const name = (s.naming.renameFiles && proposedFilename(t, settings)) || t.filename
     let dir = path.dirname(t.path)
     // Moving into folders on cut: the folder template decides the folder, inside the library.
-    if (s.organise.onCut && lib && meta) {
+    if (dest && meta && (inbox || s.organise.onCut)) {
+      if (inbox && !dest.exists) issues.push(`${dest.name}'s folder isn't there`)
       const folder = targetFolder(t, s)
-      if (folder !== null) dir = path.join(lib.path, ...folder.split("/").filter(Boolean))
+      if (folder !== null) dir = path.join(dest.path, ...folder.split("/").filter(Boolean))
       if (folder && folder.split("/")[0].toLowerCase() === s.duplicates.holdingFolder.toLowerCase()) issues.push("Would land in the folder for duplicates set aside")
-      if (!isInside(lib.path, dir)) issues.push("Would end up outside the library")
+      if (!isInside(dest.path, dir)) issues.push("Would end up outside the library")
     }
     const toPath = path.join(dir, name)
     const rename = toPath !== t.path
@@ -61,7 +66,8 @@ export function buildPlan(tracks: Track[], settings: Settings): PlanItem[] {
     if (!meta) issues.push("No approved artist/title yet")
     if (!fs.existsSync(t.path)) issues.push("File is missing on disk - rescan the library")
     if (rename && fs.existsSync(toPath) && !sameFile(t.path, toPath)) {
-      issues.push(dir === path.dirname(t.path) ? `"${name}" already exists in this folder` : `"${name}" already exists in ${relDirOf(lib, toPath) || "the library's top folder"}`)
+      const where = relDirOf(dest, toPath) || (inbox ? `${dest!.name}'s top folder` : "the library's top folder")
+      issues.push(dir === path.dirname(t.path) ? `"${name}" already exists in this folder` : `"${name}" already exists in ${inbox && relDirOf(dest, toPath) ? `${dest!.name}/${where}` : where}`)
     }
     if (rename) {
       const key = toPath.toLowerCase()
@@ -75,8 +81,9 @@ export function buildPlan(tracks: Track[], settings: Settings): PlanItem[] {
       fromName: t.filename,
       toName: name,
       fromDir: relDirOf(lib, t.path),
-      toDir: relDirOf(lib, toPath),
+      toDir: relDirOf(dest, toPath),
       rename,
+      ...(inbox && dest ? { toLibraryId: dest.id } : {}),
       tags,
       tagChanges,
       issues,
@@ -140,10 +147,10 @@ export class MoveTracker {
   }
 }
 
-export async function executePlan(items: PlanItem[], settings: Settings, opts: { dryRun: boolean }, ctx: JobContext): Promise<string> {
+export async function executePlan(items: PlanItem[], settings: Settings, opts: { dryRun: boolean; label?: string }, ctx: JobContext): Promise<string> {
   if (settings.safety.readOnly && !opts.dryRun) throw new Error("Read-only mode is on - switch it off in Settings to write to files")
   const batchId = randomUUID()
-  const label = "Cut"
+  const label = opts.label ?? "Cut"
   const runnable = items.filter((i) => !i.blocked)
   ctx.setTotal(runnable.length)
   const changed: number[] = []
@@ -186,7 +193,9 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
       updateTrack(track.id, {
         path: item.toPath,
         filename: path.basename(item.toPath),
-        relDir: relDirOf(getLibrary(track.libraryId), item.toPath),
+        relDir: relDirOf(getLibrary(item.toLibraryId ?? track.libraryId), item.toPath),
+        // Out of an inbox: the track now belongs to the library it went into.
+        ...(item.toLibraryId ? { libraryId: item.toLibraryId } : {}),
         size: after.size,
         mtimeMs: after.mtimeMs,
         tags: { ...track.tags, ...item.tags },
@@ -261,10 +270,13 @@ export async function rewind(opIds: number[] | null, batchId: string | null, ctx
           }
           // Folder moves keep the track's status; a rewound cut goes back to approved.
           const status = op.statusBefore ?? (op.kind === "move" || op.kind === "set-aside" ? t.status : "approved")
+          // A cut out of an inbox goes back to the inbox's library.
+          const home = libraryForPath(op.fromPath) ?? getLibrary(t.libraryId)
           updateTrack(t.id, {
             path: op.fromPath,
             filename: path.basename(op.fromPath),
-            relDir: relDirOf(getLibrary(t.libraryId), op.fromPath),
+            relDir: relDirOf(home, op.fromPath),
+            ...(home && home.id !== t.libraryId ? { libraryId: home.id } : {}),
             size: st.size,
             mtimeMs: st.mtimeMs,
             tags: restored,

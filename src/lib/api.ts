@@ -1,19 +1,28 @@
 import type {
   AiParse,
+  AiUsageReport,
   Alias,
+  AuthStatus,
   BackupFile,
   Correction,
+  Crate,
+  CrateFacets,
+  CrateRules,
+  DjFormat,
   DuplicateGroup,
   FinalMeta,
   HealthInfo,
+  HealthReport,
   HeuristicParse,
   Job,
   Library,
   LibrarySettings,
   MediaServerConfig,
+  MixSuggestion,
   Operation,
   OperationBatch,
   OrganisePreview,
+  PathMapping,
   PlanItem,
   ScraperDefinition,
   Settings,
@@ -54,6 +63,8 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   } catch {
     throw new ApiError(0, "Can't reach the Dubplate server - is it running?")
   }
+  // Signed out (or the password changed): the sign-in screen takes over.
+  if (res.status === 401 && !url.startsWith("/api/auth/")) window.dispatchEvent(new Event(SIGNED_OUT))
   const text = await res.text()
   let data: { error?: string } | null = null
   try {
@@ -67,6 +78,9 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   return data as T
 }
 
+/** Fired when the server says the session is gone. */
+export const SIGNED_OUT = "dubplate:signed-out"
+
 const get = <T,>(url: string) => request<T>("GET", url)
 const post = <T,>(url: string, body?: unknown) => request<T>("POST", url, body ?? {})
 const put = <T,>(url: string, body: unknown) => request<T>("PUT", url, body)
@@ -79,6 +93,9 @@ export interface TrackFilter {
   q?: string
   min?: number
   max?: number
+  /** a smart crate's tracks */
+  crate?: number
+  quality?: "suspect"
   sort?: "filename" | "confidence" | "status" | "updated" | "path" | "bpm" | "key"
   dir?: "asc" | "desc"
   limit?: number
@@ -92,6 +109,8 @@ export function filterToQuery(f: TrackFilter): string {
   if (f.q) p.set("q", f.q)
   if (f.min !== undefined) p.set("min", String(f.min))
   if (f.max !== undefined) p.set("max", String(f.max))
+  if (f.crate) p.set("crate", String(f.crate))
+  if (f.quality) p.set("quality", f.quality)
   if (f.sort) p.set("sort", f.sort)
   if (f.dir) p.set("dir", f.dir)
   if (f.limit) p.set("limit", String(f.limit))
@@ -107,6 +126,8 @@ function serverFilter(f: TrackFilter) {
     q: f.q,
     minConfidence: f.min,
     maxConfidence: f.max,
+    crateId: f.crate,
+    quality: f.quality,
   }
 }
 
@@ -160,15 +181,70 @@ export interface OrganiseRequest {
   sidecars?: boolean
 }
 
+export interface DjExportRequest {
+  format: DjFormat
+  /** playlist name, for a selection */
+  name?: string
+  selection?: Selection
+  /** export these crates, one playlist each */
+  crateIds?: number[]
+  pathMap?: PathMapping[]
+  traktorVolume?: string
+}
+
+export interface CollectionStatus {
+  username: string | null
+  count: number
+  syncedAt: string | null
+}
+
+/** POST, then save the reply as a file the browser downloads. */
+async function download(url: string, body: unknown): Promise<string> {
+  let res: Response
+  try {
+    res = await fetch(url, { method: "POST", headers: { "x-dubplate": "1", "content-type": "application/json" }, body: JSON.stringify(body) })
+  } catch {
+    throw new ApiError(0, "Can't reach the Dubplate server - is it running?")
+  }
+  if (!res.ok) {
+    if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT))
+    const j = (await res.json().catch(() => null)) as { error?: string } | null
+    throw new ApiError(res.status, j?.error ?? res.statusText)
+  }
+  const cd = res.headers.get("content-disposition") ?? ""
+  const star = cd.match(/filename\*=UTF-8''([^;]+)/i)
+  const plain = cd.match(/filename="([^"]+)"/i)
+  const filename = star ? decodeURIComponent(star[1]) : (plain?.[1] ?? "dubplate-export")
+  const blob = await res.blob()
+  const href = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = href
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(href), 10_000)
+  return filename
+}
+
 export interface RestoreResult {
   settings: boolean
   aliases: number
   corrections: number
   libraries: { added: number; updated: number; skipped: { path: string; reason: string }[] }
+  crates: number
 }
 
 export const api = {
+  authStatus: () => get<AuthStatus>("/api/auth/status"),
+  login: (password: string) => post<{ ok: true }>("/api/auth/login", { password }),
+  logout: () => post<{ ok: true }>("/api/auth/logout"),
+  logoutEverywhere: () => post<{ ok: true }>("/api/auth/logout-everywhere"),
+  setPassword: (current: string | undefined, next: string) => post<AuthStatus>("/api/auth/password", { current, next }),
+  removePassword: (current: string) => post<AuthStatus>("/api/auth/password/remove", { current }),
+
   health: () => get<HealthInfo>("/api/health"),
+  healthChecks: (fresh = false) => get<HealthReport>(`/api/health/checks${fresh ? "?fresh=1" : ""}`),
   stats: () => get<Stats>("/api/stats"),
 
   libraries: () => get<Library[]>("/api/libraries"),
@@ -196,6 +272,7 @@ export const api = {
     return ref ? `/api/tracks/${t.id}/art?which=${which}&size=${size}&h=${ref.hash.slice(0, 12)}` : null
   },
   rescoreOne: (id: number) => post<Track>(`/api/tracks/${id}/rescore`),
+  mixes: (id: number) => get<MixSuggestion[]>(`/api/tracks/${id}/mixes`),
   audioUrl: (id: number) => `/api/tracks/${id}/audio`,
 
   process: (s: Selection | null, opts: { interpret?: boolean; scour?: boolean; force?: boolean }) => post<Job>("/api/process", { ...(s ? sel(s) : {}), ...opts }),
@@ -213,6 +290,7 @@ export const api = {
   saveSettings: (patch: SettingsPatch) => put<PublicSettings>("/api/settings", patch),
 
   models: (provider: string) => get<{ models: string[]; error?: string }>(`/api/llm/models?provider=${encodeURIComponent(provider)}`),
+  aiUsage: () => get<AiUsageReport>("/api/llm/usage"),
   testLlm: (providerId: string) => post<{ ok: boolean; message: string; latencyMs: number }>("/api/llm/test", { providerId }),
   playground: (filename: string, ai: boolean) => post<{ heuristic: HeuristicParse; ai?: AiParse; error?: string }>("/api/playground", { filename, ai }),
 
@@ -220,6 +298,18 @@ export const api = {
   testSource: (id: string, artist: string, title: string) => post<{ candidates?: Candidate[]; error?: string; ms: number }>("/api/sources/test", { id, artist, title }),
   testScraper: (definition: ScraperDefinition, query: string) => post<{ candidates: Candidate[]; itemCount: number; error?: string }>("/api/scrapers/test", { definition, query }),
   clearCache: () => post<{ cleared: number }>("/api/cache/clear"),
+  collection: () => get<CollectionStatus>("/api/sources/discogs-collection"),
+  syncCollection: () => post<Job>("/api/sources/discogs-collection/sync"),
+
+  crates: () => get<Crate[]>("/api/crates"),
+  crate: (id: number) => get<Crate>(`/api/crates/${id}`),
+  crateFacets: (libraryId?: number) => get<CrateFacets>(`/api/crates/facets${libraryId ? `?libraryId=${libraryId}` : ""}`),
+  cratePreview: (rules: CrateRules) => post<{ items: TrackSummary[]; total: number }>("/api/crates/preview", { rules }),
+  createCrate: (name: string, rules: CrateRules) => post<Crate>("/api/crates", { name, rules }),
+  updateCrate: (id: number, body: { name?: string; rules?: CrateRules }) => patch<Crate>(`/api/crates/${id}`, body),
+  deleteCrate: (id: number) => del<{ ok: true }>(`/api/crates/${id}`),
+  exportDj: (req: DjExportRequest) =>
+    download("/api/export/dj", { format: req.format, name: req.name, crateIds: req.crateIds, pathMap: req.pathMap, traktorVolume: req.traktorVolume, ...(req.selection ? sel(req.selection) : {}) }),
 
   aliases: () => get<Alias[]>("/api/aliases"),
   addAlias: (alias: string, canonical: string) => post<Alias[]>("/api/aliases", { alias, canonical }),
@@ -234,7 +324,7 @@ export const api = {
   organise: (req: OrganiseRequest) => post<Job>("/api/organise", req),
 
   backupUrl: (secrets: boolean) => `/api/backup${secrets ? "?secrets=1" : ""}`,
-  restore: (backup: BackupFile, parts: { settings: boolean; learnings: boolean; libraries: boolean }) => post<RestoreResult>("/api/restore", { backup, parts }),
+  restore: (backup: BackupFile, parts: { settings: boolean; learnings: boolean; libraries: boolean; crates: boolean }) => post<RestoreResult>("/api/restore", { backup, parts }),
 
   testMediaServer: (server: MediaServerConfig) => post<{ ok: boolean; message: string }>("/api/integrations/media-server/test", { server }),
   testChat: (channel: "discord" | "telegram", integrations: Settings["integrations"]) =>

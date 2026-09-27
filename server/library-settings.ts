@@ -14,6 +14,9 @@ export function cleanLibrarySettings(input: unknown): LibrarySettings {
   if (typeof i.template === "string" && i.template.trim()) out.template = i.template.trim().slice(0, 200)
   if (typeof i.folderTemplate === "string" && i.folderTemplate.trim()) out.folderTemplate = i.folderTemplate.trim().slice(0, 200)
   if (typeof i.organiseOnCut === "boolean") out.organiseOnCut = i.organiseOnCut
+  if (i.handsOff === true) out.handsOff = true
+  const inbox = Number(i.inboxFor)
+  if (Number.isInteger(inbox) && inbox > 0) out.inboxFor = inbox
   return out
 }
 
@@ -54,4 +57,14 @@ export function forgetLibrarySettings() {
 /** Settings as they apply to a track in `libraryId`. */
 export function settingsForLibrary(settings: Settings, libraryId: number | null | undefined): Settings {
   return withLibrary(settings, librarySettings(libraryId))
+}
+
+/**
+ * The library a track's name and folder are worked out for: an inbox's tracks
+ * are headed for the library it feeds, so that library's templates apply.
+ */
+export function placementLibraryId(libraryId: number): number {
+  const target = librarySettings(libraryId).inboxFor
+  if (!target || target === libraryId) return libraryId
+  return getDb().prepare("SELECT 1 FROM libraries WHERE id = ?").get(target) ? target : libraryId
 }

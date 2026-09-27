@@ -18,7 +18,7 @@ import { AudioPlayer } from "@/components/audio-player"
 import { ConfidenceDial, StatusBadge } from "@/components/confidence"
 import { fromDraft, MetaEditor, toDraft, type MetaDraft } from "@/components/meta-editor"
 import { QueryError } from "@/components/query-error"
-import { ArtworkPanel, TempoKeyPanel } from "@/components/track-extras"
+import { ArtworkPanel, AudioQualityPanel, MixesPanel, TempoKeyPanel } from "@/components/track-extras"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -47,9 +47,12 @@ export function TrackDetail({
   trackId,
   onAdvance,
   onUndone,
+  onOpenTrack,
   compact = false,
 }: {
   trackId: number
+  /** show another track (from "mixes well with") */
+  onOpenTrack?: (id: number) => void
   onAdvance?: () => void
   /** after an approve / leave-as-is is undone, e.g. to bring this track back into view */
   onUndone?: () => void
@@ -166,6 +169,8 @@ export function TrackDetail({
       <div className={cn("grid gap-3", !compact && "sm:grid-cols-2")}>
         <ArtworkPanel track={track} embed={settings?.artwork.embed ?? true} replace={settings?.artwork.replaceExisting ?? false} />
         <TempoKeyPanel track={track} notation={settings?.analysis.keyNotation ?? "musical"} />
+        <AudioQualityPanel track={track} />
+        <MixesPanel track={track} notation={settings?.analysis.keyNotation ?? "musical"} onOpenTrack={onOpenTrack} />
       </div>
 
       {!!d?.warnings.length && (

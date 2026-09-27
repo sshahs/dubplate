@@ -39,6 +39,8 @@ const TAG_NAMES: Partial<Record<keyof ExistingTags, string>> = {
   mbReleaseId: "MusicBrainz IDs",
   mbArtistId: "MusicBrainz IDs",
   discogsReleaseId: "Discogs ID",
+  replayGainTrackGain: "ReplayGain",
+  replayGainTrackPeak: "ReplayGain",
 }
 
 export default function ExecutePage() {
@@ -46,6 +48,8 @@ export default function ExecutePage() {
   const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: api.settings })
   const { data: plan, isLoading: planLoading, error: planError, refetch: refetchPlan } = useQuery({ queryKey: ["tracks", "plan"], queryFn: () => api.plan() })
   const { data: batches } = useQuery({ queryKey: ["batches"], queryFn: api.batches })
+  const { data: libraries } = useQuery({ queryKey: ["libraries"], queryFn: api.libraries })
+  const libName = (id: number) => libraries?.find((l) => l.id === id)?.name ?? "another library"
   const [excluded, setExcluded] = useState<Set<number>>(new Set())
   // A cut or rewind in flight: lock the controls and show its progress.
   const writing = useActiveJobs().find((j) => j.kind === "execute" || j.kind === "rewind")
@@ -207,10 +211,13 @@ export default function ExecutePage() {
                           </div>
                         </TableCell>
                         <TableCell className="max-w-[20rem]">
-                          {p.toDir !== p.fromDir && (
-                            <div className="text-rasta-gold flex min-w-0 items-center gap-1 text-xs" title={p.toDir || "the library's top folder"}>
+                          {(p.toDir !== p.fromDir || p.toLibraryId) && (
+                            <div className="text-rasta-gold flex min-w-0 items-center gap-1 text-xs" title={p.toLibraryId ? `Into ${libName(p.toLibraryId)}: ${p.toDir || "its top folder"}` : p.toDir || "the library's top folder"}>
                               <HugeiconsIcon icon={Folder01Icon} strokeWidth={2} className="size-3 shrink-0" />
-                              <span className="truncate">{p.toDir || "top folder"}/</span>
+                              <span className="truncate">
+                                {p.toLibraryId && <span className="font-medium">{libName(p.toLibraryId)} › </span>}
+                                {p.toDir || "top folder"}/
+                              </span>
                             </div>
                           )}
                           <div className="truncate text-sm font-medium" title={p.toPath}>
@@ -224,7 +231,7 @@ export default function ExecutePage() {
                           ))}
                         </TableCell>
                         <TableCell className="text-muted-foreground hidden text-xs md:table-cell">
-                          {p.tagChanges.length ? p.tagChanges.map((c) => TAG_NAMES[c.field] ?? c.field).join(", ") : "–"}
+                          {p.tagChanges.length ? [...new Set(p.tagChanges.map((c) => TAG_NAMES[c.field] ?? c.field))].join(", ") : "–"}
                         </TableCell>
                         <TableCell className="hidden md:table-cell">
                           <ConfidenceMeter value={p.confidence} />

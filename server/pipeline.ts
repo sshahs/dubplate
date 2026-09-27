@@ -2,7 +2,9 @@
 
 import type { Settings, Track, TrackStatus } from "../shared/types"
 import { interpretTrack } from "./ai/interpreter"
-import { analyseTrack } from "./analysis"
+import { overBudget } from "./ai/usage"
+import { analyseTrack, needsAnalysis } from "./analysis"
+import { handsOff } from "./autopilot"
 import { findArtwork } from "./art"
 import { scoreTrack } from "./core/confidence"
 import { parseFilename } from "./core/filename-parser"
@@ -79,6 +81,10 @@ export async function processTracks(ids: number[], settings: Settings, opts: Pro
       track = { ...track, heuristic }
       updateTrack(id, { heuristic })
 
+      if (opts.interpret && !aiDisabled && (opts.force || !track.ai) && overBudget(settings)) {
+        aiDisabled = true
+        ctx.log("warn", `This month's AI budget (${settings.llm.currency}${settings.llm.monthlyBudget}) is used up - carrying on with the rule-based parser`)
+      }
       if (opts.interpret && !aiDisabled && (opts.force || !track.ai)) {
         try {
           const ai = await interpretTrack(track, settings, { corrections, aliases, signal: ctx.signal })
@@ -132,6 +138,11 @@ export async function processTracks(ids: number[], settings: Settings, opts: Pro
     const review = c.review + c.conflict
     ctx.report({ identified: changed.length, matched: c.matched, approved: c.approved, review, unmatched: c.unmatched })
     ctx.message([c.matched && `${c.matched} matched`, c.approved && `${c.approved} approved`, review && `${review} to review`, c.unmatched && `${c.unmatched} unmatched`].filter(Boolean).join(" · "))
+    // Hands-off libraries: the sure matches are cut straight away.
+    if (!ctx.signal.aborted) {
+      const cut = handsOff(changed, settings, ctx)
+      if (cut.length) ctx.log("info", `Hands-off: ${cut.length} sure match${cut.length === 1 ? "" : "es"} approved${settings.safety.readOnly ? "" : " and queued to cut"}`)
+    }
   }
 }
 
@@ -146,7 +157,7 @@ async function extras(track: Track, settings: Settings, opts: ProcessOptions, ct
       if (!ctx.signal.aborted) ctx.log("warn", `Artwork for ${track.filename}: ${err instanceof Error ? err.message : err}`)
     }
   }
-  if (settings.analysis.onProcess && (!track.analysis || (opts.force && track.analysis.error))) {
+  if (settings.analysis.onProcess && needsAnalysis(track, settings, opts.force)) {
     try {
       await analyseTrack(track, settings)
     } catch (err) {

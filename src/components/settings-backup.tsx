@@ -31,7 +31,7 @@ function readBackup(file: File): Promise<BackupFile> {
 export function BackupSettings({ onRestored }: { onRestored: () => void }) {
   const [secrets, setSecrets] = useState(false)
   const [backup, setBackup] = useState<BackupFile | null>(null)
-  const [parts, setParts] = useState({ settings: true, learnings: true, libraries: true })
+  const [parts, setParts] = useState({ settings: true, learnings: true, libraries: true, crates: true })
   const input = useRef<HTMLInputElement>(null)
   const restore = useMutation({
     mutationFn: () => api.restore(backup!, parts),
@@ -41,6 +41,7 @@ export function BackupSettings({ onRestored }: { onRestored: () => void }) {
         r.aliases && plural(r.aliases, "alias", "aliases"),
         r.corrections && plural(r.corrections, "new correction"),
         (r.libraries.added || r.libraries.updated) && `${plural(r.libraries.added + r.libraries.updated, "library", "libraries")}`,
+        r.crates && plural(r.crates, "crate"),
       ].filter(Boolean)
       toast.success(`Restored ${bits.join(", ") || "nothing new"}`, {
         description: r.libraries.skipped.length ? `Skipped: ${r.libraries.skipped.map((s) => `${s.path} (${s.reason})`).join("; ")}` : undefined,
@@ -58,7 +59,7 @@ export function BackupSettings({ onRestored }: { onRestored: () => void }) {
       <Card>
         <CardHeader>
           <CardTitle>Back up</CardTitle>
-          <CardDescription>One file with your settings, what Dubplate has learned (aliases and corrections) and your libraries. Handy before moving to a new machine.</CardDescription>
+          <CardDescription>One file with your settings, what Dubplate has learned (aliases and corrections), your libraries and your crates. Handy before moving to a new machine.</CardDescription>
         </CardHeader>
         <CardContent>
           <SettingRows>
@@ -77,7 +78,7 @@ export function BackupSettings({ onRestored }: { onRestored: () => void }) {
       <Card>
         <CardHeader>
           <CardTitle>Restore</CardTitle>
-          <CardDescription>Settings are replaced; aliases, corrections and libraries are added to what's here. Keys the backup doesn't have are kept.</CardDescription>
+          <CardDescription>Settings are replaced; aliases, corrections, libraries and crates are added to what's here. Keys the backup doesn't have are kept.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <input
@@ -110,6 +111,7 @@ export function BackupSettings({ onRestored }: { onRestored: () => void }) {
                   ["settings", "Settings", "every setting, replacing the current ones"],
                   ["learnings", "What it's learned", `${plural(backup.aliases.length, "alias", "aliases")} and ${plural(backup.corrections.length, "correction")}`],
                   ["libraries", "Libraries", backup.libraries.map((l) => l.name).join(", ") || "none"],
+                  ...(backup.crates?.length ? ([["crates", "Crates", `${backup.crates.map((c) => c.name).join(", ")} (ones with a name already here are left alone)`]] as const) : []),
                 ] as const
               ).map(([key, label, detail]) => (
                 <label key={key} className="flex items-start gap-3 text-sm">
@@ -130,7 +132,7 @@ export function BackupSettings({ onRestored }: { onRestored: () => void }) {
                 <Button variant="ghost" onClick={() => setBackup(null)}>
                   Cancel
                 </Button>
-                <Button onClick={() => restore.mutate()} disabled={restore.isPending || (!parts.settings && !parts.learnings && !parts.libraries)}>
+                <Button onClick={() => restore.mutate()} disabled={restore.isPending || (!parts.settings && !parts.learnings && !parts.libraries && !(parts.crates && backup.crates?.length))}>
                   {restore.isPending && <Spinner data-icon="inline-start" />}
                   Restore
                 </Button>

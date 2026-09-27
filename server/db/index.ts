@@ -167,6 +167,42 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE operations ADD COLUMN batch_label TEXT;
   ALTER TABLE tracks ADD COLUMN aside_json TEXT;
   `,
+  // 4: smart crates, what the AI costs, and the releases in your Discogs collection.
+  `
+  CREATE TABLE crates (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    rules_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE ai_usage (
+    id INTEGER PRIMARY KEY,
+    at TEXT NOT NULL DEFAULT (datetime('now')),
+    provider_id TEXT NOT NULL,
+    model TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    job_id TEXT
+  );
+  CREATE INDEX idx_ai_usage_at ON ai_usage(at);
+  CREATE INDEX idx_ai_usage_job ON ai_usage(job_id);
+
+  CREATE TABLE discogs_collection (
+    release_id INTEGER PRIMARY KEY,
+    artist TEXT NOT NULL,
+    -- every credited artist, normalised, as "|name|other name|" for lookups
+    artists_key TEXT NOT NULL,
+    title TEXT NOT NULL,
+    title_key TEXT NOT NULL,
+    year INTEGER,
+    label TEXT,
+    catno TEXT,
+    format TEXT,
+    added_at TEXT
+  );
+  `,
 ]
 
 export type Db = DatabaseSync

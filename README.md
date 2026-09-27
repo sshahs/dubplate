@@ -166,6 +166,7 @@ The **Evidence** tab shows every factor behind a score:
 | Deezer | – | Includes durations |
 | Spotify | ID + secret | Client-credentials flow |
 | Last.fm | key | Crowd-sourced, so weighted lower |
+| Your Discogs collection | token | The records you own. **Sources → Sync** pulls your collection down; a track that matches one of your releases counts ×1.2. Ideal for vinyl rips. |
 
 **Underground & archives**
 
@@ -304,6 +305,7 @@ Pick one with `DUBPLATE_TAG` in `.env`.
   ```
 
 - 🌐 If you browse to it by a LAN name or IP (e.g. a NAS), add that name or IP to `DUBPLATE_ALLOWED_HOSTS`.
+- 🔑 Reachable by others on your network? Set a password in **Settings → Sign-in & safety**, or with `DUBPLATE_PASSWORD`.
 - ❤️ A built-in healthcheck reports the container as healthy once the server is up.
 
 <details>
@@ -345,6 +347,7 @@ secrets, and keys entered in the UI take precedence.
 | `DUBPLATE_HOST` | `127.0.0.1` | `0.0.0.0` in Docker |
 | `DUBPLATE_DATA_DIR` | `~/.dubplate` | SQLite database + response cache |
 | `DUBPLATE_ALLOWED_HOSTS` | – | Extra `Host` names allowed (DNS-rebinding guard); `*` disables the check |
+| `DUBPLATE_PASSWORD` | – | Asks for this password in every browser. Set here, it can't be changed or removed in the app. |
 | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | `http://localhost:11434`, `qwen3:8b` | |
 | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OLLAMA_API_KEY`, `COMMANDCODE_API_KEY`, `OPENAI_COMPATIBLE_API_KEY` | – | |
 | `CMD_ZDR` | – | `1` or `true` forces Command Code's Zero Data Retention on (the Settings switch is locked) |
@@ -472,13 +475,139 @@ a **Test** button.
 </details>
 
 <details>
+<summary><b>Password</b></summary>
+
+With nothing set, anyone who can reach Dubplate can use it, which is fine
+while it only listens on your own computer (the default). On a server, a NAS
+or your home network, set one in **Settings → Sign-in & safety**, or with
+`DUBPLATE_PASSWORD`.
+
+- Every browser and phone signs in once and stays signed in for 30 days.
+- Changing the password signs everyone else out; **Sign out others** does
+  the same without changing it.
+- Wrong guesses are slowed down: every fifth locks sign-in for a minute,
+  doubling each time.
+- The password is stored as a scrypt hash, and it's never put in backups.
+- Put it behind HTTPS (a reverse proxy) if it's reachable from the internet.
+
+</details>
+
+<details>
+<summary><b>DJ software</b></summary>
+
+Export a selection in **Tracks** (**For DJ software…**) or crates in
+**Crates** as:
+
+| Software | File | How to open it |
+| --- | --- | --- |
+| Rekordbox | XML | Preferences → Advanced → Database → rekordbox xml, then look under "rekordbox xml" |
+| Traktor | NML | Right-click Playlists → Import Playlist |
+| Serato | `.crate` | Put it in `_Serato_/Subcrates` on the drive the music is on, then restart Serato |
+| Anything else | M3U8 | VirtualDJ, Engine DJ, djay, Mixxx and most players |
+
+Names, BPM and key go along where the format takes them. Rekordbox and Traktor
+exports can hold several crates, one playlist each.
+
+If the DJ software sees the files somewhere else (Dubplate in Docker, or a
+laptop reading the music over the network), add the folders under
+**Settings → DJ software**: `/music` → `D:\Music` or `/Volumes/Music`. The
+first matching folder is rewritten. The export dialog can change them for one
+export, or save them as the default.
+
+</details>
+
+<details>
+<summary><b>Audio quality & loudness</b></summary>
+
+While it listens for BPM and key, Dubplate also checks two more things
+(both can be switched off in **Settings → Artwork & audio**):
+
+- 🕵️ **Fake quality**: a lossy encode cuts off the treble at a frequency that
+  gives its real bitrate away (about 16 kHz for 128 kbps, 19-20 kHz for
+  320 kbps). A "320" or a FLAC with the treble of a 128 is flagged as
+  *sounds re-encoded*, with its likely real bitrate, in the track's details
+  and by the **Sounds re-encoded** filter in Tracks. Hi-res files made from CD-quality
+  audio are flagged too. **Duplicates** ranks a flagged copy by what it sounds
+  like, not what it claims to be.
+- 🔊 **Loudness**: integrated loudness (EBU R128, in LUFS) and peak level.
+  When cutting, Dubplate writes **ReplayGain** track gain and peak
+  (`REPLAYGAIN_TRACK_GAIN` / `_PEAK`, or the ID3 and MP4 equivalents), so
+  players can even out the volume. The reference is -18 LUFS.
+
+Very quiet or very short files, and tracks with lots of genuine high-frequency
+roll-off (some dub and old recordings), can be judged wrongly, so a flag is a
+hint to listen, never an action on its own.
+
+</details>
+
+<details>
+<summary><b>Hands-off & inbox folders</b></summary>
+
+**Hands-off** (Libraries → Customise): tracks that come in to that library
+and are identified with at least the confidence you set (95 by default, in
+**Settings → Automation**) by the sources agreeing - not by the AI alone -
+are approved and cut straight away, with no stop in Review. Everything else
+waits for you as usual. In read-only mode they're approved but nothing is
+written. Every hands-off cut is a normal batch, so **Rewind** puts it back.
+
+**Inbox folders** (Libraries → Customise): make a folder like `Downloads`
+an inbox for your main library. Tracks are identified
+there, and cutting moves them into the main library using its filename and
+folder templates. Pair it with watching and hands-off for a drop folder that
+files itself. Rewind moves them back to the inbox.
+
+</details>
+
+<details>
+<summary><b>Smart crates & mixing</b></summary>
+
+**Crates** are saved filters that keep themselves up to date: genres,
+artists, labels, a BPM range (with half and double time if you like), keys,
+years, one library, or "mixes with" a key. The editor shows the matching
+tracks as you go. Open a crate in Tracks, or export one or all of them for
+DJ software.
+
+In a track's details, **Mixes well with** lists tracks in the same or a
+compatible key (Camelot: the same number, one step either side, the relative
+major or minor, or +2 for an energy lift) within 6% of the BPM, counting half
+and double time. Click one to open it.
+
+</details>
+
+<details>
+<summary><b>AI usage & budget</b></summary>
+
+Every AI call's tokens are counted. **Settings → AI interpreter** shows this month's
+tokens, an estimated cost, a bar per day for the last 30 days, a breakdown by
+provider and model, and what each recent job used. Set a price per million
+input and output tokens on each provider for the cost (a local Ollama is
+free). With a **monthly budget**, once the estimate reaches it the AI is
+skipped and names are read by the rule-based parser until the 1st.
+
+</details>
+
+<details>
+<summary><b>Health</b></summary>
+
+**Health** checks everything Dubplate depends on in one go: its data folder
+and disk space, failed jobs, `fpcalc`, whether a password is needed, each
+library (folder there, readable, writable if you've switched off read-only),
+the AI provider and model, whether the sources can be reached and have their
+keys, and the media servers and chats. Each problem says how to fix it and
+links to the right setting. `/api/health` stays open for Docker's healthcheck.
+
+</details>
+
+<details>
 <summary><b>Backup & restore</b></summary>
 
 **Settings → Backup & restore** downloads one JSON file with your settings,
-aliases, corrections and libraries (with their own settings). API keys and
-tokens are left out unless you ask for them. Restoring replaces the settings
-(keeping any keys the file doesn't carry), merges aliases and corrections in,
-and adds the libraries whose folders exist on the new machine.
+aliases, corrections, libraries (with their own settings) and smart crates.
+API keys and tokens are left out unless you ask for them, and the password
+never goes in the file. Restoring replaces the settings (keeping any keys the
+file doesn't carry), merges aliases and corrections in, adds the libraries
+whose folders exist on the new machine (relinking inbox folders), and adds
+crates whose names aren't taken.
 
 </details>
 
@@ -492,6 +621,8 @@ and adds the libraries whose folders exist on the new machine.
 - ⏪ Every rename, move and tag write is logged with the old name, folder and tag values (and any cover it replaced), so **Rewind** restores them all.
 - ↩️ Review decisions and bulk edits come with **Undo** for a few moments afterwards.
 - 🏠 The server binds to localhost, rejects unknown `Host` headers (DNS rebinding) and needs an `X-Dubplate` header on every write request (CSRF).
+- 🔑 An optional password keeps everyone else out when it's on a server or your network.
+- 🤖 Hands-off only cuts tracks the sources agree on, never on the AI's word alone, and every cut can be rewound.
 
 ## 🎁 Extra riddims
 
@@ -506,7 +637,19 @@ and adds the libraries whose folders exist on the new machine.
 - 🎚️ **Per-library settings**: a library can have its own genres, filename template and folder layout.
 - 🏷️ **Catalogue IDs**: MusicBrainz and Discogs IDs written to tags, so media servers and other taggers recognise tracks.
 - 📺 **Media servers**: Plex, Jellyfin/Emby and Navidrome rescan after every change.
-- 💾 **Backup & restore**: settings, learnings and libraries in one file.
+- 💾 **Backup & restore**: settings, learnings, libraries and crates in one file.
+- 🔑 **Password**: one password for the whole app, with 30-day sign-ins and sign out everywhere.
+- 🎛️ **DJ software**: export tracks or crates to Rekordbox, Traktor, Serato or M3U, with folder mapping for another computer.
+- 🕵️ **Fake-quality check**: spots "320s" and FLACs made from low-bitrate files by where the treble stops.
+- 🔊 **Loudness & ReplayGain**: EBU R128 loudness measured, ReplayGain written when cutting.
+- 🤖 **Hands-off mode**: sure matches in chosen libraries are cut without a stop in Review.
+- 📥 **Inbox folders**: a drop folder whose tracks are filed into your main library when cut.
+- 📦 **Smart crates**: saved filters by genre, BPM, key, year, label and more.
+- 🎚️ **Mixing helper**: tracks in a compatible key and tempo, from any track's details.
+- 💿 **Discogs collection**: the records you own count extra when identifying.
+- 💸 **AI usage & cost**: tokens and estimated spend per day, provider and job, with a monthly budget.
+- 🩺 **Health page**: every dependency checked, with a fix for each problem.
+- 📲 **Install it on a phone**: add Dubplate to the home screen from the browser (needs HTTPS, or localhost) and it opens like an app.
 - 📱 **Review on a phone**: swipe right to approve, left to leave as-is; **Approve all** clears a queue with Undo.
 - 🎧 **Audio preview** in the review screen, with streaming and seeking.
 - 👯 **Duplicates**: identical audio by fingerprint, plus different files that would get the same name. Keep the best copy and set the rest aside, never deleted.
@@ -531,7 +674,7 @@ in the dance and in Dubplate:
 | **Riddim** | The instrumental a tune is voiced on | Picked out by the AI (`Sleng Teng`, `Diwali`…) |
 | **Clash** | Sound systems going head to head | `A vs B` readings, joined with ` vs ` |
 | **Pull up / Rewind** | Stopping the tune to run it back from the top | **Rewind** puts a batch back exactly as it was |
-| **Crates** | A selector's record boxes | Your libraries |
+| **Crates** | A selector's record boxes | Smart crates: saved filters by genre, BPM, key and more, ready to export to DJ software |
 | **Big up** | Respect, a shout-out | What the success toasts say |
 
 ## 🔧 Development

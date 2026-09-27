@@ -1,6 +1,6 @@
 // Turns approved metadata into a filename and a set of tags.
 
-import type { Decision, ExistingTags, ExternalIds, FinalMeta, Settings } from "../../shared/types"
+import type { Decision, ExistingTags, ExternalIds, FinalMeta, LoudnessMeasure, Settings } from "../../shared/types"
 import { collapseSpaces } from "./normalize"
 
 type Naming = Settings["naming"]
@@ -91,6 +91,8 @@ export interface TagExtras {
   cover?: string | null
   /** MusicBrainz / Discogs IDs to write */
   ids?: ExternalIds
+  /** measured loudness, written as ReplayGain */
+  replayGain?: LoudnessMeasure | null
 }
 
 /**
@@ -115,6 +117,16 @@ export function tagsFor(meta: FinalMeta, current: ExistingTags, naming: Naming, 
   if (ids.mbReleaseId && ids.mbReleaseId !== current.mbReleaseId) out.mbReleaseId = ids.mbReleaseId
   if (ids.mbArtistIds?.[0] && ids.mbArtistIds[0] !== current.mbArtistId) out.mbArtistId = ids.mbArtistIds[0]
   if (ids.discogsReleaseId && ids.discogsReleaseId !== current.discogsReleaseId) out.discogsReleaseId = ids.discogsReleaseId
+  const rg = extras.replayGain
+  if (rg && Number.isFinite(rg.gain) && Number.isFinite(rg.peak)) {
+    const gain = Math.round(rg.gain * 100) / 100
+    const peak = Math.round(rg.peak * 1e6) / 1e6
+    // Already there to the precision taggers write: leave the file alone.
+    if (Math.abs(gain - (current.replayGainTrackGain ?? Infinity)) >= 0.01 || Math.abs(peak - (current.replayGainTrackPeak ?? Infinity)) >= 1e-5) {
+      out.replayGainTrackGain = gain
+      out.replayGainTrackPeak = peak
+    }
+  }
   return out
 }
 

@@ -63,7 +63,7 @@ export const musicbrainz: SourceAdapter = {
 interface DiscogsSearch {
   results?: { id: number; type: string; title: string; year?: string; label?: string[]; genre?: string[]; style?: string[]; uri?: string }[]
 }
-interface DiscogsRelease {
+export interface DiscogsRelease {
   id: number
   title: string
   year?: number
@@ -102,33 +102,44 @@ export const discogs: SourceAdapter = {
     const out: Candidate[] = []
     // The search only returns releases; open the top two to find the actual track.
     for (const r of (found?.results ?? []).slice(0, 2)) {
-      const rel = await httpJson<DiscogsRelease>(`https://api.discogs.com/releases/${r.id}`, { headers, signal, ttlMs: 30 * 86400_000 })
-      if (!rel?.tracklist?.length) continue
-      const best = rel.tracklist
-        .filter((t) => (t.type_ ?? "track") === "track")
-        .map((t) => ({ t, sim: titleSimilarity(t.title, q.title) }))
-        .sort((a, b) => b.sim - a.sim)[0]
-      if (!best || best.sim < 0.5) continue
-      const credits = best.t.artists?.length ? best.t.artists : (rel.artists ?? [])
-      out.push({
-        source: "discogs",
-        sourceLabel: "Discogs",
-        artist: joinDiscogsArtists(credits),
-        artists: credits.map((a) => cleanArtistName(a.name)),
-        title: best.t.title,
-        album: rel.title,
-        year: rel.year || yearOf(r.year),
-        label: rel.labels?.[0]?.name,
-        genre: [...(rel.genres ?? []), ...(rel.styles ?? [])].join(", ") || undefined,
-        duration: discogsDuration(best.t.duration),
-        url: rel.uri ?? `https://www.discogs.com/release/${rel.id}`,
-        externalId: String(rel.id),
-        ids: { discogsReleaseId: String(rel.id) },
-        artwork: (rel.images?.find((i) => i.type === "primary") ?? rel.images?.[0])?.uri || undefined,
-      })
+      const rel = await discogsRelease(r.id, cfg.apiKey!, signal)
+      const hit = rel && releaseCandidate(rel, q.title, { source: "discogs", label: "Discogs", year: yearOf(r.year) })
+      if (hit) out.push(hit)
     }
     return out
   },
+}
+
+/** A release in full (cached for a month: releases rarely change). */
+export function discogsRelease(id: number, token: string, signal?: AbortSignal) {
+  return httpJson<DiscogsRelease>(`https://api.discogs.com/releases/${id}`, { headers: { authorization: `Discogs token=${token}` }, signal, ttlMs: 30 * 86400_000 })
+}
+
+/** The release's track that best matches `title`, as a candidate (null when none is close enough). */
+export function releaseCandidate(rel: DiscogsRelease, title: string, opts: { source: Candidate["source"]; label: string; year?: number; minSimilarity?: number }): Candidate | null {
+  if (!rel.tracklist?.length) return null
+  const best = rel.tracklist
+    .filter((t) => (t.type_ ?? "track") === "track")
+    .map((t) => ({ t, sim: titleSimilarity(t.title, title) }))
+    .sort((a, b) => b.sim - a.sim)[0]
+  if (!best || best.sim < (opts.minSimilarity ?? 0.5)) return null
+  const credits = best.t.artists?.length ? best.t.artists : (rel.artists ?? [])
+  return {
+    source: opts.source,
+    sourceLabel: opts.label,
+    artist: joinDiscogsArtists(credits),
+    artists: credits.map((a) => cleanArtistName(a.name)),
+    title: best.t.title,
+    album: rel.title,
+    year: rel.year || opts.year,
+    label: rel.labels?.[0]?.name,
+    genre: [...(rel.genres ?? []), ...(rel.styles ?? [])].join(", ") || undefined,
+    duration: discogsDuration(best.t.duration),
+    url: rel.uri ?? `https://www.discogs.com/release/${rel.id}`,
+    externalId: String(rel.id),
+    ids: { discogsReleaseId: String(rel.id) },
+    artwork: (rel.images?.find((i) => i.type === "primary") ?? rel.images?.[0])?.uri || undefined,
+  }
 }
 
 // ---------- Last.fm ----------

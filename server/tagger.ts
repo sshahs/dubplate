@@ -114,6 +114,8 @@ export function readManagedTags(file: string): ExistingTags {
       mbReleaseId: t.musicBrainzReleaseId || undefined,
       mbArtistId: t.musicBrainzArtistId || undefined,
       discogsReleaseId: readCustom(f, DISCOGS_RELEASE),
+      replayGainTrackGain: Number.isFinite(t.replayGainTrackGain) ? t.replayGainTrackGain : undefined,
+      replayGainTrackPeak: Number.isFinite(t.replayGainTrackPeak) ? t.replayGainTrackPeak : undefined,
     }
   } finally {
     f.dispose()
@@ -147,6 +149,10 @@ export function writeTags(file: string, changes: Partial<Record<keyof ExistingTa
     if ("mbReleaseId" in changes) t.musicBrainzReleaseId = str(changes.mbReleaseId)
     if ("mbArtistId" in changes) t.musicBrainzArtistId = str(changes.mbArtistId)
     if ("discogsReleaseId" in changes) writeCustom(f, DISCOGS_RELEASE, str(changes.discogsReleaseId))
+    // NaN clears a ReplayGain field.
+    const num = (v: unknown) => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? NaN : Number(v))
+    if ("replayGainTrackGain" in changes) t.replayGainTrackGain = num(changes.replayGainTrackGain)
+    if ("replayGainTrackPeak" in changes) t.replayGainTrackPeak = num(changes.replayGainTrackPeak)
     if ("cover" in changes) {
       // Only the front cover is Dubplate's; back covers, artist photos etc. stay put.
       const others = (t.pictures ?? []).filter((p) => p !== frontCover(t.pictures ?? []))

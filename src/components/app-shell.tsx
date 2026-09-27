@@ -7,13 +7,16 @@ import {
   DatabaseIcon,
   FolderLibraryIcon,
   FolderTreeIcon,
+  HealthIcon,
   Moon02Icon,
   MusicNote03Icon,
   Scissor01Icon,
+  Logout03Icon,
   Search01Icon,
   Settings02Icon,
   SquareLock02Icon,
   Sun03Icon,
+  Vynil02Icon,
 } from "@hugeicons/core-free-icons"
 import { useQuery } from "@tanstack/react-query"
 import { useState, ViewTransition, type MouseEvent, type ReactNode } from "react"
@@ -46,6 +49,7 @@ import {
 } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { api } from "@/lib/api"
+import { useAuth } from "@/lib/auth"
 import { useLive } from "@/lib/events"
 import { cn } from "@/lib/utils"
 
@@ -56,9 +60,11 @@ export const NAV = [
   { to: "/review", label: "Review", icon: CheckListIcon, group: "Selector", badge: "review" as const },
   { to: "/execute", label: "Cut & Tag", icon: Scissor01Icon, group: "Selector", badge: "approved" as const },
   { to: "/organise", label: "Organise", icon: FolderTreeIcon, group: "Selector" },
+  { to: "/crates", label: "Crates", icon: Vynil02Icon, group: "Selector" },
   { to: "/untangler", label: "Untangler", icon: AiMagicIcon, group: "Tools" },
   { to: "/sources", label: "Sources", icon: DatabaseIcon, group: "Tools" },
   { to: "/duplicates", label: "Duplicates", icon: Copy01Icon, group: "Tools" },
+  { to: "/health", label: "Health", icon: HealthIcon, group: "Tools" },
   { to: "/settings", label: "Settings", icon: Settings02Icon, group: "Tools" },
 ]
 
@@ -223,6 +229,19 @@ function ReadOnlyPill() {
   )
 }
 
+function SignOutButton() {
+  const { status, signedOut } = useAuth()
+  if (!status?.enabled) return null
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Sign out" onClick={() => void api.logout().finally(signedOut)} />}>
+        <HugeiconsIcon icon={Logout03Icon} strokeWidth={2} />
+      </TooltipTrigger>
+      <TooltipContent>Sign out</TooltipContent>
+    </Tooltip>
+  )
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false)
   return (
@@ -245,6 +264,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <JobDock />
             <ReadOnlyPill />
             <ThemeToggle />
+            <SignOutButton />
           </div>
         </header>
         <ConnectionBanner />

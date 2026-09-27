@@ -1,6 +1,7 @@
 // In-process job queue + event bus. Jobs run one at a time so rate limits
 // and file operations never race each other; progress streams over SSE.
 
+import { AsyncLocalStorage } from "node:async_hooks"
 import { randomUUID } from "node:crypto"
 import type { Job, JobKind, ServerEvent } from "../shared/types"
 import { getDb } from "./db"
@@ -77,6 +78,12 @@ export function onJobFinished(l: FinishListener) {
 
 const queue: QueuedJob[] = []
 let running: QueuedJob | null = null
+
+/** Which job the current code is running for (AI usage is booked against it). */
+const jobScope = new AsyncLocalStorage<string>()
+export function currentJobId(): string | null {
+  return jobScope.getStore() ?? null
+}
 
 function rowToJob(r: Record<string, unknown>): Job {
   return {
@@ -174,7 +181,7 @@ async function pump() {
     },
   }
   try {
-    await fn(ctx)
+    await jobScope.run(job.id, () => fn(ctx))
     job.status = controller.signal.aborted ? "cancelled" : "done"
   } catch (err) {
     job.status = controller.signal.aborted ? "cancelled" : "failed"

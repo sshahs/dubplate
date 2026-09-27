@@ -51,6 +51,10 @@ export interface ExistingTags {
   mbArtistId?: string
   /** Discogs release ID */
   discogsReleaseId?: string
+  /** ReplayGain 2 track gain in dB (the -18 LUFS reference) */
+  replayGainTrackGain?: number
+  /** ReplayGain track peak, as a linear sample value (1 = full scale) */
+  replayGainTrackPeak?: number
 }
 
 /** Catalogue identifiers a source can pin a track to. */
@@ -76,6 +80,33 @@ export interface ArtRef {
   url?: string
 }
 
+/** How loud a track is (EBU R128 / ITU BS.1770) and the gain that evens it out. */
+export interface LoudnessMeasure {
+  /** integrated loudness, LUFS */
+  lufs: number
+  /** sample peak, linear (1 = full scale) */
+  peak: number
+  /** ReplayGain 2 track gain in dB: -18 LUFS minus the loudness */
+  gain: number
+}
+
+/**
+ * Where the high frequencies stop, and whether that fits the file's format. An
+ * encoder's low-pass leaves a sharp "brick wall"; a lossless or 320 kbps file
+ * with one well below 20 kHz was probably made from a lower-quality file.
+ */
+export interface QualityCheck {
+  /** where the high end stops, Hz; null when there's content right to the top of the band */
+  cutoffHz: number | null
+  /** the drop is a brick wall (an encoder) rather than a gentle roll-off (the recording) */
+  sharp: boolean
+  /** "ok": fits the format; "suspect": sounds made from a lower-quality file; "unknown": can't tell */
+  verdict: "ok" | "suspect" | "unknown"
+  /** what the audio really is, when it doesn't fit, e.g. "a ~128 kbps MP3" */
+  likely?: string
+  detail: string
+}
+
 /** What listening to the audio said about tempo and key. */
 export interface TrackAnalysis {
   bpm: number | null
@@ -89,6 +120,9 @@ export interface TrackAnalysis {
   seconds: number
   analyzedAt: string
   error?: string
+  /** measured over the whole file (missing on tracks analysed before loudness existed) */
+  loudness?: LoudnessMeasure | null
+  quality?: QualityCheck | null
 }
 
 /** A reading of "who and what" a file is, from any parser. */
@@ -136,6 +170,7 @@ export type SourceId =
   | "mixcloud"
   | "youtube"
   | "acoustid"
+  | "discogs-collection"
   | `scraper:${string}`
 
 export interface Candidate {
@@ -292,9 +327,13 @@ export interface LibrarySettings {
   folderTemplate?: string
   /** move files into folders when cutting */
   organiseOnCut?: boolean
+  /** hands-off: confident matches are approved and cut (and moved into place) without asking */
+  handsOff?: boolean
+  /** an inbox: cut tracks move into this library, into its folder layout */
+  inboxFor?: number
 }
 
-export type JobKind = "scan" | "interpret" | "scour" | "score" | "process" | "execute" | "rewind" | "analyze" | "artwork" | "organise" | "duplicates"
+export type JobKind = "scan" | "interpret" | "scour" | "score" | "process" | "execute" | "rewind" | "analyze" | "artwork" | "organise" | "duplicates" | "sync"
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled"
 
 export interface Job {
@@ -363,6 +402,8 @@ export interface PlanItem {
   toDir: string
   /** the file changes name or folder */
   rename: boolean
+  /** set when the file moves into another library (an inbox feeding it) */
+  toLibraryId?: number
   tags: ExistingTags
   tagChanges: { field: keyof ExistingTags; before: unknown; after: unknown }[]
   issues: string[]
@@ -394,6 +435,10 @@ export interface LlmProviderConfig {
   enabled: boolean
   /** Command Code only: ask for Zero Data Retention (`x-cmd-zdr: 1`) on every request. */
   zdr?: boolean
+  /** what the provider charges per million input (prompt) tokens, for cost estimates */
+  priceIn?: number
+  /** per million output tokens */
+  priceOut?: number
 }
 
 export interface SourceConfig {
@@ -446,6 +491,10 @@ export interface Settings {
     genres: string[]
     /** Free-text notes about the collection, added to what the genres say. */
     sceneHint: string
+    /** stop using the AI for the rest of the month once estimated spend reaches this (0 = no limit) */
+    monthlyBudget: number
+    /** symbol shown with prices and costs */
+    currency: string
   }
   sources: Record<string, SourceConfig>
   scrapers: ScraperDefinition[]
@@ -521,6 +570,12 @@ export interface Settings {
     keyNotation: "musical" | "camelot"
     /** BPMs are folded into [bpmMin, 2 × bpmMin) */
     bpmMin: number
+    /** check whether files are really the quality they claim (spectrum cut-off) */
+    quality: boolean
+    /** measure loudness (EBU R128) */
+    loudness: boolean
+    /** write ReplayGain tags when cutting */
+    writeReplayGain: boolean
   }
   automation: {
     /** identify files that watched folders or the nightly scan pick up */
@@ -531,8 +586,21 @@ export interface Settings {
     nightly: boolean
     /** "HH:MM", server time */
     nightlyAt: string
+    /** hands-off libraries: how sure a match must be to be cut without asking */
+    handsOffMin: number
+  }
+  exports: {
+    /** rewrite paths for software on another computer, e.g. /music → D:\Music */
+    pathMap: PathMapping[]
+    /** Traktor's name for the drive the music is on (e.g. "Macintosh HD"; Windows paths use their drive letter) */
+    traktorVolume: string
   }
   contact: string
+}
+
+export interface PathMapping {
+  from: string
+  to: string
 }
 
 export type MediaServerKind = "plex" | "jellyfin" | "navidrome"
@@ -565,6 +633,8 @@ export interface Correction {
 }
 
 export interface HealthInfo {
+  /** a password is set (the rest of the fields are left out until you sign in) */
+  auth?: boolean
   version: string
   dataDir: string
   readOnly: boolean
@@ -624,5 +694,122 @@ export interface BackupFile {
   settings: Settings
   aliases: { alias: string; canonical: string }[]
   corrections: { filename: string; artists: string[]; title: string; version: string | null; createdAt: string }[]
-  libraries: { path: string; name: string; watch: boolean; settings: LibrarySettings }[]
+  /** an inbox's target is saved by folder, since library IDs differ from one install to the next */
+  libraries: { path: string; name: string; watch: boolean; settings: LibrarySettings; inboxForPath?: string }[]
+  /** smart crates (a crate limited to one library names it by folder) */
+  crates?: { name: string; rules: CrateRules; libraryPath?: string }[]
+}
+
+// ---------- sign-in ----------
+
+export interface AuthStatus {
+  /** a password is set */
+  enabled: boolean
+  authenticated: boolean
+  /** set with DUBPLATE_PASSWORD, so it can't be changed here */
+  fromEnv: boolean
+}
+
+// ---------- smart crates ----------
+
+/** A saved filter. Every rule that's set must match; lists match any of their values. */
+export interface CrateRules {
+  genres?: string[]
+  bpmMin?: number
+  bpmMax?: number
+  /** count tracks at half or double the range too (a 70 BPM one-drop in a 140 crate) */
+  halfDouble?: boolean
+  /** musical notation, e.g. "Am" */
+  keys?: string[]
+  /** this key and the keys that mix with it on the Camelot wheel */
+  mixesWith?: string
+  yearFrom?: number
+  yearTo?: number
+  labels?: string[]
+  artists?: string[]
+  libraryId?: number
+  statuses?: TrackStatus[]
+  /** filename, folder or tag text */
+  text?: string
+  quality?: "ok" | "suspect"
+}
+
+export interface Crate {
+  id: number
+  name: string
+  rules: CrateRules
+  /** tracks in it now */
+  count: number
+  createdAt: string
+  updatedAt: string
+}
+
+/** What a library has, for picking crate rules. */
+export interface CrateFacets {
+  genres: { value: string; count: number }[]
+  labels: { value: string; count: number }[]
+  keys: { value: string; count: number }[]
+  bpm: { min: number | null; max: number | null }
+  years: { min: number | null; max: number | null }
+}
+
+// ---------- mixing ----------
+
+export type KeyRelation = "same" | "up" | "down" | "relative" | "boost"
+
+export interface MixSuggestion {
+  track: TrackSummary
+  /** null when this track has no key to go by */
+  keyRelation: KeyRelation | null
+  /** tempo difference in percent (after half/double time) */
+  bpmDiff: number
+  /** matched at half or double time */
+  halfDouble: boolean
+}
+
+// ---------- DJ software ----------
+
+export type DjFormat = "rekordbox" | "traktor" | "serato" | "m3u"
+
+// ---------- AI usage ----------
+
+export interface UsageTotals {
+  input: number
+  output: number
+  calls: number
+  /** null when the provider has no prices set */
+  cost: number | null
+}
+
+export interface AiUsageReport {
+  currency: string
+  /** 0 = no limit */
+  budget: number
+  /** spend so far this calendar month (known prices only) */
+  monthCost: number
+  month: UsageTotals
+  byProvider: (UsageTotals & { providerId: string; label: string; model: string; priced: boolean })[]
+  /** the last 30 days, oldest first, quiet days included */
+  byDay: (UsageTotals & { day: string })[]
+  runs: (UsageTotals & { jobId: string; label: string; at: string })[]
+}
+
+// ---------- health ----------
+
+export type CheckStatus = "ok" | "warn" | "error" | "info"
+
+export interface HealthCheck {
+  id: string
+  group: "Server" | "Security" | "Libraries" | "AI" | "Sources" | "Integrations"
+  label: string
+  status: CheckStatus
+  detail: string
+  /** where to put it right */
+  fix?: { label: string; to: string }
+}
+
+export interface HealthReport {
+  checkedAt: string
+  checks: HealthCheck[]
+  system: { version: string; node: string; platform: string; uptimeSec: number; memoryMb: number; dbMb: number; dataDir: string }
 }

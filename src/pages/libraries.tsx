@@ -23,8 +23,10 @@ import { fmtAgo } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 /** What a library has of its own, for badges on its card. */
-function overrides(ls: LibrarySettings): string[] {
+function overrides(ls: LibrarySettings, nameOf: (id: number) => string | undefined): string[] {
   const out: string[] = []
+  if (ls.inboxFor) out.push(`inbox → ${nameOf(ls.inboxFor) ?? "a removed library"}`)
+  if (ls.handsOff) out.push("hands-off")
   if (ls.genres || ls.sceneHint) out.push("own crates")
   if (ls.template) out.push("own file names")
   if (ls.folderTemplate || ls.organiseOnCut !== undefined) out.push("own folders")
@@ -148,6 +150,7 @@ export default function LibrariesPage() {
       <div className="grid gap-3 md:grid-cols-2">
         {libraries?.map((lib) => {
           const scanning = active.find((j) => j.kind === "scan" && j.label.endsWith(lib.name) && j.status === "running")
+          const own = overrides(lib.settings, (id) => libraries.find((l) => l.id === id)?.name)
           return (
             <Card key={lib.id}>
               <CardContent className="space-y-3">
@@ -163,9 +166,9 @@ export default function LibrariesPage() {
                   </div>
                   {!lib.exists && <Badge variant="destructive">folder missing</Badge>}
                 </div>
-                {overrides(lib.settings).length > 0 && (
+                {own.length > 0 && (
                   <div className="flex flex-wrap gap-1.5">
-                    {overrides(lib.settings).map((o) => (
+                    {own.map((o) => (
                       <Badge key={o} variant="outline" className="font-normal">
                         {o}
                       </Badge>

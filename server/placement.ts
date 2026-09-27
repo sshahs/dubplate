@@ -5,7 +5,7 @@ import { formatKey } from "../shared/keys"
 import type { FinalMeta, Settings, Track } from "../shared/types"
 import { bpmRange, decadeOf, initialOf, renderFolderTemplate, type FolderValues } from "./core/folders"
 import { decisionToFinal, formatArtist, renderTemplate } from "./core/naming"
-import { settingsForLibrary } from "./library-settings"
+import { placementLibraryId, settingsForLibrary } from "./library-settings"
 
 export function metaFor(t: Track): FinalMeta | null {
   if (t.final) return t.final
@@ -13,11 +13,11 @@ export function metaFor(t: Track): FinalMeta | null {
   return null
 }
 
-/** The name the track would be cut to, under its library's naming template. */
+/** The name the track would be cut to, under its library's naming template (an inbox: the library it feeds). */
 export function proposedFilename(t: Track, settings: Settings): string | null {
   const meta = metaFor(t)
   if (!meta || !meta.title || !meta.artists.length) return null
-  const s = settingsForLibrary(settings, t.libraryId)
+  const s = settingsForLibrary(settings, placementLibraryId(t.libraryId))
   const base = renderTemplate(s.naming.template, meta, s.naming)
   return base ? `${base}.${t.ext.toLowerCase()}` : null
 }

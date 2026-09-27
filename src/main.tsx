@@ -3,6 +3,7 @@ import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { BrowserRouter } from "react-router"
 import App from "@/App"
+import { AuthGate } from "@/components/auth-gate"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -26,6 +27,11 @@ window.addEventListener("vite:preloadError", (event) => {
   }
 })
 
+// Installable as an app on phones; the worker only shows a page when the server's unreachable.
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  window.addEventListener("load", () => void navigator.serviceWorker.register("/sw.js").catch(() => {}))
+}
+
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 5_000, refetchOnWindowFocus: false, retry: 1 } },
 })
@@ -34,14 +40,16 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ThemeProvider defaultTheme="dark">
       <QueryClientProvider client={queryClient}>
-        <LiveProvider>
-          <TooltipProvider>
-            <BrowserRouter>
-              <App />
-            </BrowserRouter>
-            <Toaster position="bottom-right" richColors closeButton />
-          </TooltipProvider>
-        </LiveProvider>
+        <TooltipProvider>
+          <AuthGate>
+            <LiveProvider>
+              <BrowserRouter>
+                <App />
+              </BrowserRouter>
+            </LiveProvider>
+          </AuthGate>
+          <Toaster position="bottom-right" richColors closeButton />
+        </TooltipProvider>
       </QueryClientProvider>
     </ThemeProvider>
   </StrictMode>
