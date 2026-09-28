@@ -6,6 +6,7 @@ import fs from "node:fs"
 import path from "node:path"
 import type { Library } from "../shared/types"
 import { enqueueJob, log } from "./jobs"
+import { checkSubmissions, pendingSubmissions } from "./acoustid-submit"
 import { processTracks } from "./pipeline"
 import { getLibrary, listLibraries } from "./repo"
 import { libraryHasChanges, scanLibrary } from "./scanner"
@@ -127,8 +128,15 @@ export function scanSoon(libraryId: number, label: string, delayMs = 3000) {
   soon.set(libraryId, timer)
 }
 
+let lastAcoustIdCheck = 0
+
 function minuteTick() {
   const s = settingsNow()
+  // Pending AcoustID submissions: ask how they got on every 20 minutes.
+  if (Date.now() - lastAcoustIdCheck > 20 * 60_000 && pendingSubmissions()) {
+    lastAcoustIdCheck = Date.now()
+    void checkSubmissions(s, (level, m) => log(level, m))
+  }
   extensions = new Set(s.scanner.extensions)
   const now = new Date()
   // Periodic re-check of watched folders (and a fallback for ones without file events).

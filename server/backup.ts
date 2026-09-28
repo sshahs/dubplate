@@ -21,6 +21,7 @@ function withoutSecrets(s: Settings): Settings {
   out.integrations.mediaServers = out.integrations.mediaServers.map(({ token: _t, ...m }) => m)
   delete out.integrations.discord.webhookUrl
   delete out.integrations.telegram.botToken
+  delete out.acoustid.userKey
   return out
 }
 

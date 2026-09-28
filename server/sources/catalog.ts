@@ -1,8 +1,9 @@
 // Mainstream catalogue APIs: MusicBrainz, Discogs, Last.fm, Spotify,
 // Apple Music (iTunes Search) and Deezer.
 
-import type { Candidate } from "../../shared/types"
+import type { Candidate, ReleaseInfo } from "../../shared/types"
 import { titleSimilarity } from "../core/normalize"
+import { discogsKind, isOwnRelease, mbKind, spotifyKind } from "../core/releases"
 import { httpJson } from "./http"
 import { cleanArtistName, enc, yearOf, type SourceAdapter, type SourceQuery } from "./types"
 
@@ -19,7 +20,41 @@ interface MbRecording {
   length?: number
   "first-release-date"?: string
   "artist-credit"?: { name: string; joinphrase?: string; artist?: { id?: string; name: string } }[]
-  releases?: { id?: string; title: string; date?: string }[]
+  releases?: MbRelease[]
+  tags?: { name: string; count?: number }[]
+}
+
+interface MbRelease {
+  id?: string
+  title: string
+  date?: string
+  status?: string
+  country?: string
+  "artist-credit"?: { name: string; artist?: { name: string } }[]
+  "release-group"?: { id?: string; "primary-type"?: string; "secondary-types"?: string[] }
+}
+
+/** A recording's releases as ReleaseInfo, each typed by its release group. */
+function mbReleases(r: MbRecording, artists: string[]): ReleaseInfo[] {
+  return (r.releases ?? []).map((rel): ReleaseInfo => {
+    const group = rel["release-group"] ?? {}
+    const credit = rel["artist-credit"]?.map((c) => c.name)
+    return {
+      source: "musicbrainz",
+      title: rel.title,
+      kind: mbKind(group["primary-type"], group["secondary-types"] ?? []),
+      // Without a credit of its own, a release is credited like its recording.
+      own: credit?.length ? isOwnRelease(credit, artists) : null,
+      id: rel.id,
+      groupId: group.id,
+      status: rel.status,
+      date: rel.date,
+      country: rel.country,
+      typeText: [group["primary-type"], ...(group["secondary-types"] ?? [])].filter(Boolean).join(" + ") || undefined,
+      recordingId: r.id,
+      length: r.length ? r.length / 1000 : undefined,
+    }
+  })
 }
 
 export const musicbrainz: SourceAdapter = {
@@ -34,6 +69,10 @@ export const musicbrainz: SourceAdapter = {
     const j = await httpJson<{ recordings?: MbRecording[] }>(url, { signal })
     return (j?.recordings ?? []).map((r): Candidate => {
       const credits = r["artist-credit"] ?? []
+      const releases = mbReleases(
+        r,
+        credits.map((c) => c.name)
+      )
       return {
         source: "musicbrainz",
         sourceLabel: "MusicBrainz",
@@ -53,6 +92,9 @@ export const musicbrainz: SourceAdapter = {
         sourceScore: r.score !== undefined ? r.score / 100 : undefined,
         // Cover Art Archive answers 404 when a release has no front cover; the fetcher moves on.
         artwork: r.releases?.[0]?.id ? `https://coverartarchive.org/release/${r.releases[0].id}/front-1200` : undefined,
+        releases,
+        genres: r.tags?.length ? [...r.tags].sort((a, b) => (b.count ?? 0) - (a.count ?? 0)).map((t) => t.name) : undefined,
+        country: r.releases?.[0]?.country,
       }
     })
   },
@@ -68,6 +110,9 @@ export interface DiscogsRelease {
   title: string
   year?: number
   uri?: string
+  country?: string
+  released?: string
+  formats?: { name: string; descriptions?: string[] }[]
   artists?: { name: string; join?: string }[]
   labels?: { name: string }[]
   genres?: string[]
@@ -134,11 +179,32 @@ export function releaseCandidate(rel: DiscogsRelease, title: string, opts: { sou
     year: rel.year || opts.year,
     label: rel.labels?.[0]?.name,
     genre: [...(rel.genres ?? []), ...(rel.styles ?? [])].join(", ") || undefined,
+    genres: [...(rel.genres ?? []), ...(rel.styles ?? [])],
+    country: rel.country,
     duration: discogsDuration(best.t.duration),
     url: rel.uri ?? `https://www.discogs.com/release/${rel.id}`,
     externalId: String(rel.id),
     ids: { discogsReleaseId: String(rel.id) },
     artwork: (rel.images?.find((i) => i.type === "primary") ?? rel.images?.[0])?.uri || undefined,
+    releases: [discogsReleaseInfo(rel, credits.map((a) => cleanArtistName(a.name)), discogsDuration(best.t.duration))],
+  }
+}
+
+/** A Discogs release as ReleaseInfo, typed by its format descriptions. */
+export function discogsReleaseInfo(rel: DiscogsRelease, trackArtists: string[], length?: number): ReleaseInfo {
+  const descriptions = (rel.formats ?? []).flatMap((f) => f.descriptions ?? [])
+  const names = (rel.formats ?? []).map((f) => f.name)
+  return {
+    source: "discogs",
+    title: rel.title,
+    kind: discogsKind(descriptions, names),
+    own: isOwnRelease(rel.artists?.map((a) => cleanArtistName(a.name)), trackArtists),
+    id: String(rel.id),
+    date: rel.released || (rel.year ? String(rel.year) : undefined),
+    country: rel.country,
+    label: rel.labels?.[0]?.name,
+    typeText: [...names, ...descriptions].join(", ") || undefined,
+    length,
   }
 }
 
@@ -199,7 +265,17 @@ export const spotify: SourceAdapter = {
     const token = await spotifyAuth(cfg.apiKey!, cfg.apiSecret!, signal)
     const query = q.artist ? `track:${q.title} artist:${q.artists[0] ?? q.artist}` : q.title
     const j = await httpJson<{
-      tracks?: { items?: { id: string; name: string; popularity?: number; duration_ms: number; artists: { name: string }[]; album: { name: string; release_date?: string; images?: { url: string; width?: number }[] }; external_urls?: { spotify?: string } }[] }
+      tracks?: {
+        items?: {
+          id: string
+          name: string
+          popularity?: number
+          duration_ms: number
+          artists: { name: string }[]
+          album: { name: string; album_type?: string; artists?: { name: string }[]; release_date?: string; images?: { url: string; width?: number }[] }
+          external_urls?: { spotify?: string }
+        }[]
+      }
     }>(`https://api.spotify.com/v1/search?type=track&limit=8&q=${enc(query)}`, { headers: { authorization: `Bearer ${token}` }, signal })
     return (j?.tracks?.items ?? []).map((t) => ({
       source: "spotify" as const,
@@ -214,6 +290,20 @@ export const spotify: SourceAdapter = {
       externalId: t.id,
       sourceScore: t.popularity !== undefined ? t.popularity / 100 : undefined,
       artwork: t.album.images?.[0]?.url,
+      releases: [
+        {
+          source: "spotify" as const,
+          title: t.album.name,
+          kind: spotifyKind(t.album.album_type),
+          own: isOwnRelease(
+            t.album.artists?.map((a) => a.name),
+            t.artists.map((a) => a.name)
+          ),
+          date: t.album.release_date,
+          typeText: t.album.album_type,
+          length: t.duration_ms / 1000,
+        },
+      ],
     }))
   },
 }
@@ -238,6 +328,7 @@ export const itunes: SourceAdapter = {
       album: r.collectionName,
       year: yearOf(r.releaseDate),
       genre: r.primaryGenreName,
+      genres: r.primaryGenreName ? [r.primaryGenreName] : undefined,
       duration: r.trackTimeMillis ? r.trackTimeMillis / 1000 : undefined,
       url: r.trackViewUrl,
       externalId: String(r.trackId),

@@ -219,6 +219,63 @@ export const MIGRATIONS: string[] = [
     last_used_at TEXT
   );
   `,
+  // 6: fingerprints and each file as first scanned (kept for good), IDs set by hand or by a
+  // MusicBrainz submission, what's been sent to AcoustID and MusicBrainz, a cache of lookups by
+  // normalised reading, and scraper health.
+  `
+  ALTER TABLE track_data ADD COLUMN fingerprint_json TEXT;
+  ALTER TABLE track_data ADD COLUMN original_json TEXT;
+  ALTER TABLE track_data ADD COLUMN escalation_json TEXT;
+  ALTER TABLE tracks ADD COLUMN ids_json TEXT;
+  -- Who approved it: "person", "auto" (auto-approve) or "hands-off". Approvals from before this was
+  -- recorded stay unknown (NULL): they may have been automatic, so they never count as a person's.
+  ALTER TABLE tracks ADD COLUMN approved_by TEXT;
+  -- Files never cut still have their first-scan name and tags: keep those as the original.
+  INSERT INTO track_data (track_id) SELECT id FROM tracks WHERE id NOT IN (SELECT track_id FROM track_data);
+  UPDATE track_data SET original_json = (
+    SELECT json_object('filename', t.filename, 'path', t.path, 'tags', json(t.tags_json), 'scannedAt', t.created_at)
+    FROM tracks t WHERE t.id = track_data.track_id AND t.status <> 'done' AND t.path = t.original_path AND json_valid(t.tags_json)
+  );
+
+  CREATE TABLE acoustid_submissions (
+    id INTEGER PRIMARY KEY,
+    track_id INTEGER REFERENCES tracks(id) ON DELETE SET NULL,
+    -- sha256 of the fingerprint: the same fingerprint is never sent twice
+    fingerprint_hash TEXT NOT NULL UNIQUE,
+    submission_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'pending',
+    acoustid TEXT,
+    mb_recording_id TEXT,
+    error TEXT,
+    submitted_at TEXT NOT NULL DEFAULT (datetime('now')),
+    checked_at TEXT
+  );
+  CREATE INDEX idx_acoustid_track ON acoustid_submissions(track_id);
+
+  CREATE TABLE mb_submissions (
+    id INTEGER PRIMARY KEY,
+    track_ids_json TEXT NOT NULL,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    release_mbid TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE lookup_cache (
+    key TEXT PRIMARY KEY,
+    candidates_json TEXT NOT NULL,
+    fetched_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE source_health (
+    source_id TEXT PRIMARY KEY,
+    bad_in_a_row INTEGER NOT NULL DEFAULT 0,
+    last_bad TEXT,
+    last_ok_at TEXT,
+    disabled_at TEXT
+  );
+  `,
 ]
 
 export type Db = DatabaseSync

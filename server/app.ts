@@ -16,6 +16,9 @@ import { usageReport } from "./ai/usage"
 import { analyzeTracks } from "./analysis"
 import { findArtwork, thumbnail } from "./art"
 import { lyricsForTrack, lyricsTracks, topUpLyrics } from "./lyrics"
+import { checkSubmissions, eligibility, listSubmissions, submitTracks } from "./acoustid-submit"
+import { completeMbSubmission, listMbSubmissions, markMbSubmitted, startMbSubmission } from "./musicbrainz-seed"
+import { trackInsight } from "./steps"
 import * as auth from "./auth"
 import * as tokens from "./tokens"
 import { readHook, recentHookCalls, runHook } from "./hooks"
@@ -39,7 +42,7 @@ import { scanLibrary } from "./scanner"
 import { isMasked, publicSettings, saveSettings, settingsNow } from "./settings"
 import { findFpcalc } from "./sources/acoustid"
 import { clearHttpCache } from "./sources/http"
-import { allAdapters, buildQuery, sourceStatus } from "./sources"
+import { allAdapters, buildQuery, clearLookupCache, sourceStatus } from "./sources"
 import { collectionStatus, syncCollection } from "./sources/discogs-collection"
 import { runScraper } from "./sources/scraper"
 import { restore, snapshot } from "./undo"
@@ -407,7 +410,7 @@ export function createApp() {
     const learn = body.learn !== false
     const undoId = snapshot("Approve", [id], learn ? [t.filename] : [])
     const next = { ...t, final }
-    repo.updateTrack(id, { final, status: "approved", proposedName: proposedFilename(next, s) })
+    repo.updateTrack(id, { final, status: "approved", approvedBy: "person", proposedName: proposedFilename(next, s) })
     // Learn from the human: store as a few-shot example for the AI and as a known artist.
     if (learn) repo.addCorrection(t.filename, final.artists, final.title, final.version)
     return c.json({ ...repo.getTrack(id), undoId })
@@ -429,13 +432,13 @@ export function createApp() {
           skipped++
           continue
         }
-        repo.updateTrack(id, { final, status: "approved", proposedName: proposedFilename({ ...t, final }, s) })
+        repo.updateTrack(id, { final, status: "approved", approvedBy: "person", proposedName: proposedFilename({ ...t, final }, s) })
       } else if (body.action === "reject") {
         repo.updateTrack(id, { status: "rejected" })
       } else if (body.action === "unapprove") {
-        repo.updateTrack(id, { status: t.decision?.status ?? "new", final: null })
+        repo.updateTrack(id, { status: t.decision?.status ?? "new", final: null, approvedBy: null })
       } else if (body.action === "reset") {
-        repo.updateTrack(id, { ai: null, candidates: null, decision: null, final: null, confidence: null, proposedName: null, status: "new", note: null })
+        repo.updateTrack(id, { ai: null, candidates: null, decision: null, final: null, confidence: null, proposedName: null, status: "new", note: null, approvedBy: null })
       }
       changed++
     }
@@ -620,6 +623,96 @@ export function createApp() {
   /** Sharing to the installed app lands here only without its service worker (which handles it): say so. */
   app.post("/share", (c) => c.redirect("/upload?shared=0", 303))
 
+  // ---- tag updates for files already cut ----
+  /** Write what's new since a cut (MusicBrainz IDs, lyrics, artwork, ReplayGain) without renaming or moving. */
+  app.post("/api/retag", async (c) => {
+    const body = await c.req.json<Selection & { dryRun?: boolean }>()
+    const s = settingsNow()
+    if (s.safety.readOnly) return c.json({ error: "Read-only mode is on. Turn it off in Settings → Safety to write files." }, 409)
+    const ids = resolveIds(body, { status: ["done"] }).filter((id) => repo.getTrack(id)?.status === "done")
+    if (!ids.length) return c.json({ error: "Only tracks that are already cut can have their tags updated" }, 400)
+    return c.json(
+      enqueueJob("retag", `Update tags of ${ids.length} cut track${ids.length === 1 ? "" : "s"}`, async (ctx) => {
+        const settings = settingsNow()
+        await topUpLyrics(repo.getTracks(ids), settings, ctx)
+        const plan = buildPlan(repo.getTracks(ids), settings, { tagsOnly: true })
+        const runnable = plan.filter((p) => !p.blocked)
+        if (!runnable.length) {
+          ctx.setTotal(0)
+          ctx.message("Tags are already up to date")
+          return
+        }
+        await executePlan(runnable, settings, { dryRun: false, label: "Update tags" }, ctx)
+        ctx.log("success", `Updated the tags of ${ctx.job.done} file${ctx.job.done === 1 ? "" : "s"}${plan.length - runnable.length ? ` (${plan.length - runnable.length} already up to date)` : ""}`)
+      })
+    )
+  })
+
+  // ---- MusicBrainz: releases a person adds through the release editor ----
+  app.get("/api/musicbrainz/submissions", (c) => c.json(listMbSubmissions()))
+
+  app.post("/api/musicbrainz/seed", async (c) => {
+    const body = await c.req.json<Selection & { base?: string }>()
+    const ids = resolveIds(body)
+    if (!ids.length) return c.json({ error: "Pick the tracks for the release" }, 400)
+    if (ids.length > 99) return c.json({ error: "That's a lot for one release - pick up to 99 tracks" }, 400)
+    const base = settingsNow().integrations.publicUrl || body.base || new URL(c.req.url).origin
+    try {
+      return c.json(startMbSubmission(ids, base))
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
+
+  app.post("/api/musicbrainz/submissions/:id/submitted", (c) => {
+    const s = markMbSubmitted(Number(c.req.param("id")))
+    return s ? c.json(s) : c.json({ error: "No such submission" }, 404)
+  })
+
+  app.post("/api/musicbrainz/submissions/:id/complete", async (c) => {
+    const body = await c.req.json<{ releaseMbid?: string }>().catch(() => ({}) as { releaseMbid?: string })
+    try {
+      const r = await completeMbSubmission(Number(c.req.param("id")), body.releaseMbid ?? "")
+      emit({ type: "tracks", ids: r.submission.trackIds })
+      return c.json(r)
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
+
+  // ---- AcoustID submissions ----
+  app.get("/api/acoustid/submissions", (c) => c.json({ ...listSubmissions(), submit: settingsNow().acoustid.submit }))
+
+  /** Send the eligible ones among a selection (or among everything that's cut). */
+  app.post("/api/acoustid/submit", async (c) => {
+    const body = await c.req.json<Selection>().catch(() => ({}) as Selection)
+    const s = settingsNow()
+    const ids = resolveIds(body, { status: ["done"] }).filter((id) => {
+      const t = repo.getTrack(id)
+      return !!t && eligibility(t, s).eligible
+    })
+    if (!ids.length) return c.json({ error: "None of these are ready to send - open a track to see what's missing" }, 400)
+    return c.json(enqueueJob("acoustid", `Send ${ids.length} fingerprint${ids.length === 1 ? "" : "s"} to AcoustID`, (ctx) => submitTracks(ids, settingsNow(), ctx).then(() => undefined)))
+  })
+
+  app.post("/api/acoustid/check", async (c) => {
+    const imported = await checkSubmissions(settingsNow(), (level, m) => log(level, m))
+    return c.json({ imported, ...listSubmissions() })
+  })
+
+  /** How it was decided, step by step, with its risk, AcoustID checklist and MusicBrainz status. */
+  app.get("/api/tracks/:id/insight", (c) => {
+    const t = repo.getTrack(Number(c.req.param("id")))
+    if (!t) return c.json({ error: "Track not found" }, 404)
+    return c.json(trackInsight(t, settingsNow()))
+  })
+
+  app.get("/api/tracks/:id/acoustid", (c) => {
+    const t = repo.getTrack(Number(c.req.param("id")))
+    if (!t) return c.json({ error: "Track not found" }, 404)
+    return c.json(eligibility(t, settingsNow()))
+  })
+
   // ---- lyrics ----
   app.post("/api/lyrics", async (c) => {
     const body = await c.req.json<Selection & { force?: boolean }>()
@@ -800,7 +893,7 @@ export function createApp() {
     }
   })
 
-  app.post("/api/cache/clear", (c) => c.json({ cleared: clearHttpCache() }))
+  app.post("/api/cache/clear", (c) => c.json({ cleared: clearHttpCache() + clearLookupCache() }))
 
   // ---- learning: aliases & corrections ----
   app.get("/api/aliases", (c) => c.json(repo.listAliases()))

@@ -13,6 +13,8 @@ export interface JsonRequest {
   temperature: number
   signal?: AbortSignal
   timeoutMs?: number
+  /** pictures to show a vision model, alongside the user message */
+  images?: { mime: string; base64: string }[]
 }
 
 export class LlmError extends Error {
@@ -112,7 +114,7 @@ async function ollamaJson(p: LlmProviderConfig, req: JsonRequest) {
       options: { temperature: req.temperature },
       messages: [
         { role: "system", content: req.system },
-        { role: "user", content: req.user },
+        { role: "user", content: req.user, ...(req.images?.length ? { images: req.images.map((i) => i.base64) } : {}) },
       ],
     },
     authHeaders(p),
@@ -132,9 +134,12 @@ function openAiTemperature(p: LlmProviderConfig, t: number) {
 }
 
 async function openAiJson(p: LlmProviderConfig, req: JsonRequest) {
+  const userContent = req.images?.length
+    ? [{ type: "text", text: req.user }, ...req.images.map((i) => ({ type: "image_url", image_url: { url: `data:${i.mime};base64,${i.base64}` } }))]
+    : req.user
   const messages = [
     { role: "system", content: req.system },
-    { role: "user", content: req.user },
+    { role: "user", content: userContent },
   ]
   const url = joinUrl(p.baseUrl, "/chat/completions")
   const formats: unknown[] =
@@ -186,8 +191,15 @@ async function anthropicJson(p: LlmProviderConfig, req: JsonRequest) {
       max_tokens: 1500,
       temperature: req.temperature,
       system: req.system,
-      messages: [{ role: "user", content: req.user }],
-      tools: [{ name: req.schemaName, description: "Record the identified track.", input_schema: req.schema }],
+      messages: [
+        {
+          role: "user",
+          content: req.images?.length
+            ? [...req.images.map((i) => ({ type: "image", source: { type: "base64", media_type: i.mime, data: i.base64 } })), { type: "text", text: req.user }]
+            : req.user,
+        },
+      ],
+      tools: [{ name: req.schemaName, description: "Record the answer.", input_schema: req.schema }],
       tool_choice: { type: "tool", name: req.schemaName },
     },
     { "x-api-key": p.apiKey ?? "", "anthropic-version": "2023-06-01" },

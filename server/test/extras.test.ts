@@ -11,7 +11,7 @@ import { LoudnessMeter } from "../analysis/loudness"
 import { judgeQuality, SpectrumCollector } from "../analysis/quality"
 import { createApp } from "../app"
 import * as auth from "../auth"
-import { cutApproved, handsOff } from "../autopilot"
+import { cutApproved, handsOff, handsOffReady } from "../autopilot"
 import { makeBackup, restoreBackup } from "../backup"
 import { tagsFor } from "../core/naming"
 import { crateFacets, createCrate, listCrates, mixSuggestionIds } from "../crates"
@@ -406,7 +406,7 @@ describe("DJ exports", () => {
 
 // ---------- hands-off and inboxes ----------
 
-const decision = (artist: string, title: string, confidence: number, basis: Decision["basis"] = "sources"): Decision => ({
+const decision = (artist: string, title: string, confidence: number, basis: Decision["basis"] = "sources", sources: Decision["clusters"][number]["sources"] = ["musicbrainz", "discogs"]): Decision => ({
   artists: [artist],
   featuring: [],
   artist,
@@ -415,7 +415,7 @@ const decision = (artist: string, title: string, confidence: number, basis: Deci
   status: confidence >= 90 ? "matched" : "review",
   basis,
   factors: [],
-  clusters: [],
+  clusters: basis === "sources" ? [{ artist, title, sources, support: 1, relevance: 1, candidates: [] }] : [],
   warnings: [],
 })
 
@@ -428,6 +428,11 @@ describe("hands-off", () => {
     repo.updateTrack(byName["skepta shutdown.mp3"], { decision: decision("Skepta", "Shutdown", 97), confidence: 97, status: "matched" })
     repo.updateTrack(byName["sister nancy.mp3"], { decision: decision("Sister Nancy", "Bam Bam", 80), confidence: 80, status: "review" })
     repo.updateTrack(byName["wiley.mp3"], { decision: decision("Wiley", "Eskimo", 97, "ai"), confidence: 97, status: "matched" })
+
+    // Sure but risky - only one source backs it up - isn't hands-off either.
+    const lone = repo.getTrack(byName["sister nancy.mp3"])!
+    expect(handsOffReady({ ...lone, decision: decision("Sister Nancy", "Bam Bam", 97, "sources", ["musicbrainz"]), confidence: 97, status: "matched" }, settings)).toBe(false)
+    expect(handsOffReady({ ...lone, decision: decision("Sister Nancy", "Bam Bam", 97), confidence: 97, status: "matched" }, settings)).toBe(true)
 
     const readOnly = { ...settings, safety: { readOnly: true } }
     const c = ctx()

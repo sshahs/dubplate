@@ -13,6 +13,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
 import { renderTemplate } from "@core/naming"
+import { RISK_LABEL, riskOf } from "@shared/risk"
 import type { Candidate, FinalMeta, Track } from "@shared/types"
 import { AudioPlayer } from "@/components/audio-player"
 import { ConfidenceDial, StatusBadge } from "@/components/confidence"
@@ -23,6 +24,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { DecisionSteps } from "@/components/track-decision"
 import { api } from "@/lib/api"
 import { fmtBytes, fmtDuration } from "@/lib/format"
 import { toastUndoable } from "@/lib/undo"
@@ -143,6 +145,7 @@ export function TrackDetail({
   }
 
   const d = track.decision
+  const risk = d ? riskOf(track) : null
   const editDraft = (next: MetaDraft) => setEdit({ trackId, draft: next })
 
   return (
@@ -153,7 +156,13 @@ export function TrackDetail({
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={track.status} />
             {d?.basis && <Badge variant="outline">from {d.basis === "sources" ? "sources" : d.basis === "ai" ? "AI reading" : d.basis}</Badge>}
-            {track.ai && <Badge variant="outline">{track.ai.model}</Badge>}
+            {track.ai && <Badge variant="outline">{track.escalation ? track.escalation.model : track.ai.model}</Badge>}
+            {track.escalation && <Badge variant="outline">second opinion</Badge>}
+            {risk && risk.level !== "low" && (
+              <Badge variant="outline" className={risk.level === "high" ? "border-rasta-red/40 text-rasta-red" : "border-rasta-gold/40 text-rasta-gold"} title={risk.reasons.join(". ")}>
+                {RISK_LABEL[risk.level]}
+              </Badge>
+            )}
           </div>
           <div className="text-muted-foreground font-mono text-xs break-all">{track.relDir ? `${track.relDir}/` : ""}</div>
           <div className="font-mono text-sm font-medium break-all">{track.filename}</div>
@@ -209,13 +218,18 @@ export function TrackDetail({
         </Button>
       </div>
 
-      <Tabs defaultValue="evidence">
+      <Tabs defaultValue="decision">
         <TabsList>
+          <TabsTrigger value="decision">Decision</TabsTrigger>
           <TabsTrigger value="evidence">Evidence</TabsTrigger>
           <TabsTrigger value="sources">Sources {d?.clusters.length ? `(${d.clusters.length})` : ""}</TabsTrigger>
           <TabsTrigger value="readings">Readings</TabsTrigger>
           <TabsTrigger value="file">File</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="decision" className="pt-3">
+          <DecisionSteps track={track} />
+        </TabsContent>
 
         <TabsContent value="evidence" className="space-y-2 pt-3">
           {!d && <p className="text-muted-foreground text-sm">Not scored yet - run the pipeline on this track.</p>}
@@ -291,6 +305,24 @@ export function TrackDetail({
         </TabsContent>
 
         <TabsContent value="readings" className="space-y-3 pt-3">
+          {track.escalation && (
+            <div className="border-rasta-gold/40 rounded-2xl border p-3">
+              <div className="mb-1 flex items-center gap-2 text-sm font-medium">
+                <HugeiconsIcon icon={AiMagicIcon} strokeWidth={2} className="text-rasta-gold size-4" />
+                Second opinion · {track.escalation.model} · {Math.round(track.escalation.ai.confidence * 100)}%
+              </div>
+              <div className="text-sm">
+                {track.escalation.ai.artists.join(track.escalation.ai.relation === "vs" ? " vs " : " & ")} - {track.escalation.ai.title}
+                {track.escalation.ai.version ? ` (${track.escalation.ai.version})` : ""}
+                {track.escalation.ai.year ? ` · ${track.escalation.ai.year}` : ""}
+              </div>
+              <p className="text-muted-foreground mt-1 text-xs">
+                Asked because {track.escalation.reason}. {track.escalation.changed ? "It read the track differently, so its reading is the one scored" : "It agreed with the first reading"}; a person
+                approves it either way. Before: {track.escalation.before.artists.join(" & ")} - {track.escalation.before.title} at {track.escalation.before.confidence}.
+              </p>
+              {track.escalation.ai.reasoning && <p className="text-muted-foreground mt-1 text-xs">{track.escalation.ai.reasoning}</p>}
+            </div>
+          )}
           {track.ai && (
             <div className="rounded-2xl border p-3">
               <div className="mb-1 flex items-center gap-2 text-sm font-medium">
@@ -371,9 +403,37 @@ export function TrackDetail({
             <dd>{fmtDuration(track.duration)}</dd>
             <dt className="text-muted-foreground">Size</dt>
             <dd>{fmtBytes(track.size)}</dd>
-            <dt className="text-muted-foreground">Fingerprint</dt>
+            <dt className="text-muted-foreground">Content hash</dt>
             <dd className="font-mono">{track.hash?.slice(0, 16) ?? "–"}</dd>
+            <dt className="text-muted-foreground">Fingerprint</dt>
+            <dd>{track.fingerprint ? `Chromaprint, ${fmtDuration(track.fingerprint.duration)} (kept for AcoustID)` : "Not taken"}</dd>
+            {track.approvedBy && (
+              <>
+                <dt className="text-muted-foreground">Approved by</dt>
+                <dd>{track.approvedBy === "person" ? "You" : track.approvedBy === "hands-off" ? "Hands-off" : "Auto-approve"}</dd>
+              </>
+            )}
           </dl>
+          {track.original && (
+            <div className="mt-4 rounded-2xl border p-3">
+              <div className="text-sm font-medium">As first found</div>
+              <p className="text-muted-foreground mb-2 text-xs">The name, place and tags when Dubplate first scanned it ({track.original.scannedAt.slice(0, 10)}). Never changed afterwards.</p>
+              <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1 text-xs">
+                <dt className="text-muted-foreground">Filename</dt>
+                <dd className="font-mono break-all">{track.original.filename}</dd>
+                <dt className="text-muted-foreground">Path</dt>
+                <dd className="font-mono break-all">{track.original.path}</dd>
+                {Object.entries(track.original.tags)
+                  .filter(([k]) => k !== "cover")
+                  .map(([k, v]) => (
+                    <div key={k} className="contents">
+                      <dt className="text-muted-foreground">{k}</dt>
+                      <dd className="break-all">{Array.isArray(v) ? v.join(", ") : String(v)}</dd>
+                    </div>
+                  ))}
+              </dl>
+            </div>
+          )}
         </TabsContent>
       </Tabs>
     </div>

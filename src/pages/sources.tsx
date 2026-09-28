@@ -69,6 +69,21 @@ const groupOf = (id: string): GroupId => (id.startsWith("scraper:") ? "scrapers"
 const MAX_WEIGHT = 1.5
 const one = (v: number | readonly number[]) => (Array.isArray(v) ? v[0] : (v as number))
 
+/** Genre weights as they're typed: "Reggae: 1.3, Dancehall: 1.2". */
+const formatWeights = (w: Record<string, number> | undefined | null) =>
+  Object.entries(w ?? {})
+    .map(([g, n]) => `${g}: ${n}`)
+    .join(", ")
+
+function parseWeights(text: string): Record<string, number> | undefined {
+  const out: Record<string, number> = {}
+  for (const part of text.split(",")) {
+    const m = part.match(/^\s*(.+?)\s*[:=]\s*([\d.]+)\s*$/)
+    if (m && Number.isFinite(Number(m[2]))) out[m[1]] = Math.min(2, Math.max(0.5, Number(m[2])))
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
 function hostOf(url: string) {
   try {
     return new URL(url.replace(/\{[^}]+\}/g, "x")).host
@@ -245,6 +260,7 @@ function SourceRow({
               </SettingRow>
             )}
             {s.id === "discogs-collection" && <CollectionSync hasToken={!!settingsSources?.discogs?.apiKey} />}
+            {s.id === "acoustid" && settingsData && <AcoustIdSending settings={settingsData} />}
             <SettingRow title="Trust weight" description="How much a hit here counts towards the consensus. 1 is a solid source; above 1 is near-certain.">
               <div className="flex w-full items-center gap-3 sm:w-64">
                 <Slider
@@ -259,6 +275,19 @@ function SourceRow({
                 />
                 <span className="w-10 text-right font-mono text-sm tabular-nums">{weight.toFixed(2)}</span>
               </div>
+            </SettingRow>
+            <SettingRow stack title="Genre weights" description="Optional: counts this much more (or less) when your crates hold that genre, e.g. Reggae: 1.3. 0.5 to 2.">
+              <Input
+                key={formatWeights(cfg.genreWeights)}
+                defaultValue={formatWeights(cfg.genreWeights)}
+                onBlur={(e) => {
+                  const next = parseWeights(e.target.value)
+                  // {} rather than nothing, so clearing the field clears the weights.
+                  if (formatWeights(next) !== formatWeights(cfg.genreWeights)) save.mutate({ genreWeights: next ?? {} })
+                }}
+                placeholder="none"
+                aria-label={`${s.label} genre weights`}
+              />
             </SettingRow>
             <SettingRow
               title="Try it"
@@ -315,11 +344,100 @@ function CollectionSync({ hasToken }: { hasToken: boolean }) {
   )
 }
 
+/** Sending fingerprints of verified tracks back to AcoustID, so the next person's copy is recognised. */
+function AcoustIdSending({ settings }: { settings: PublicSettings }) {
+  const qc = useQueryClient()
+  const [key, setKey] = useState(settings.acoustid.userKey ?? "")
+  const { data } = useQuery({ queryKey: ["acoustid-submissions"], queryFn: api.acoustidSubmissions })
+  const save = useMutation({
+    mutationFn: (patch: Partial<PublicSettings["acoustid"]>) => api.saveSettings({ acoustid: { ...settings.acoustid, userKey: key, ...patch } }),
+    onSuccess: (next) => {
+      qc.setQueryData(["settings"], next)
+      setKey(next.acoustid.userKey ?? "")
+      void qc.invalidateQueries({ queryKey: ["acoustid-submissions"] })
+    },
+    onError: (e) => toast.error(e.message),
+  })
+  const check = useMutation({
+    mutationFn: api.acoustidCheck,
+    onSuccess: (r) => {
+      qc.setQueryData(["acoustid-submissions"], r)
+      toast(r.imported ? `${r.imported} imported since the last look` : "Nothing new imported yet")
+    },
+    onError: (e) => toast.error(e.message),
+  })
+  const sendAll = useMutation({ mutationFn: () => api.acoustidSubmit(), onSuccess: (j) => toast(j.label), onError: (e) => toast.error(e.message) })
+  const c = data?.counts
+  return (
+    <>
+      <SettingRow
+        stack
+        title="Your AcoustID user key"
+        description={
+          <>
+            To send fingerprints back. Sign in at{" "}
+            <a href="https://acoustid.org/" target="_blank" rel="noreferrer noopener" className="text-foreground underline underline-offset-2">
+              acoustid.org
+            </a>{" "}
+            and copy the user API key (not the application key above).
+          </>
+        }
+      >
+        <form
+          className="flex flex-col gap-2 sm:flex-row"
+          onSubmit={(e) => {
+            e.preventDefault()
+            save.mutate({}, { onSuccess: () => toast.success("AcoustID user key saved") })
+          }}
+        >
+          <Input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder="not set" aria-label="AcoustID user key" autoComplete="off" />
+          <Button type="submit" variant="secondary" disabled={save.isPending || key === (settings.acoustid.userKey ?? "")}>
+            Save
+          </Button>
+        </form>
+      </SettingRow>
+      <SettingRow
+        title="Send fingerprints after cutting"
+        description="Only for tracks you approved yourself (or that two independent sources agree on), with no conflict or second opinion, once each. MusicBrainz's recording ID goes along when it knows the song."
+      >
+        <Switch checked={settings.acoustid.submit} onCheckedChange={(v) => save.mutate({ submit: v })} disabled={!settings.acoustid.userKey && !key} size="sm" aria-label="Send fingerprints after cutting" />
+      </SettingRow>
+      <SettingRow
+        title="Sent so far"
+        description={c ? `${c.imported} imported, ${c.pending} waiting for AcoustID${c.failed ? `, ${c.failed} failed` : ""}.` : "Nothing sent yet."}
+      >
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={() => sendAll.mutate()} disabled={sendAll.isPending || !settings.acoustid.userKey}>
+            Send what's ready
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => check.mutate()} disabled={check.isPending || !c?.pending}>
+            {check.isPending ? <Spinner data-icon="inline-start" /> : <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} data-icon="inline-start" />}
+            Check
+          </Button>
+        </div>
+      </SettingRow>
+      {!!data?.items.some((i) => i.status === "failed") && (
+        <ul className="text-muted-foreground space-y-1 pb-3 text-xs">
+          {data.items
+            .filter((i) => i.status === "failed")
+            .slice(0, 5)
+            .map((i) => (
+              <li key={i.id}>
+                <span className="text-rasta-red">Failed</span> {fmtAgo(i.submittedAt)}: {i.error}
+              </li>
+            ))}
+        </ul>
+      )}
+    </>
+  )
+}
+
 /** One custom scraper: its switch, weight and actions; editing happens in the dialog. */
 function ScraperRow({
   sc,
   unavailable,
   suits,
+  health,
   onToggle,
   onEdit,
   onDuplicate,
@@ -329,6 +447,7 @@ function ScraperRow({
   unavailable: string | null
   /** suits the picked genres (and counts a little more for it) */
   suits: boolean
+  health: SourceStatus["health"]
   onToggle: (enabled: boolean) => void
   onEdit: () => void
   onDuplicate: () => void
@@ -347,9 +466,22 @@ function ScraperRow({
               {sc.enabled ? "suits your crates" : "suggested for your crates"}
             </Badge>
           )}
-          {unavailable ? (
+          {sc.supportingOnly && (
+            <Badge variant="outline" className="font-normal" title="Backs up a match but never confirms one on its own">
+              supporting only
+            </Badge>
+          )}
+          {!sc.enabled && sc.disabledReason ? (
+            <Badge variant="outline" className="text-rasta-red font-normal">
+              switched off by the health check
+            </Badge>
+          ) : unavailable ? (
             <Badge variant="outline" className="text-rasta-gold font-normal">
               {unavailable}
+            </Badge>
+          ) : sc.enabled && health && health.badInARow > 0 ? (
+            <Badge variant="outline" className="text-rasta-gold font-normal" title={health.lastBad ?? undefined}>
+              {health.badInARow} bad answer{health.badInARow === 1 ? "" : "s"} in a row
             </Badge>
           ) : (
             !sc.verified && (
@@ -360,7 +492,13 @@ function ScraperRow({
           )}
         </div>
         <p className="text-muted-foreground truncate text-xs">
-          {sc.scene || sc.notes || "No notes"} · <span className="font-mono">{hostOf(sc.searchUrl)}</span>
+          {!sc.enabled && sc.disabledReason ? (
+            <span className="text-rasta-red">{sc.disabledReason}</span>
+          ) : (
+            <>
+              {sc.scene || sc.notes || "No notes"} · <span className="font-mono">{hostOf(sc.searchUrl)}</span>
+            </>
+          )}
         </p>
       </button>
       <WeightMeter value={sc.weight} dim={!sc.enabled} />
@@ -524,6 +662,18 @@ function ScraperDialog({ value, onClose, onSave }: { value: ScraperDefinition | 
             </FieldLabel>
             <Slider min={0} max={MAX_WEIGHT} step={0.05} value={[d.weight]} onValueChange={(v) => setD({ ...d, weight: one(v) })} aria-label="Trust weight" />
             <FieldDescription>How much a hit here counts towards consensus.</FieldDescription>
+          </Field>
+          <Field>
+            <FieldLabel>Genre weights</FieldLabel>
+            <Input key={formatWeights(value?.genreWeights)} defaultValue={formatWeights(d.genreWeights)} onBlur={(e) => setD({ ...d, genreWeights: parseWeights(e.target.value) })} placeholder="e.g. Grime: 1.2, UK rap: 1.25" />
+            <FieldDescription>Counts this much more when your crates hold that genre (0.5 to 2).</FieldDescription>
+          </Field>
+          <Field>
+            <label className="flex items-center justify-between gap-2">
+              <FieldLabel>Supporting only</FieldLabel>
+              <Switch checked={!!d.supportingOnly} onCheckedChange={(v) => setD({ ...d, supportingOnly: v || undefined })} size="sm" aria-label="Supporting only" />
+            </label>
+            <FieldDescription>Backs up a match other sources found, but never confirms one alone - for event listings, forums and the like.</FieldDescription>
           </Field>
         </div>
         <div className="space-y-2 rounded-2xl border p-3">
@@ -696,6 +846,7 @@ export default function SourcesPage() {
                         sc={sc}
                         unavailable={sc.enabled ? (sources.find((s) => s.id === `scraper:${sc.id}`)?.unavailable ?? null) : null}
                         suits={(sources.find((s) => s.id === `scraper:${sc.id}`)?.boost ?? 1) > 1}
+                        health={sources.find((s) => s.id === `scraper:${sc.id}`)?.health ?? null}
                         onToggle={(v) => saveScrapers.mutate(scrapers.map((x) => (x.id === sc.id ? { ...x, enabled: v } : x)))}
                         onEdit={() => setEditing(sc)}
                         onDuplicate={() => setEditing({ ...sc, id: "", name: `${sc.name} copy`, enabled: false })}

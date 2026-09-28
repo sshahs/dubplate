@@ -14,9 +14,13 @@ import { mismatch, sniffFileSync } from "./sniff"
 import { ensureDir, followableSidecars, isInside, moveFile, removeCreatedDirs, removeEmptyDirs, sameFile } from "./fsops"
 import type { JobContext } from "./jobs"
 import { placementLibraryId, settingsForLibrary } from "./library-settings"
+import { canonicalGenre } from "./genres"
 import { lyricsToEmbed, usableLyrics } from "./lyrics"
 import { extFor, metaFor, proposedFilename, targetFolder } from "./placement"
-import { getLibrary, getTrack, insertOperation, libraryForPath, listLibraries, listOperations, markOperationReverted, updateTrack } from "./repo"
+import { eligibility, submitTracks } from "./acoustid-submit"
+import { enqueueJob } from "./jobs"
+import { getLibrary, getTrack, getTracks, insertOperation, libraryForPath, listLibraries, listOperations, markOperationReverted, updateTrack } from "./repo"
+import { settingsNow } from "./settings"
 import { readManagedTags, writeTags } from "./tagger"
 
 export { metaFor, proposedFilename } from "./placement"
@@ -29,11 +33,17 @@ export function extrasFor(t: Track, settings: Settings): TagExtras {
     out.key = formatKey(t.key, settings.analysis.keyNotation)
   }
   out.cover = artToEmbed(t, settings)?.hash ?? null
-  if (settings.naming.writeIds) out.ids = idsFor(t.decision, metaFor(t))
+  // IDs set by hand or by a MusicBrainz submission win over what the sources found.
+  if (settings.naming.writeIds) out.ids = { ...idsFor(t.decision, metaFor(t)), ...definedIds(t.idsOverride) }
   if (settings.analysis.writeReplayGain) out.replayGain = t.analysis?.loudness ?? null
   out.lyrics = lyricsToEmbed(t, settings)
+  if (settings.canonicalGenres.enabled) out.canonicalGenre = { genre: canonicalGenre(t, t.decision, settings)?.genre ?? null, overwrite: settings.canonicalGenres.overwrite }
   out.replaceLyrics = settings.lyrics.replaceExisting
   return out
+}
+
+function definedIds(ids: Track["idsOverride"]) {
+  return Object.fromEntries(Object.entries(ids ?? {}).filter(([, v]) => v !== undefined && v !== null && v !== "")) as Track["idsOverride"]
 }
 
 /** The .lrc file next to an audio file with the same name, if there is one. */
@@ -88,24 +98,29 @@ export function relDirOf(lib: Library | null | undefined, file: string): string 
   return path.relative(lib.path, path.dirname(file))
 }
 
-export function buildPlan(tracks: Track[], settings: Settings): PlanItem[] {
+/**
+ * What cutting these tracks would do. `tagsOnly`: bring the tags of files that
+ * are already cut up to date (new IDs, lyrics, artwork) without renaming or
+ * moving anything.
+ */
+export function buildPlan(tracks: Track[], settings: Settings, opts: { tagsOnly?: boolean } = {}): PlanItem[] {
   const libs = new Map(listLibraries().map((l) => [l.id, l]))
   const targets = new Map<string, number>()
   const items: PlanItem[] = tracks.map((t) => {
     const lib = libs.get(t.libraryId)
     // An inbox's tracks go to the library it feeds, into that library's layout.
-    const dest = libs.get(placementLibraryId(t.libraryId)) ?? lib
+    const dest = opts.tagsOnly ? lib : (libs.get(placementLibraryId(t.libraryId)) ?? lib)
     const inbox = !!dest && dest.id !== t.libraryId
     const s = settingsForLibrary(settings, dest?.id ?? t.libraryId)
     const issues: string[] = []
     const meta = metaFor(t)
-    let name = (s.naming.renameFiles && proposedFilename(t, settings)) || t.filename
+    let name = opts.tagsOnly ? t.filename : (s.naming.renameFiles && proposedFilename(t, settings)) || t.filename
     // Not renaming, but the extension is wrong for what the file is: fix just that.
     const ext = extFor(t, settings)
-    if (path.extname(name).slice(1).toLowerCase() !== ext) name = `${name.slice(0, name.length - path.extname(name).length)}.${ext}`
+    if (!opts.tagsOnly && path.extname(name).slice(1).toLowerCase() !== ext) name = `${name.slice(0, name.length - path.extname(name).length)}.${ext}`
     let dir = path.dirname(t.path)
     // Moving into folders on cut: the folder template decides the folder, inside the library.
-    if (dest && meta && (inbox || s.organise.onCut)) {
+    if (!opts.tagsOnly && dest && meta && (inbox || s.organise.onCut)) {
       if (inbox && !dest.exists) issues.push(`${dest.name}'s folder isn't there`)
       const folder = targetFolder(t, s)
       if (folder !== null) dir = path.join(dest.path, ...folder.split("/").filter(Boolean))
@@ -126,7 +141,7 @@ export function buildPlan(tracks: Track[], settings: Settings): PlanItem[] {
       const key = toPath.toLowerCase()
       targets.set(key, (targets.get(key) ?? 0) + 1)
     }
-    if (!rename && !tagChanges.length && meta) issues.push("Already clean - nothing to change")
+    if (!rename && !tagChanges.length && meta) issues.push(opts.tagsOnly ? "Already clean - tags are up to date" : "Already clean - nothing to change")
     return {
       trackId: t.id,
       fromPath: t.path,
@@ -283,6 +298,11 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
   }
   if (!opts.dryRun) await moved.finish(settings, batchId, label, ctx)
   if (changed.length && !opts.dryRun) ctx.filesChanged()
+  // Verified and corrected: their fingerprints can go to AcoustID.
+  if (changed.length && !opts.dryRun && settings.acoustid.submit) {
+    const ready = getTracks(changed).filter((t) => eligibility(t, settings).eligible).map((t) => t.id)
+    if (ready.length) enqueueJob("acoustid", `Send ${ready.length} fingerprint${ready.length === 1 ? "" : "s"} to AcoustID`, (job) => submitTracks(ready, settingsNow(), job).then(() => undefined))
+  }
   ctx.tracksChanged(changed)
   return batchId
 }

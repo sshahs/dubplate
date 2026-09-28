@@ -199,6 +199,16 @@ async function aiChecks(settings: Settings): Promise<HealthCheck[]> {
       out.push({ id: "ai", group: "AI", label, status: "error", detail: networkMessage(err), fix: { label: "AI settings", to: "/settings#ai" } })
     }
   }
+  // The second opinion and the cover check each need a model of their own.
+  for (const [which, cfg] of [
+    ["Second opinion", settings.llm.escalation],
+    ["Cover check", settings.llm.vision],
+  ] as const) {
+    if (!cfg.enabled) continue
+    const prov = settings.llm.providers.find((x) => x.id === cfg.providerId)
+    if (!cfg.model || !prov) out.push({ id: `ai-${which}`, group: "AI", label: which, status: "warn", detail: !prov ? "Its provider no longer exists." : "No model chosen, so it's skipped.", fix: { label: "AI settings", to: "/settings#ai" } })
+    else out.push({ id: `ai-${which}`, group: "AI", label: which, status: "info", detail: `${prov.label} · ${cfg.model}` })
+  }
   const budget = settings.llm.monthlyBudget
   if (budget > 0) {
     const spent = monthSpend(settings)
@@ -254,6 +264,12 @@ async function sourceChecks(settings: Settings): Promise<HealthCheck[]> {
   for (const r of down) out.push({ id: `down-${r.labels[0]}`, group: "Sources", label: r.labels.join(", "), status: "warn", detail: `Can't reach it: ${r.error}` })
   if (skipped.length) out.push({ id: "sources-skipped", group: "Sources", label: "Switched on but skipped", status: "info", detail: skipped.join("; "), fix: { label: "Sources", to: "/sources" } })
   if (!enabled.length) out.push({ id: "sources", group: "Sources", label: "Sources", status: "warn", detail: "Every source is switched off.", fix: { label: "Sources", to: "/sources" } })
+  for (const sc of settings.scrapers.filter((x) => !x.enabled && x.disabledReason)) {
+    out.push({ id: `scraper-off-${sc.id}`, group: "Sources", label: sc.name, status: "warn", detail: `${sc.disabledReason}. Test it and switch it back on once it works.`, fix: { label: "Sources", to: "/sources#scrapers" } })
+  }
+  if (settings.acoustid.submit && !settings.acoustid.userKey) {
+    out.push({ id: "acoustid-submit", group: "Sources", label: "Sending to AcoustID", status: "warn", detail: "Switched on, but there's no AcoustID user key, so nothing is sent.", fix: { label: "Add it", to: "/sources#fingerprint" } })
+  }
   if (settings.sources.musicbrainz?.enabled && !settings.contact.trim()) {
     out.push({ id: "contact", group: "Sources", label: "Contact for MusicBrainz", status: "warn", detail: "MusicBrainz asks every app for a contact address; without one it may slow or block requests.", fix: { label: "Add one", to: "/settings#safety" } })
   }

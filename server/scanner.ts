@@ -122,6 +122,7 @@ export async function readAudio(file: string) {
       cover: art?.hash,
       mbRecordingId: c.musicbrainz_recordingid || undefined,
       mbReleaseId: c.musicbrainz_albumid || undefined,
+      mbReleaseGroupId: c.musicbrainz_releasegroupid || undefined,
       mbArtistId: c.musicbrainz_artistid?.[0] || undefined,
       discogsReleaseId: c.discogs_release_id ? String(c.discogs_release_id) : undefined,
       replayGainTrackGain: Number.isFinite(c.replaygain_track_gain?.dB) ? Math.round(c.replaygain_track_gain!.dB * 100) / 100 : undefined,
@@ -231,7 +232,8 @@ export async function scanLibrary(lib: Library, settings: Settings, ctx: JobCont
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ${TAGS_VERSION}) RETURNING id`
   )
   const markRead = db.prepare(`UPDATE tracks SET tags_version = ${TAGS_VERSION} WHERE id = ?`)
-  const insertData = db.prepare("INSERT INTO track_data (track_id, heuristic_json) VALUES (?, ?)")
+  // The file as first found - name, place and tags - is kept for good, whatever's done to it later.
+  const insertData = db.prepare("INSERT INTO track_data (track_id, heuristic_json, original_json) VALUES (?, ?, ?)")
   const prevTrack = (id: number) => getTrack(id)!
 
   await mapLimit(files, 8, ctx.signal, async (file) => {
@@ -304,7 +306,7 @@ export async function scanLibrary(lib: Library, settings: Settings, ctx: JobCont
             parseKey(audio.tags.key),
             audio.fileCheck ? JSON.stringify(audio.fileCheck) : null
           ) as { id: number }
-          insertData.run(r.id, JSON.stringify(heuristic))
+          insertData.run(r.id, JSON.stringify(heuristic), JSON.stringify({ filename, path: file, tags: audio.tags, scannedAt: new Date().toISOString() }))
           seen.add(r.id)
           changed.push(r.id)
           addedIds.push(r.id)

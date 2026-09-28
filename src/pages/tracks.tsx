@@ -5,12 +5,15 @@ import {
   Cancel01Icon,
   Download04Icon,
   FileCorruptIcon,
+  FingerPrintIcon,
   Image01Icon,
+  LinkSquare02Icon,
   MusicNote03Icon,
   MoreHorizontalIcon,
   PencilEdit02Icon,
   RefreshIcon,
   Search01Icon,
+  Tag01Icon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons"
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -27,6 +30,7 @@ import { BulkEditDialog } from "@/components/bulk-edit"
 import { ConfidenceMeter, StatusBadge } from "@/components/confidence"
 import { Cover } from "@/components/cover"
 import { DjExportDialog } from "@/components/dj-export-dialog"
+import { MusicBrainzDialog } from "@/components/track-decision"
 import { QueryError } from "@/components/query-error"
 import { TrackDetail } from "@/components/track-detail"
 import { Button } from "@/components/ui/button"
@@ -190,6 +194,7 @@ export default function TracksPage() {
   const quality = params.get("quality") === "suspect" ? ("suspect" as const) : undefined
   const problems = params.get("problems") === "1" || undefined
   const [exporting, setExporting] = useState(false)
+  const [mbOpen, setMbOpen] = useState(false)
   const [sort, setSort] = useState<Sort>("filename")
   const [dir, setDir] = useState<"asc" | "desc">("asc")
   const [selected, setSelected] = useState<Set<number>>(new Set())
@@ -296,8 +301,16 @@ export default function TracksPage() {
     onError: (e) => toast.error(e.message),
   })
   const job = useMutation({
-    mutationFn: (kind: "analyze" | "reanalyze" | "artwork" | "lyrics") =>
-      kind === "artwork" ? api.findArtwork(selection!) : kind === "lyrics" ? api.findLyrics(selection!, true) : api.analyze(selection!, kind === "reanalyze"),
+    mutationFn: (kind: "analyze" | "reanalyze" | "artwork" | "lyrics" | "retag" | "acoustid") =>
+      kind === "artwork"
+        ? api.findArtwork(selection!)
+        : kind === "lyrics"
+          ? api.findLyrics(selection!, true)
+          : kind === "retag"
+            ? api.retag(selection!)
+            : kind === "acoustid"
+              ? api.acoustidSubmit(selection!)
+              : api.analyze(selection!, kind === "reanalyze"),
     onSuccess: (j) => toast(j.label, { description: "Runs in the background - watch the job dock." }),
     onError: (e) => toast.error(e.message),
   })
@@ -415,6 +428,8 @@ export default function TracksPage() {
           </DropdownMenu>
         }
       />
+
+      {selection && <MusicBrainzDialog open={mbOpen} onOpenChange={setMbOpen} selection={selection} count={selectionCount} />}
 
       <DjExportDialog
         open={exporting}
@@ -551,6 +566,22 @@ export default function TracksPage() {
                     <DropdownMenuItem onClick={() => job.mutate("lyrics")}>
                       <HugeiconsIcon icon={MusicNote03Icon} strokeWidth={2} />
                       Find lyrics
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>Cut tracks</DropdownMenuLabel>
+                    <DropdownMenuItem onClick={() => job.mutate("retag")}>
+                      <HugeiconsIcon icon={Tag01Icon} strokeWidth={2} />
+                      Update tags
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => job.mutate("acoustid")}>
+                      <HugeiconsIcon icon={FingerPrintIcon} strokeWidth={2} />
+                      Send fingerprints to AcoustID
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setMbOpen(true)}>
+                      <HugeiconsIcon icon={LinkSquare02Icon} strokeWidth={2} />
+                      Add to MusicBrainz as one release…
                     </DropdownMenuItem>
                   </DropdownMenuGroup>
                   <DropdownMenuSeparator />
