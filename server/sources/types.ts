@@ -12,6 +12,8 @@ export interface SourceQuery {
   year?: number
   /** true when the title is a description ("Live Clash") rather than a song name */
   descriptiveTitle: boolean
+  /** the reading's version ("Dubplate", "VIP"…), for the lookup cache */
+  version?: string
   filePath: string
 }
 

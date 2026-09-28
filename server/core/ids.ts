@@ -24,6 +24,13 @@ export function idsFor(decision: Decision | null | undefined, meta: FinalMeta | 
   }
   const discogs = cluster.candidates.find((c) => c.ids?.discogsReleaseId)
   if (discogs?.ids?.discogsReleaseId) out.discogsReleaseId = discogs.ids.discogsReleaseId
+  // The chosen release (the artist's own album over a compilation…) decides which release IDs are written.
+  const chosen = decision.release?.release
+  if (chosen && (chosen.source === "musicbrainz" || chosen.source === "acoustid")) {
+    if (chosen.recordingId) out.mbRecordingId = chosen.recordingId
+    if (chosen.id) out.mbReleaseId = chosen.id
+    if (chosen.groupId) out.mbReleaseGroupId = chosen.groupId
+  } else if (chosen?.source === "discogs" && chosen.id) out.discogsReleaseId = chosen.id
   for (const k of Object.keys(out) as (keyof ExternalIds)[]) if (!out[k] || (Array.isArray(out[k]) && !out[k].length)) delete out[k]
   return out
 }

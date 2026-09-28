@@ -51,6 +51,8 @@ export interface ExistingTags {
   mbArtistId?: string
   /** Discogs release ID */
   discogsReleaseId?: string
+  /** MusicBrainz release group ID */
+  mbReleaseGroupId?: string
   /** ReplayGain 2 track gain in dB (the -18 LUFS reference) */
   replayGainTrackGain?: number
   /** ReplayGain track peak, as a linear sample value (1 = full scale) */
@@ -66,6 +68,7 @@ export interface ExistingTags {
 export interface ExternalIds {
   mbRecordingId?: string
   mbReleaseId?: string
+  mbReleaseGroupId?: string
   mbArtistIds?: string[]
   discogsReleaseId?: string
 }
@@ -83,6 +86,17 @@ export interface ArtRef {
   sourceLabel?: string
   /** where it was downloaded from */
   url?: string
+  /** what a vision model said about it, when the match was in doubt */
+  check?: CoverCheck
+}
+
+/** A vision model's look at a found cover. */
+export interface CoverCheck {
+  model: string
+  matches: boolean
+  confidence: number
+  reason: string
+  at: string
 }
 
 /** How loud a track is (EBU R128 / ITU BS.1770) and the gain that evens it out. */
@@ -215,6 +229,8 @@ export interface HeuristicParse extends TrackReading {
 }
 
 export interface AiParse extends TrackReading {
+  /** the main artist's home country, ISO code, when the model knows it */
+  country?: string
   confidence: number // 0..1
   reasoning: string
   alternatives: { artists: string[]; title: string }[]
@@ -238,6 +254,36 @@ export type SourceId =
   | "discogs-collection"
   | `scraper:${string}`
 
+/**
+ * What kind of release something is, in the order an artist's own release
+ * context is preferred: their album, EP, single, a standalone release, a remix
+ * or re-release of their own, a mixtape or street release, then compilations,
+ * DJ mixes and anything else.
+ */
+export type ReleaseKind = "album" | "ep" | "single" | "standalone" | "remix" | "mixtape" | "live" | "compilation" | "dj-mix" | "other"
+
+/** A release a recording appears on, as a source describes it. */
+export interface ReleaseInfo {
+  source: SourceId
+  title: string
+  kind: ReleaseKind
+  /** the release is the artist's own (not Various Artists or someone else's) */
+  own: boolean | null
+  /** MusicBrainz release / release group, or a Discogs release id */
+  id?: string
+  groupId?: string
+  /** "Official", "Promotion", "Bootleg"… (MusicBrainz) */
+  status?: string
+  date?: string
+  country?: string
+  label?: string
+  /** the source's own words for the type, e.g. "Album + Compilation", "Vinyl, 12\", Mixed" */
+  typeText?: string
+  /** the recording on it (MusicBrainz), and that recording's length in seconds */
+  recordingId?: string
+  length?: number
+}
+
 export interface Candidate {
   source: SourceId
   sourceLabel: string
@@ -259,6 +305,12 @@ export interface Candidate {
   artwork?: string
   /** catalogue identifiers (MusicBrainz, Discogs) for writing to tags */
   ids?: ExternalIds
+  /** the releases this recording appears on, where the source says (for choosing the release) */
+  releases?: ReleaseInfo[]
+  /** genres and styles as the source words them */
+  genres?: string[]
+  /** where the release came out (ISO country, e.g. "GB") */
+  country?: string
 }
 
 export interface ConfidenceFactor {
@@ -295,6 +347,137 @@ export interface Decision {
   factors: ConfidenceFactor[]
   clusters: CandidateCluster[]
   warnings: string[]
+  /** the release chosen for the recording, and why */
+  release?: ReleaseChoice | null
+  /** what kind of recording this is, and whether length and fingerprint back it up */
+  versionCheck?: VersionCheck
+  /** which reading or source each field came from */
+  provenance?: Partial<Record<ProvenanceField, string>>
+  /** a second, larger model looked at it: never approved without a person */
+  escalated?: Escalation
+  /** genres the sources gave, as they worded them */
+  sourceGenres?: string[]
+  /** the one genre from the canonical list (when canonical genres are on) */
+  canonicalGenre?: CanonicalGenre | null
+}
+
+export type ProvenanceField = "artists" | "title" | "version" | "year" | "album" | "label" | "genre" | "release"
+
+export interface ReleaseChoice {
+  release: ReleaseInfo
+  /** in words: "the artist's own album", "the file's album tag names this compilation"… */
+  reason: string
+  /** how many releases were weighed */
+  considered: number
+  /** the best of the artist's own, when evidence kept a compilation or DJ mix instead */
+  ownAlternative?: ReleaseInfo
+}
+
+export type VersionKind = "original" | "remix" | "vip" | "dubplate" | "live" | "edit" | "exclusive" | "compilation" | "dj-mix"
+
+export interface VersionCheck {
+  kind: VersionKind
+  label: string
+  /** the chosen release is officially the artist's (MusicBrainz status "Official" on their own release) */
+  official: boolean | null
+  /** the file's length is within a few seconds of the recording's */
+  durationMatch: boolean | null
+  /** an audio fingerprint points at this recording */
+  fingerprintMatch: boolean | null
+}
+
+export interface Escalation {
+  provider: string
+  model: string
+  at: string
+  /** what the first pass had */
+  before: { confidence: number; status: Decision["status"]; artists: string[]; title: string }
+  /** the second model read it differently */
+  changed: boolean
+  reason: string
+}
+
+export interface CanonicalGenre {
+  genre: string
+  /** the genre's own folder: its name, unless the rule names the folder differently */
+  folder: string
+  /** the folder above it (e.g. "UK", "US"), empty when it has none */
+  region: string
+  /** what matched: a source genre, the AI, the file's tag, the title, or you */
+  from: string
+}
+
+/** One rule of the canonical genre list. */
+export interface GenreRule {
+  /** the genre written to the tag (and the folder's name, unless `folder` says otherwise) */
+  genre: string
+  /** the folder's name when it isn't the genre, e.g. "House Genres" for House */
+  folder?: string
+  /** folder above the genre ("UK", "US"); empty for none */
+  region: string
+  /** source genres and styles that mean this one, e.g. "grime", "grime revival" */
+  match: string[]
+  /** words in the title, version or album that put a track here whatever its style, e.g. "daily duppy" */
+  titles?: string[]
+  /** source genres containing these words never count for it, e.g. "rock" so "garage rock" isn't UK Garage */
+  exclude?: string[]
+  /** only when the music's from one of these (e.g. ["UK"]); "?" allows unknown; empty = anywhere */
+  regions?: string[]
+}
+
+/** How safe it is to let automation change a file, apart from how sure the identification is. */
+export interface RiskAssessment {
+  level: "low" | "medium" | "high"
+  reasons: string[]
+}
+
+/** One step of how a track was decided, in order. */
+export interface DecisionStep {
+  key: "recording" | "release" | "version" | "genre" | "safety" | "verified" | "acoustid" | "musicbrainz"
+  label: string
+  state: "ok" | "warn" | "bad" | "info" | "pending"
+  value: string
+  detail?: string
+}
+
+/** A fingerprint sent to AcoustID. */
+export interface AcoustIdSubmission {
+  id: number
+  trackId: number | null
+  status: "pending" | "imported" | "failed"
+  submissionId: number | null
+  acoustId: string | null
+  mbRecordingId: string | null
+  error: string | null
+  submittedAt: string
+  checkedAt: string | null
+}
+
+/** What stands between a track and an AcoustID submission. */
+export interface AcoustIdEligibility {
+  eligible: boolean
+  checks: { key: string; label: string; ok: boolean; detail?: string }[]
+  submission: AcoustIdSubmission | null
+}
+
+/** A release sent to MusicBrainz's release editor for a person to check and submit. */
+export interface MbSubmission {
+  id: number
+  trackIds: number[]
+  title: string
+  status: "pending" | "submitted" | "received"
+  releaseMbid: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** A scraper's recent health, to switch off one that's started returning login or home pages. */
+export interface SourceHealth {
+  sourceId: string
+  badInARow: number
+  lastBad: string | null
+  lastOkAt: string | null
+  disabledAt: string | null
 }
 
 /** The metadata a track will be renamed/tagged to. */
@@ -351,6 +534,16 @@ export interface Track {
   fileCheck: FileCheck | null
   /** lyrics found online, written when the track is cut */
   lyrics: LyricsFound | null
+  /** Chromaprint fingerprint, kept for AcoustID (never sent anywhere else) */
+  fingerprint: { duration: number; fingerprint: string; at: string } | null
+  /** the file as first scanned: name, place and tags, never changed afterwards */
+  original: { filename: string; path: string; tags: ExistingTags; scannedAt: string } | null
+  /** IDs set by hand or by a MusicBrainz submission; they win over what sources found */
+  idsOverride: ExternalIds | null
+  /** a second, larger model's reading of an uncertain track (it replaces the first in scoring) */
+  escalation: (Escalation & { ai: AiParse }) | null
+  /** who approved it: a person, auto-approve, or a hands-off library */
+  approvedBy: "person" | "auto" | "hands-off" | null
   createdAt: string
   updatedAt: string
 }
@@ -362,7 +555,7 @@ export interface SetAside {
   keptId: number | null
 }
 
-export type TrackSummary = Omit<Track, "candidates" | "decision" | "heuristic" | "ai" | "lyrics"> & {
+export type TrackSummary = Omit<Track, "candidates" | "decision" | "heuristic" | "ai" | "lyrics" | "fingerprint" | "original" | "escalation"> & {
   proposedArtist: string | null
   proposedTitle: string | null
   sourceCount: number
@@ -402,7 +595,7 @@ export interface LibrarySettings {
   inboxFor?: number
 }
 
-export type JobKind = "scan" | "interpret" | "scour" | "score" | "process" | "execute" | "rewind" | "analyze" | "artwork" | "organise" | "duplicates" | "sync" | "lyrics" | "upload"
+export type JobKind = "scan" | "interpret" | "scour" | "score" | "process" | "execute" | "rewind" | "analyze" | "artwork" | "organise" | "duplicates" | "sync" | "lyrics" | "upload" | "acoustid" | "retag"
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled"
 
 export interface Job {
@@ -518,6 +711,8 @@ export interface SourceConfig {
   weight: number
   apiKey?: string
   apiSecret?: string
+  /** a multiplier per genre (crates picker names), in place of the flat ×1.2 for a good fit */
+  genreWeights?: Record<string, number>
 }
 
 export interface ScraperField {
@@ -550,6 +745,12 @@ export interface ScraperDefinition {
   verified?: boolean
   /** genres this site is good for (names from the crates picker) */
   genres?: string[]
+  /** a multiplier per genre, in place of the flat ×1.2 for a good fit */
+  genreWeights?: Record<string, number>
+  /** its hits back up other sources but never confirm a track on their own */
+  supportingOnly?: boolean
+  /** switched off by the health check, and why */
+  disabledReason?: string
 }
 
 export interface Settings {
@@ -567,6 +768,13 @@ export interface Settings {
     monthlyBudget: number
     /** symbol shown with prices and costs */
     currency: string
+    /**
+     * A second, larger model for the uncertain ones: scores in [from, to] or sources
+     * in conflict (never the "no source knows it" cap). What it reads always goes to Review.
+     */
+    escalation: { enabled: boolean; providerId: string; model: string; from: number; to: number }
+    /** a vision model that looks at a found cover when the match is in doubt */
+    vision: { enabled: boolean; providerId: string; model: string }
   }
   sources: Record<string, SourceConfig>
   scrapers: ScraperDefinition[]
@@ -579,6 +787,8 @@ export interface Settings {
     parseOnlyMax: number
     /** trust sources that suit the picked genres a little more */
     genreAware: boolean
+    /** prefer the artist's own album, EP or single over compilations and DJ mixes (unless the file says otherwise) */
+    preferOwnRelease: boolean
   }
   naming: {
     template: string
@@ -690,6 +900,19 @@ export interface Settings {
   hooks: {
     /** folders as download tools see them → as Dubplate does, e.g. /downloads → /music/Downloads */
     pathMap: PathMapping[]
+  }
+  acoustid: {
+    /** send fingerprints of verified tracks to AcoustID */
+    submit: boolean
+    /** your AcoustID user API key (acoustid.org, after signing in); the application key is the source's */
+    userKey?: string
+  }
+  /** one genre per track, from your own list */
+  canonicalGenres: {
+    enabled: boolean
+    /** write the canonical genre over whatever genre a file has (off: only into files without one) */
+    overwrite: boolean
+    rules: GenreRule[]
   }
   contact: string
 }

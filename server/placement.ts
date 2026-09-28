@@ -5,6 +5,7 @@ import { formatKey } from "../shared/keys"
 import type { FinalMeta, Settings, Track } from "../shared/types"
 import { bpmRange, decadeOf, initialOf, renderFolderTemplate, type FolderValues } from "./core/folders"
 import { decisionToFinal, formatArtist, renderTemplate } from "./core/naming"
+import { canonicalGenre } from "./genres"
 import { placementLibraryId, settingsForLibrary } from "./library-settings"
 
 export function metaFor(t: Track): FinalMeta | null {
@@ -39,7 +40,9 @@ export function extFor(t: Pick<Track, "ext" | "fileCheck">, settings: Settings):
 export function folderValues(t: Track, meta: FinalMeta, settings: Settings): FolderValues {
   const artist = formatArtist(meta, settings.naming, false)
   const year = t.tags.year || meta.year
-  const genre = (t.tags.genre?.[0] || meta.genre || "").split(/[,;/]/)[0].trim()
+  // Canonical genres on: the folder follows the one genre from your list (and its region folder).
+  const canonical = settings.canonicalGenres?.enabled ? canonicalGenre(t, t.decision, settings) : null
+  const genre = settings.canonicalGenres?.enabled ? (canonical?.folder ?? "") : (t.tags.genre?.[0] || meta.genre || "").split(/[,;/]/)[0].trim()
   const bpm = t.bpm ? Math.round(t.bpm) : null
   return {
     artist,
@@ -50,6 +53,7 @@ export function folderValues(t: Track, meta: FinalMeta, settings: Settings): Fol
     decade: decadeOf(year),
     label: t.tags.label || meta.label || "",
     genre,
+    region: canonical?.region ?? "",
     version: meta.version ?? "",
     initial: initialOf(meta.artists[0] ?? artist),
     bpm: bpm ? String(bpm) : "",

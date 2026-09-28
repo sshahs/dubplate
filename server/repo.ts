@@ -131,13 +131,18 @@ export function rowToTrack(r: Row): Track {
     aside: parseJson<SetAside | null>(r.aside_json, null),
     fileCheck: parseJson<FileCheck | null>(r.file_check_json, null),
     lyrics: parseJson<LyricsFound | null>(r.lyrics_json, null),
+    fingerprint: parseJson<Track["fingerprint"]>(r.fingerprint_json, null),
+    original: parseJson<Track["original"]>(r.original_json, null),
+    idsOverride: parseJson<Track["idsOverride"]>(r.ids_json, null),
+    approvedBy: (r.approved_by as Track["approvedBy"]) ?? null,
+    escalation: parseJson<Track["escalation"]>(r.escalation_json, null),
     createdAt: r.created_at as string,
     updatedAt: r.updated_at as string,
   }
 }
 
 export function toSummary(t: Track): TrackSummary {
-  const { candidates: _c, decision, heuristic, ai, lyrics: _l, ...rest } = t
+  const { candidates: _c, decision, heuristic, ai, lyrics: _l, fingerprint: _f, original: _o, escalation: _e, ...rest } = t
   const reading = t.final ?? decision ?? ai ?? heuristic
   return {
     ...rest,
@@ -149,10 +154,20 @@ export function toSummary(t: Track): TrackSummary {
 }
 
 /** A full track: its row plus the bulky readings/hits/decision kept in track_data. */
-const FULL_TRACK = "SELECT t.*, d.heuristic_json, d.ai_json, d.candidates_json, d.decision_json, d.lyrics_json FROM tracks t LEFT JOIN track_data d ON d.track_id = t.id"
+const FULL_TRACK =
+  "SELECT t.*, d.heuristic_json, d.ai_json, d.candidates_json, d.decision_json, d.lyrics_json, d.fingerprint_json, d.original_json, d.escalation_json FROM tracks t LEFT JOIN track_data d ON d.track_id = t.id"
 
 export function getTrack(id: number): Track | null {
   const r = getDb().prepare(`${FULL_TRACK} WHERE t.id = ?`).get(id) as Row | undefined
+  return r ? rowToTrack(r) : null
+}
+
+/** Another copy of exactly the same audio (same content hash) that's already been identified. */
+export function identifiedTwin(t: Pick<Track, "id" | "hash">): Track | null {
+  if (!t.hash) return null
+  const r = getDb()
+    .prepare(`${FULL_TRACK} WHERE t.hash = ? AND t.id <> ? AND d.candidates_json IS NOT NULL AND t.aside_json IS NULL ORDER BY t.missing, t.id LIMIT 1`)
+    .get(t.hash, t.id) as Row | undefined
   return r ? rowToTrack(r) : null
 }
 
@@ -245,7 +260,7 @@ const SUMMARY = `SELECT t.*,
 
 function rowToSummary(r: Row): TrackSummary {
   const t = rowToTrack(r)
-  const { candidates: _c, decision: _d, heuristic: _h, ai: _a, lyrics: _l, ...rest } = t
+  const { candidates: _c, decision: _d, heuristic: _h, ai: _a, lyrics: _l, fingerprint: _f, original: _o, escalation: _e, ...rest } = t
   // Same precedence as toSummary: approved → decision → AI → rule-based parser.
   const reading = t.final
     ? { artists: t.final.artists, title: t.final.title }
@@ -302,7 +317,7 @@ export function queryTrackIds(q: TrackQuery): number[] {
   return (getDb().prepare(`SELECT id FROM tracks ${sql} ORDER BY id`).all(...params) as { id: number }[]).map((r) => r.id)
 }
 
-const JSON_COLS = new Set(["tags", "heuristic", "ai", "candidates", "decision", "final", "analysis", "art", "artFound", "aside", "fileCheck", "lyrics"])
+const JSON_COLS = new Set(["tags", "heuristic", "ai", "candidates", "decision", "final", "analysis", "art", "artFound", "aside", "fileCheck", "lyrics", "fingerprint", "original", "idsOverride", "escalation"])
 /** Kept in track_data rather than on the track row. */
 const DATA_COLS: Record<string, string> = {
   heuristic: "heuristic_json",
@@ -310,6 +325,9 @@ const DATA_COLS: Record<string, string> = {
   candidates: "candidates_json",
   decision: "decision_json",
   lyrics: "lyrics_json",
+  fingerprint: "fingerprint_json",
+  original: "original_json",
+  escalation: "escalation_json",
 }
 const COLS: Record<string, string> = {
   libraryId: "library_id",
@@ -338,6 +356,8 @@ const COLS: Record<string, string> = {
   artFound: "art_found_json",
   aside: "aside_json",
   fileCheck: "file_check_json",
+  idsOverride: "ids_json",
+  approvedBy: "approved_by",
 }
 
 export function updateTrack(id: number, patch: Partial<Track>) {

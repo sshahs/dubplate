@@ -1,4 +1,6 @@
 import type {
+  AcoustIdEligibility,
+  AcoustIdSubmission,
   AiParse,
   AiUsageReport,
   Alias,
@@ -8,6 +10,7 @@ import type {
   Correction,
   Crate,
   CrateFacets,
+  DecisionStep,
   CrateRules,
   DjFormat,
   DuplicateGroup,
@@ -19,6 +22,7 @@ import type {
   Job,
   Library,
   LibrarySettings,
+  MbSubmission,
   MediaServerConfig,
   MixSuggestion,
   Operation,
@@ -26,8 +30,10 @@ import type {
   OrganisePreview,
   PathMapping,
   PlanItem,
+  RiskAssessment,
   ScraperDefinition,
   Settings,
+  SourceHealth,
   Stats,
   Track,
   TrackStatus,
@@ -188,8 +194,33 @@ export interface SourceStatus {
   meta: { label: string; needs: ("apiKey" | "apiSecret")[]; keyLabel?: string; secretLabel?: string; about: string; signup?: string } | null
   /** genres the source is especially good for */
   suits: string[]
-  /** ×1.2 when it suits the picked genres, else 1 */
+  /** ×1.2 when it suits the picked genres, else 1 (or its own weight for that genre) */
   boost: number
+  /** its own weight per genre, when it has them */
+  genreWeights: Record<string, number> | null
+  /** scrapers: how its recent answers went */
+  health: SourceHealth | null
+}
+
+/** How a track was decided, step by step. */
+export interface TrackInsight {
+  steps: DecisionStep[]
+  risk: RiskAssessment
+  acoustid: AcoustIdEligibility
+  musicbrainz: MbSubmission | null
+}
+
+export interface AcoustIdSubmissions {
+  items: AcoustIdSubmission[]
+  counts: Record<AcoustIdSubmission["status"], number>
+  submit: boolean
+}
+
+/** The release editor's address and the fields to post to it. */
+export interface MbSeed {
+  submission: MbSubmission
+  action: string
+  fields: Record<string, string>
 }
 
 /** Fields bulk edit can set; null or "" clears. */
@@ -311,6 +342,8 @@ export const api = {
     return ref ? `/api/tracks/${t.id}/art?which=${which}&size=${size}&h=${ref.hash.slice(0, 12)}` : null
   },
   rescoreOne: (id: number) => post<Track>(`/api/tracks/${id}/rescore`),
+  insight: (id: number) => get<TrackInsight>(`/api/tracks/${id}/insight`),
+  retag: (s: Selection) => post<Job>("/api/retag", sel(s)),
   mixes: (id: number) => get<MixSuggestion[]>(`/api/tracks/${id}/mixes`),
   audioUrl: (id: number) => `/api/tracks/${id}/audio`,
 
@@ -343,6 +376,14 @@ export const api = {
   createToken: (name: string, scope: ApiToken["scope"]) => post<ApiToken & { token: string }>("/api/tokens", { name, scope }),
   deleteToken: (id: number) => del<{ ok: true }>(`/api/tokens/${id}`),
   hookCalls: () => get<HookCall[]>("/api/hooks/recent"),
+
+  acoustidSubmissions: () => get<AcoustIdSubmissions>("/api/acoustid/submissions"),
+  acoustidSubmit: (s?: Selection) => post<Job>("/api/acoustid/submit", s ? sel(s) : {}),
+  acoustidCheck: () => post<AcoustIdSubmissions & { imported: number }>("/api/acoustid/check"),
+  mbSubmissions: () => get<MbSubmission[]>("/api/musicbrainz/submissions"),
+  mbSeed: (s: Selection) => post<MbSeed>("/api/musicbrainz/seed", { ...sel(s), base: window.location.origin }),
+  mbSubmitted: (id: number) => post<MbSubmission>(`/api/musicbrainz/submissions/${id}/submitted`),
+  mbComplete: (id: number, releaseMbid: string) => post<{ submission: MbSubmission; recordings: number }>(`/api/musicbrainz/submissions/${id}/complete`, { releaseMbid }),
 
   crates: () => get<Crate[]>("/api/crates"),
   crate: (id: number) => get<Crate>(`/api/crates/${id}`),

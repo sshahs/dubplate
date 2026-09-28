@@ -1,11 +1,15 @@
 // Orchestrates interpret → scour → score for batches of tracks.
 
-import type { Settings, Track, TrackStatus } from "../shared/types"
+import { riskOf } from "../shared/risk"
+import type { AiParse, Candidate, Settings, Track, TrackStatus } from "../shared/types"
 import { interpretTrack } from "./ai/interpreter"
+import { escalate, shouldEscalate } from "./ai/escalation"
 import { overBudget } from "./ai/usage"
+import { checkCover, coverInDoubt } from "./ai/vision"
 import { analyseTrack, needsAnalysis } from "./analysis"
 import { handsOff } from "./autopilot"
 import { findArtwork } from "./art"
+import { canonicalGenre } from "./genres"
 import { lyricsForTrack, needsLyrics } from "./lyrics"
 import { scoreTrack } from "./core/confidence"
 import { parseFilename } from "./core/filename-parser"
@@ -14,12 +18,18 @@ import { proposedFilename } from "./executor"
 import type { JobContext } from "./jobs"
 import { mapLimit } from "./jobs"
 import { settingsForLibrary } from "./library-settings"
-import { aliasMap, getTrack, knownArtists, listCorrections, statusCounts, updateTrack } from "./repo"
+import { aliasMap, getTrack, identifiedTwin, knownArtists, listCorrections, statusCounts, updateTrack } from "./repo"
+import { acoustidLookup, findFpcalc, fingerprintFile } from "./sources/acoustid"
 import { folderContext } from "./scanner"
 import { genreBoost, scourTrack, SourceBreaker } from "./sources"
 
 /** Statuses a human set - automated passes must not overwrite them. */
 const HUMAN_STATUSES: TrackStatus[] = ["approved", "done", "rejected"]
+
+/** Sources whose hits back others up but never confirm a track alone (scrapers marked so). */
+export function supportingSources(settings: Settings): Set<string> {
+  return new Set(settings.scrapers.filter((s) => s.supportingOnly).map((s) => `scraper:${s.id}`))
+}
 
 /** Each source's trust weight, a little higher for sources that suit the crates' genres. */
 export function weightsFrom(settings: Settings): Record<string, number> {
@@ -29,26 +39,47 @@ export function weightsFrom(settings: Settings): Record<string, number> {
   return w
 }
 
+/** The AI reading to score with: a second model's, when there is one, with the first model's as an alternative. */
+function readingForScore(track: Track): AiParse | null {
+  const e = track.escalation
+  if (!e) return track.ai
+  const first = track.ai
+  const alt = first && (first.title || first.artists.length) ? [{ artists: first.artists, title: first.title }] : []
+  return { ...e.ai, alternatives: [...e.ai.alternatives, ...alt].slice(0, 5) }
+}
+
 export function scoreAndSave(track: Track, settings: Settings): Track {
   const decision = scoreTrack({
     heuristic: track.heuristic,
-    ai: track.ai,
+    ai: readingForScore(track),
     tags: track.tags,
     candidates: track.candidates ?? [],
     duration: track.duration,
     weights: weightsFrom(settingsForLibrary(settings, track.libraryId)),
     thresholds: settings.confidence,
+    context: { filename: track.filename, folders: folderContext(track.relDir), preferOwnRelease: settings.confidence.preferOwnRelease },
+    supporting: supportingSources(settings),
   })
+  if (track.escalation) {
+    const { ai: _ai, ...e } = track.escalation
+    decision.escalated = e
+    // An escalated track always goes to a person.
+    if (decision.status === "matched") decision.status = "review"
+  }
   const keepStatus = HUMAN_STATUSES.includes(track.status)
   let status: TrackStatus = keepStatus ? track.status : decision.status
   let final = track.final
-  if (!keepStatus && settings.confidence.autoApprove && decision.status === "matched") {
+  let approvedBy = track.approvedBy
+  // Auto-approve only acts on low-risk tracks: confidence and risk are separate questions.
+  if (!keepStatus && settings.confidence.autoApprove && decision.status === "matched" && riskOf({ ...track, decision }).level === "low") {
     status = "approved"
     final = decisionToFinal(decision)
+    approvedBy = "auto"
   }
-  const next: Track = { ...track, decision, confidence: decision.confidence, status, final }
+  decision.canonicalGenre = canonicalGenre({ ...track, final }, decision, settings)
+  const next: Track = { ...track, decision, confidence: decision.confidence, status, final, approvedBy }
   next.proposedName = proposedFilename(next, settings)
-  updateTrack(track.id, { decision, confidence: decision.confidence, status, final, proposedName: next.proposedName })
+  updateTrack(track.id, { decision, confidence: decision.confidence, status, final, approvedBy, proposedName: next.proposedName })
   return next
 }
 
@@ -68,6 +99,9 @@ export async function processTracks(ids: number[], settings: Settings, opts: Pro
   let aiDisabled = false
   const changed: number[] = []
   const breaker = new SourceBreaker()
+  let sharedCount = 0
+  let skippedAi = 0
+  let escalatedCount = 0
 
   const concurrency = opts.interpret ? Math.max(1, settings.llm.concurrency) : 3
   await mapLimit(ids, concurrency, ctx.signal, async (id) => {
@@ -82,11 +116,50 @@ export async function processTracks(ids: number[], settings: Settings, opts: Pro
       track = { ...track, heuristic }
       updateTrack(id, { heuristic })
 
-      if (opts.interpret && !aiDisabled && (opts.force || !track.ai) && overBudget(settings)) {
+      // Identifying again from scratch: an earlier second opinion no longer applies.
+      if (opts.force && opts.interpret && track.escalation) {
+        updateTrack(id, { escalation: null })
+        track = { ...track, escalation: null }
+      }
+
+      // The same audio (another copy of the file) is identified once: reuse what it found.
+      let reused = false
+      if (!opts.force && !track.candidates) {
+        const twin = identifiedTwin(track)
+        if (twin) {
+          const shared = { ai: twin.ai, candidates: twin.candidates, fingerprint: twin.fingerprint ?? track.fingerprint, escalation: twin.escalation }
+          updateTrack(id, shared)
+          track = { ...track, ...shared }
+          reused = true
+          sharedCount++
+        }
+      }
+
+      // Fingerprint first: when the audio's already known, the AI has nothing to add.
+      const pre: Partial<Record<string, Candidate[]>> = {}
+      let fpStrong: Candidate | undefined
+      const acoustidKey = settings.sources.acoustid?.apiKey
+      if (!reused && opts.scour && (opts.force || !track.candidates) && settings.sources.acoustid?.enabled && acoustidKey && findFpcalc()) {
+        try {
+          const fp = track.fingerprint ?? { ...(await fingerprintFile(track.path, ctx.signal)), at: new Date().toISOString() }
+          if (!track.fingerprint) {
+            updateTrack(id, { fingerprint: fp })
+            track = { ...track, fingerprint: fp }
+          }
+          pre.acoustid = await acoustidLookup(fp, acoustidKey, ctx.signal)
+          fpStrong = pre.acoustid.find((c) => (c.sourceScore ?? 0) >= 0.9 && c.ids?.mbRecordingId && c.title && c.artists?.length)
+        } catch (err) {
+          if (ctx.signal.aborted) return
+          ctx.log("warn", `Fingerprint of ${track.filename}: ${err instanceof Error ? err.message : err}`)
+        }
+      }
+      if (fpStrong && opts.interpret && !track.ai) skippedAi++
+
+      if (!reused && !fpStrong && opts.interpret && !aiDisabled && (opts.force || !track.ai) && overBudget(settings)) {
         aiDisabled = true
         ctx.log("warn", `This month's AI budget (${settings.llm.currency}${settings.llm.monthlyBudget}) is used up - carrying on with the rule-based parser`)
       }
-      if (opts.interpret && !aiDisabled && (opts.force || !track.ai)) {
+      if (!reused && !fpStrong && opts.interpret && !aiDisabled && (opts.force || !track.ai)) {
         try {
           const ai = await interpretTrack(track, settings, { corrections, aliases, signal: ctx.signal })
           track = { ...track, ai }
@@ -108,10 +181,15 @@ export async function processTracks(ids: number[], settings: Settings, opts: Pro
         }
       }
 
-      if (opts.scour && (opts.force || !track.candidates)) {
-        const reading = track.ai?.title || track.ai?.artists.length ? track.ai : track.heuristic
+      if (!reused && opts.scour && (opts.force || !track.candidates)) {
+        // A strong fingerprint match names the recording; the other sources check that reading.
+        const reading = fpStrong
+          ? { artists: fpStrong.artists ?? [fpStrong.artist], featuring: [], title: fpStrong.title, version: track.heuristic?.version }
+          : track.ai?.title || track.ai?.artists.length
+            ? track.ai
+            : track.heuristic
         if (reading) {
-          const result = await scourTrack(track, reading, settings, track.ai?.searchQueries ?? [], ctx.signal, breaker)
+          const result = await scourTrack(track, reading, settings, track.ai?.searchQueries ?? [], ctx.signal, breaker, pre)
           for (const e of result.errors) ctx.log("warn", `${e.source}: ${e.message}`)
           for (const s of result.tripped) ctx.log("error", `${s} keeps failing - skipping it for the rest of this run`)
           track = { ...track, candidates: result.candidates }
@@ -120,7 +198,29 @@ export async function processTracks(ids: number[], settings: Settings, opts: Pro
       }
 
       if (ctx.signal.aborted) return
-      const scored = scoreAndSave(track, settings)
+      let scored = scoreAndSave(track, settings)
+
+      // Uncertain (a middle score, or sources in conflict): a second model reads it, and a person decides.
+      const why = opts.interpret && !aiDisabled && !overBudget(settings) ? shouldEscalate(scored, settings) : null
+      if (why) {
+        try {
+          let up = await escalate(scored, why, settings, { corrections, aliases, signal: ctx.signal })
+          updateTrack(id, { escalation: up.escalation })
+          // Read differently: check the new reading with the sources too.
+          if (up.escalation?.changed && opts.scour) {
+            const result = await scourTrack(up, up.escalation.ai, settings, up.escalation.ai.searchQueries, ctx.signal, breaker, pre)
+            const seen = new Set((up.candidates ?? []).map((c) => `${c.source}|${c.externalId ?? c.url ?? c.title}`))
+            const candidates = [...(up.candidates ?? []), ...result.candidates.filter((c) => !seen.has(`${c.source}|${c.externalId ?? c.url ?? c.title}`))]
+            updateTrack(id, { candidates })
+            up = { ...up, candidates }
+          }
+          scored = scoreAndSave(up, settings)
+          escalatedCount++
+        } catch (err) {
+          if (ctx.signal.aborted) return
+          ctx.log("warn", `Second model on ${track.filename}: ${err instanceof Error ? err.message : err}`)
+        }
+      }
       await extras(scored, settings, opts, ctx)
       changed.push(id)
       ctx.tick(true, `${scored.filename} → ${scored.confidence ?? 0}%`)
@@ -134,6 +234,9 @@ export async function processTracks(ids: number[], settings: Settings, opts: Pro
     }
   })
   ctx.tracksChanged(changed)
+  if (sharedCount) ctx.log("info", `${sharedCount} track${sharedCount === 1 ? " was the same audio as one" : "s were the same audio as ones"} already identified - reused that`)
+  if (skippedAi) ctx.log("info", `The audio fingerprint identified ${skippedAi} track${skippedAi === 1 ? "" : "s"} outright - no AI needed`)
+  if (escalatedCount) ctx.log("info", `${escalatedCount} uncertain track${escalatedCount === 1 ? "" : "s"} went to ${settings.llm.escalation.model || "the second model"} - they wait in Review`)
   if (changed.length) {
     const c = statusCounts(changed)
     const review = c.review + c.conflict
@@ -153,7 +256,13 @@ async function extras(track: Track, settings: Settings, opts: ProcessOptions, ct
   if (wantArt && track.decision && track.decision.status !== "unmatched") {
     try {
       const art = await findArtwork(track, settings, ctx.signal)
-      if (art && art.hash !== track.art?.hash) updateTrack(track.id, { artFound: art })
+      if (art && art.hash !== track.art?.hash) {
+        // In doubt about the match: a vision model looks before it's embedded.
+        const doubt = settings.llm.vision.enabled ? coverInDoubt(track) : null
+        const check = doubt ? await checkCover(track, art, settings, ctx.signal).catch((err) => (ctx.log("warn", `Cover check for ${track.filename}: ${err instanceof Error ? err.message : err}`), null)) : null
+        if (check && !check.matches && check.confidence >= 0.6) ctx.log("info", `${track.filename}: ${check.model} says the cover found isn't this release (${check.reason}) - not using it`)
+        else updateTrack(track.id, { artFound: check ? { ...art, check } : art })
+      }
     } catch (err) {
       if (!ctx.signal.aborted) ctx.log("warn", `Artwork for ${track.filename}: ${err instanceof Error ? err.message : err}`)
     }

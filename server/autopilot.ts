@@ -3,6 +3,7 @@
 // the same plan, checks and journal as a cut from Cut & Tag, so Rewind undoes
 // it. Anything less certain waits in Review as usual.
 
+import { riskOf } from "../shared/risk"
 import type { Settings, Track } from "../shared/types"
 import { decisionToFinal } from "./core/naming"
 import { buildPlan, executePlan, proposedFilename } from "./executor"
@@ -17,7 +18,9 @@ export function handsOffReady(t: Track, settings: Settings): boolean {
   if (t.missing || !librarySettings(t.libraryId).handsOff) return false
   if (t.status !== "matched" && t.status !== "approved") return false
   const d = t.decision
-  return !!d && d.status === "matched" && d.basis === "sources" && (t.confidence ?? 0) >= settings.automation.handsOffMin && !!d.title && d.artists.length > 0
+  if (!d || d.status !== "matched" || d.basis !== "sources" || (t.confidence ?? 0) < settings.automation.handsOffMin || !d.title || !d.artists.length) return false
+  // Sure isn't enough: it also has to be safe to change without a person looking.
+  return riskOf(t).level === "low"
 }
 
 /**
@@ -30,7 +33,7 @@ export function handsOff(ids: number[], settings: Settings, ctx: Pick<JobContext
   for (const t of ready) {
     if (t.status === "approved" && t.final) continue
     const final = t.final ?? decisionToFinal(t.decision!)
-    updateTrack(t.id, { final, status: "approved", proposedName: proposedFilename({ ...t, final }, settings) })
+    updateTrack(t.id, { final, status: "approved", approvedBy: "hands-off", proposedName: proposedFilename({ ...t, final }, settings) })
   }
   const approved = ready.map((t) => t.id)
   const libs = [...new Set(ready.map((t) => getLibrary(t.libraryId)?.name).filter(Boolean))].join(", ")

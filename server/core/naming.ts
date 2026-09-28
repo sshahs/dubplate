@@ -98,6 +98,11 @@ export interface TagExtras {
   lyrics?: string | null
   /** replace lyrics the file already has */
   replaceLyrics?: boolean
+  /**
+   * Canonical genres are on: only this genre is ever written (never a source's
+   * or the AI's), over whatever the file has when `overwrite` is set.
+   */
+  canonicalGenre?: { genre: string | null; overwrite: boolean }
 }
 
 /**
@@ -111,7 +116,11 @@ export function tagsFor(meta: FinalMeta, current: ExistingTags, naming: Naming, 
   }
   if (!current.album && meta.album) out.album = meta.album
   if (!current.year && meta.year) out.year = meta.year
-  if (!current.genre?.length && meta.genre) out.genre = [meta.genre]
+  if (extras.canonicalGenre) {
+    const g = extras.canonicalGenre.genre
+    const same = current.genre?.length === 1 && current.genre[0] === g
+    if (g && !same && (extras.canonicalGenre.overwrite || !current.genre?.length)) out.genre = [g]
+  } else if (!current.genre?.length && meta.genre) out.genre = [meta.genre]
   if (!current.label && meta.label) out.label = meta.label
   if (naming.tagComment) out.comment = "Identified by Dubplate"
   if (extras.bpm && Math.round(extras.bpm) !== Math.round(current.bpm ?? 0)) out.bpm = Math.round(extras.bpm)
@@ -120,6 +129,7 @@ export function tagsFor(meta: FinalMeta, current: ExistingTags, naming: Naming, 
   const ids = extras.ids ?? {}
   if (ids.mbRecordingId && ids.mbRecordingId !== current.mbRecordingId) out.mbRecordingId = ids.mbRecordingId
   if (ids.mbReleaseId && ids.mbReleaseId !== current.mbReleaseId) out.mbReleaseId = ids.mbReleaseId
+  if (ids.mbReleaseGroupId && ids.mbReleaseGroupId !== current.mbReleaseGroupId) out.mbReleaseGroupId = ids.mbReleaseGroupId
   if (ids.mbArtistIds?.[0] && ids.mbArtistIds[0] !== current.mbArtistId) out.mbArtistId = ids.mbArtistIds[0]
   if (ids.discogsReleaseId && ids.discogsReleaseId !== current.discogsReleaseId) out.discogsReleaseId = ids.discogsReleaseId
   // Lyrics go into a file without any, unless replacing is allowed (the stored value is only a summary).

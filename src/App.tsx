@@ -14,6 +14,7 @@ const PAGES = {
   health: () => import("@/pages/health"),
   upload: () => import("@/pages/upload"),
   libraries: () => import("@/pages/libraries"),
+  musicbrainzDone: () => import("@/pages/musicbrainz-done"),
   organise: () => import("@/pages/organise"),
   review: () => import("@/pages/review"),
   settings: () => import("@/pages/settings"),
@@ -28,6 +29,7 @@ const DuplicatesPage = lazy(PAGES.duplicates)
 const ExecutePage = lazy(PAGES.execute)
 const HealthPage = lazy(PAGES.health)
 const LibrariesPage = lazy(PAGES.libraries)
+const MusicBrainzDonePage = lazy(PAGES.musicbrainzDone)
 const OrganisePage = lazy(PAGES.organise)
 const ReviewPage = lazy(PAGES.review)
 const SettingsPage = lazy(PAGES.settings)
@@ -114,6 +116,7 @@ export default function App() {
                 <Route path="/health" element={<HealthPage />} />
                 <Route path="/upload" element={<UploadPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/musicbrainz/done" element={<MusicBrainzDonePage />} />
                 <Route path="*" element={<DashboardPage />} />
               </Routes>
             </div>

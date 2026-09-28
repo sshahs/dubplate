@@ -66,6 +66,11 @@ export function ArtworkPanel({ track, embed, replace }: { track: Track; embed: b
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium">Artwork</div>
         <p className="text-muted-foreground text-xs">{line}</p>
+        {found?.check && (
+          <p className={cn("mt-0.5 text-xs", found.check.matches ? "text-muted-foreground" : "text-rasta-gold")}>
+            {found.check.matches ? `${found.check.model} looked: it fits this release.` : `${found.check.model} isn't sure it's this release: ${found.check.reason}`}
+          </p>
+        )}
         <div className="mt-1.5 flex flex-wrap gap-1.5">
           <Button size="xs" variant="outline" onClick={() => find.mutate()} disabled={find.isPending}>
             {find.isPending ? <Spinner data-icon="inline-start" /> : <HugeiconsIcon icon={Image01Icon} strokeWidth={2} data-icon="inline-start" />}

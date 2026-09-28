@@ -11,9 +11,13 @@ import type {
   Decision,
   ExistingTags,
   HeuristicParse,
+  ProvenanceField,
+  ReleaseChoice,
   TrackReading,
+  VersionCheck,
 } from "../../shared/types"
 import { artistSimilarity, collapseSpaces, normArtist, similarity, splitArtists, titleSimilarity } from "./normalize"
+import { KIND_LABEL, pickRelease, releasesOf } from "./releases"
 
 export interface ScoreInput {
   heuristic: HeuristicParse | null
@@ -24,6 +28,10 @@ export interface ScoreInput {
   /** source id → weight (default 0.6) */
   weights: Record<string, number>
   thresholds: { autoThreshold: number; reviewThreshold: number; parseOnlyMax: number }
+  /** what the file itself says about its release, for choosing among the sources' releases */
+  context?: { filename: string; folders: string[]; preferOwnRelease: boolean }
+  /** sources whose hits back others up but never confirm a track on their own */
+  supporting?: Set<string>
 }
 
 interface Hypothesis {
@@ -183,7 +191,13 @@ export function scoreTrack(input: ScoreInput): Decision {
   }
   clusters.sort((a, b) => b.support - a.support)
 
-  const best = clusters[0]
+  // A cluster only supporting-evidence sources agree on backs a reading up, but doesn't confirm it.
+  const confirms = (cl: (typeof clusters)[number]) => !input.supporting?.size || cl.sources.some((s) => !input.supporting!.has(s))
+  if (clusters.length && !confirms(clusters[0])) {
+    const firm = clusters.findIndex(confirms)
+    if (firm > 0) clusters.unshift(...clusters.splice(firm, 1))
+  }
+  const best = clusters.length && confirms(clusters[0]) ? clusters[0] : undefined
   const runner = clusters[1]
   let conflict = false
   let final: number
@@ -268,13 +282,39 @@ export function scoreTrack(input: ScoreInput): Decision {
       label: "Source consensus",
       score: 0,
       weight: 0,
-      detail: input.candidates.length ? "Sources returned results, but none matched this reading" : "No source had this track - common for dubplates and specials",
+      detail: clusters.length
+        ? `Only supporting sources had it (${clusters[0].sources.join(", ")}) - they back a reading up but don't confirm it`
+        : input.candidates.length
+          ? "Sources returned results, but none matched this reading"
+          : "No source had this track - common for dubplates and specials",
     })
     warnings.push(`No source confirmation - capped at ${input.thresholds.parseOnlyMax}`)
   }
 
   if (!reading.artists.length) warnings.push("No artist identified")
   if (!reading.title) warnings.push("No title identified")
+
+  // ---- release: release group, then release, then recording ----
+  const fingerprintRecordings = new Set((best?.candidates ?? []).filter((c) => c.fingerprint && c.ids?.mbRecordingId).map((c) => c.ids!.mbRecordingId!))
+  const release =
+    best && basis === "sources"
+      ? pickRelease(releasesOf(best.candidates), {
+          artists: reading.artists,
+          albumTag: input.tags.album,
+          folders: input.context?.folders ?? [],
+          duration: input.duration,
+          version: reading.version,
+          filename: input.context?.filename ?? "",
+          fingerprintRecordings,
+          preferOwn: input.context?.preferOwnRelease ?? true,
+        })
+      : null
+  const provenance = provenanceOf(reading, basis, primary.from, best?.rep, best?.candidates ?? [], release, input)
+  if (release) {
+    reading = { ...reading, album: release.release.title, label: reading.label ?? release.release.label }
+    provenance.album = `${sourceName(release.release.source)} (${KIND_LABEL[release.release.kind]})`
+  }
+  const versionCheck = checkVersion(reading, release, best, clusters, input.duration)
 
   const confidence = Math.round(Math.max(0, Math.min(1, final)) * 100)
   let status: Decision["status"]
@@ -300,6 +340,96 @@ export function scoreTrack(input: ScoreInput): Decision {
     factors,
     clusters: clusters.slice(0, 5).map(({ rep: _rep, best: _best, relPrimary: _rp, ...c }) => ({ ...c, relevance: round(c.relevance) })),
     warnings,
+    release,
+    versionCheck,
+    provenance,
+    sourceGenres: sourceGenresOf(best?.candidates ?? []),
+  }
+}
+
+const SOURCE_NAMES: Record<string, string> = { musicbrainz: "MusicBrainz", discogs: "Discogs", acoustid: "AcoustID", spotify: "Spotify", itunes: "Apple Music", deezer: "Deezer" }
+const sourceName = (id: string) => SOURCE_NAMES[id] ?? (id.startsWith("scraper:") ? id.slice(8) : id)
+
+/** Genres the agreeing sources gave, most-mentioned first, as they worded them. */
+function sourceGenresOf(cands: Candidate[]): string[] {
+  const count = new Map<string, { name: string; n: number }>()
+  for (const c of cands) {
+    const names = c.genres?.length ? c.genres : c.genre ? c.genre.split(/,\s*/) : []
+    for (const raw of names) {
+      const name = raw.trim()
+      if (!name) continue
+      const k = name.toLowerCase()
+      const e = count.get(k) ?? { name, n: 0 }
+      e.n++
+      count.set(k, e)
+    }
+  }
+  return [...count.values()].sort((a, b) => b.n - a.n).map((e) => e.name).slice(0, 12)
+}
+
+/** Where each field came from: a source, the AI, the filename or the file's own tags. */
+function provenanceOf(
+  reading: TrackReading,
+  basis: Decision["basis"],
+  from: Hypothesis["from"],
+  rep: Candidate | undefined,
+  cluster: Candidate[],
+  release: ReleaseChoice | null,
+  input: ScoreInput
+): Partial<Record<ProvenanceField, string>> {
+  const readingFrom = from === "ai" ? `AI (${input.ai?.model ?? "model"})` : from === "tags" ? "the file's tags" : "the filename"
+  const out: Partial<Record<ProvenanceField, string>> = {}
+  out.artists = basis === "sources" && rep ? rep.sourceLabel : readingFrom
+  out.title = out.artists
+  if (reading.version) out.version = readingFrom
+  const find = (field: "year" | "album" | "label" | "genre") => {
+    const v = reading[field]
+    if (v === undefined || v === null || v === "") return
+    const hit = cluster.find((c) => c[field] === v)
+    out[field] = hit ? hit.sourceLabel : readingFrom
+  }
+  find("year")
+  find("album")
+  find("label")
+  find("genre")
+  if (release) out.release = sourceName(release.release.source)
+  return out
+}
+
+const VERSION_KINDS: [RegExp, VersionCheck["kind"], string][] = [
+  [/\b(?:dubplate|special)s?\b/i, "dubplate", "Dubplate or special"],
+  [/\bvip\b/i, "vip", "VIP"],
+  [/\b(?:live|clash)\b/i, "live", "Live"],
+  [/\b(?:remix|refix|rmx|bootleg|flip|re-?edit)\b/i, "remix", "Remix"],
+  [/\b(?:edit|radio edit|extended|club mix|instrumental|dub|acapella)\b/i, "edit", "Edit"],
+]
+
+/** What kind of recording this is - original, remix, VIP, dubplate… - and whether length and fingerprint back it up. */
+function checkVersion(
+  reading: TrackReading,
+  release: ReleaseChoice | null,
+  best: { candidates: Candidate[] } | undefined,
+  clusters: { candidates: Candidate[] }[],
+  duration: number | null
+): VersionCheck {
+  let kind: VersionCheck["kind"] = "original"
+  let label = "Original"
+  const hit = VERSION_KINDS.find(([re]) => re.test(reading.version ?? ""))
+  if (hit) [, kind, label] = hit
+  else if (release?.release.kind === "dj-mix") [kind, label] = ["dj-mix", "From a DJ mix"]
+  else if (release?.release.kind === "compilation" && !release.ownAlternative) [kind, label] = ["compilation", "Only on compilations"]
+  else if (release && /with this version on it/.test(release.reason)) [kind, label] = ["exclusive", `This version is on ${release.release.title}`]
+  const durations = (best?.candidates ?? []).map((c) => c.duration).filter((d): d is number => !!d)
+  const delta = duration && durations.length ? Math.min(...durations.map((d) => Math.abs(d - duration))) : null
+  const fpHere = best?.candidates.some((c) => c.fingerprint) ?? false
+  const fpElsewhere = clusters.some((cl) => cl !== best && cl.candidates.some((c) => c.fingerprint))
+  const r = release?.release
+  return {
+    kind,
+    label,
+    official: r ? (r.status ? r.status.toLowerCase() === "official" && r.own !== false : null) : null,
+    durationMatch: delta === null ? null : delta <= 3 ? true : delta > 10 ? false : null,
+    fingerprintMatch: fpHere ? true : fpElsewhere ? false : null,
   }
 }
 

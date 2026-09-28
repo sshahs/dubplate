@@ -22,6 +22,7 @@ export const AI_SCHEMA = {
     "event",
     "label",
     "genre",
+    "country",
     "confidence",
     "reasoning",
     "alternatives",
@@ -38,6 +39,7 @@ export const AI_SCHEMA = {
     event: nullable("string"),
     label: nullable("string"),
     genre: nullable("string"),
+    country: nullable("string"),
     confidence: { type: "number" },
     reasoning: { type: "string" },
     alternatives: {
@@ -61,7 +63,21 @@ export function collectionContext(llm: Pick<Settings["llm"], "genres" | "sceneHi
   return `Mostly ${genres.join(", ")}.${note ? ` ${note}` : ""}`
 }
 
-export function systemPrompt(context: string) {
+/** How names are joined and written, from the naming settings, so the AI's reading fits what gets written. */
+export function metadataRulebook(naming?: Pick<Settings["naming"], "artistJoiner" | "clashJoiner" | "featuring">): string {
+  const join = naming?.artistJoiner?.trim() || "&"
+  const clash = naming?.clashJoiner?.trim() || "vs"
+  const feat = naming?.featuring === "title" ? 'after the title as "(feat. Name)"' : naming?.featuring === "drop" ? "not at all (they're dropped)" : 'after the artists as "feat. Name"'
+  return `Metadata rulebook - follow it exactly:
+- Artist separator: list each main artist separately in "artists". Dubplate joins them with "${join}", and clashes with "${clash}". Never join names yourself.
+- Featured artists: only in "featuring", never "feat."/"ft." inside artists or title. Dubplate writes them ${feat}.
+- Dubplates and specials: version "Dubplate", or "Dubplate for <Sound>" / "<Sound> Special" when the sound it was cut for is named. Never put "dubplate" or "special" in the title.
+- VIPs and remixes: version "VIP" (or "<Artist> VIP"), "<Remixer> Remix", "Refix", "Edit". The title stays the song's own name.
+- Never invent an album, year, label or catalogue number. Give year or label only when the filename, folder or embedded tags state them; otherwise null. Never fill them from memory - the sources supply those.
+- Keep an artist's own spelling and capitalisation ("JME", "Ms. Dynamite", "D Double E").`
+}
+
+export function systemPrompt(context: string, naming?: Pick<Settings["naming"], "artistJoiner" | "clashJoiner" | "featuring">) {
   return `You are the music librarian inside "Dubplate", a tagger for DJ and collector libraries. You know music across every genre (reggae, dub and dancehall, UK grime, garage, jungle and dubstep, house, techno and disco, hip-hop, R&B and soul, jazz, rock, pop, Latin, African and classical), Jamaican and UK sound-system culture especially deeply, and you are expert at untangling messy digital filenames.
 
 Collection context: ${context}
@@ -78,9 +94,12 @@ Rules:
 - event: clash, session, show or festival name if relevant (e.g. "Sting", "Fire in the Booth", "Rinse FM", "Boiler Room", "Glastonbury"), else null.
 - Ignore rip-site names, bitrates, track numbers, "official video" and similar noise.
 - Never invent facts. When a filename is genuinely ambiguous (e.g. order could be Title - Artist), give your best reading in the main fields and the others in "alternatives".
+- country: the main artist's home country as an ISO code ("GB", "US", "JM") if you genuinely know it, else null.
 - confidence: 0 to 1 - how sure you are of artists + title together.
 - searchQueries: 1 to 3 short queries you would type into MusicBrainz or Discogs to verify this.
-- reasoning: one or two short sentences.`
+- reasoning: one or two short sentences.
+
+${metadataRulebook(naming)}`
 }
 
 function fmtDuration(sec: number | null) {
@@ -175,6 +194,7 @@ export function sanitizeAi(raw: unknown, provider: LlmProviderConfig, aliases: M
     event: strOrUndef(r.event),
     label: strOrUndef(r.label),
     genre: strOrUndef(r.genre),
+    country: /^[A-Za-z]{2}$/.test(str(r.country)) ? str(r.country).toUpperCase() : undefined,
     confidence: Math.max(0, Math.min(1, confidence)),
     reasoning: str(r.reasoning).slice(0, 600),
     alternatives,
@@ -184,6 +204,13 @@ export function sanitizeAi(raw: unknown, provider: LlmProviderConfig, aliases: M
   }
 }
 
+/** A configured provider with another model (for escalation or vision), or null when it isn't usable. */
+export function providerWithModel(settings: Settings, providerId: string, model: string): LlmProviderConfig | null {
+  const base = settings.llm.providers.find((p) => p.id === providerId)
+  if (!base || !(model || base.model)) return null
+  return { ...base, model: model || base.model }
+}
+
 export function activeProvider(settings: Settings): LlmProviderConfig | null {
   return settings.llm.providers.find((p) => p.id === settings.llm.activeProvider && p.enabled) ?? null
 }
@@ -191,13 +218,13 @@ export function activeProvider(settings: Settings): LlmProviderConfig | null {
 export async function interpretTrack(
   track: Track,
   settings: Settings,
-  opts: { corrections: Correction[]; aliases: Map<string, string>; signal?: AbortSignal }
+  opts: { corrections: Correction[]; aliases: Map<string, string>; signal?: AbortSignal; provider?: LlmProviderConfig }
 ): Promise<AiParse> {
-  const provider = activeProvider(settings)
+  const provider = opts.provider ?? activeProvider(settings)
   if (!provider) throw new Error("No AI provider is enabled - pick one in Settings")
   const examples = settings.llm.useCorrections ? similarCorrections(track.filename, opts.corrections) : []
   const raw = await completeJson(provider, {
-    system: systemPrompt(collectionContext(settingsForLibrary(settings, track.libraryId).llm)),
+    system: systemPrompt(collectionContext(settingsForLibrary(settings, track.libraryId).llm), settingsForLibrary(settings, track.libraryId).naming),
     user: buildUserPrompt(track, examples),
     schema: AI_SCHEMA as unknown as Record<string, unknown>,
     schemaName: "identify_track",

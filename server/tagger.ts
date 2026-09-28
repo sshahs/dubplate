@@ -123,6 +123,7 @@ export function readManagedTags(file: string): ExistingTags {
       cover: cover ? storeArt(cover.data.toByteArray(), "embedded")?.hash : undefined,
       mbRecordingId: t.musicBrainzTrackId || undefined,
       mbReleaseId: t.musicBrainzReleaseId || undefined,
+      mbReleaseGroupId: t.musicBrainzReleaseGroupId || undefined,
       mbArtistId: t.musicBrainzArtistId || undefined,
       discogsReleaseId: readCustom(f, ext, DISCOGS_RELEASE),
       replayGainTrackGain: Number.isFinite(t.replayGainTrackGain) ? t.replayGainTrackGain : undefined,
@@ -158,6 +159,7 @@ export function writeTags(file: string, changes: Partial<Record<keyof ExistingTa
     if ("key" in changes) t.initialKey = str(changes.key)
     if ("mbRecordingId" in changes) t.musicBrainzTrackId = str(changes.mbRecordingId)
     if ("mbReleaseId" in changes) t.musicBrainzReleaseId = str(changes.mbReleaseId)
+    if ("mbReleaseGroupId" in changes) t.musicBrainzReleaseGroupId = str(changes.mbReleaseGroupId)
     if ("mbArtistId" in changes) t.musicBrainzArtistId = str(changes.mbArtistId)
     if ("discogsReleaseId" in changes) writeCustom(f, ext, DISCOGS_RELEASE, str(changes.discogsReleaseId))
     if ("lyrics" in changes) t.lyrics = str(changes.lyrics)

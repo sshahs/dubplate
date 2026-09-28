@@ -91,11 +91,11 @@ flowchart TB
 
 | Stage | What happens |
 | --- | --- |
-| **📂 Scanner** | Walks your folders and reads existing tags (including BPM, key and cover art), duration and a content fingerprint into a SQLite staging database. **It never opens a music file for writing.** It follows files you've moved and flags exact duplicates. Watched folders are picked up as files land. |
+| **📂 Scanner** | Walks your folders and reads existing tags (including BPM, key and cover art), duration and a content fingerprint into a SQLite staging database. **It never opens a music file for writing.** It follows files you've moved and flags exact duplicates, and keeps each file's name, place and tags as first found, never changed afterwards. Watched folders are picked up as files land. |
 | **⚡ Rule-based parser** | A fast first pass. It strips rip-site names, bitrates, *(Official Video)*, and track and vinyl-side numbers. It splits `Artist - Title`, `Title by Artist` and `A vs B` clashes, and spots hints like *dubplate*, *special*, *live '93*, *riddim* and *VIP*. |
-| **🧠 AI interpreter** | Reads the filename, folder, tags and first-pass result, and returns structured JSON: artists, `&` or `vs`, title, version, year, riddim, event, alternatives and search queries. Your approvals are shown to it as examples, so it learns your style. |
-| **🔎 Metadata scourer** | Asks every enabled source at once, with polite per-host rate limits and a 7-day response cache. |
-| **📊 Confidence engine** | Groups the hits by recording, then weighs consensus across independent sources, agreement between readings, duration, fingerprint matches and conflicts. The result is an explainable 0–100 score. |
+| **🧠 AI interpreter** | Reads the filename, folder, tags and first-pass result, and returns structured JSON: artists, `&` or `vs`, title, version, year, riddim, event, alternatives and search queries. Your approvals are shown to it as examples, so it learns your style, and a written rulebook keeps it from inventing what the sources didn't say. An optional bigger model gives a **second opinion** on the uncertain ones. |
+| **🔎 Metadata scourer** | With AcoustID set up, the audio fingerprint goes first: a sure fingerprint match skips the AI altogether. Then it asks every enabled source at once, with polite per-host rate limits, a 7-day response cache and a two-week cache of lookups by artist, title, version and length (so a renamed copy doesn't ask again). |
+| **📊 Confidence engine** | Groups the hits by recording, then weighs consensus across independent sources, agreement between readings, duration, fingerprint matches and conflicts. The result is an explainable 0–100 score, plus which **release** the track belongs to (the artist's own album, EP or single before a compilation or DJ mix) and a separate **risk** rating for letting automation change the file. |
 | **🎨 Artwork, tempo & key** | Fetches a cover from the sources that confirmed the track (Cover Art Archive, Discogs, Bandcamp, Apple Music, Deezer…), and listens to the audio for BPM and musical key. |
 | **✂️ Verify & execute** | Bulk-approve the matches, review the rest, then rename and tag in place, writing MusicBrainz and Discogs IDs where the sources found them. Every operation is logged so any batch can be put back. |
 | **🗄️ Organise** | Optionally moves cut tracks into a folder layout of your choosing inside the library (`Artist / Year - Album`, `A-Z / Artist`, `BPM / Key`…), bringing cover images along and tidying empty folders. Previewed as a tree first, rewindable after. |
@@ -122,6 +122,27 @@ The **Evidence** tab shows every factor behind a score:
 > A reading that **no source confirms** is capped at 75, so dubplates and
 > specials that exist nowhere online always get a human check. Thresholds and
 > source weights are all adjustable in Settings.
+
+The **Decision** tab answers each question on its own, in order, so a sure
+recording on a doubtful release says exactly that:
+
+1. **Recording**: which song, and how many independent sources back it (Discogs and your Discogs collection count once).
+2. **Release**: which album, EP, single, compilation or DJ mix it's tagged with, and why.
+3. **Version**: original, remix, VIP, dubplate, live, edit…, with whether the length and fingerprint fit.
+4. **Genre**: the canonical genre, when that's on.
+5. **Safe to automate**: the risk (below).
+6. **Verified**: approved by you, by auto-approve or by hands-off.
+7. **AcoustID** and **MusicBrainz**: whether its fingerprint can be sent back, and whether MusicBrainz knows the release.
+
+It also shows where each field came from (MusicBrainz, Discogs, the AI, the file's tags…).
+
+**Risk is not confidence.** A 92 that one source backs up, on a file that's
+cut short, is a confident guess but a risky write. A track is **high risk**
+when a second opinion was needed, sources conflict, only the AI's reading
+stands, the fingerprint points elsewhere or the file is damaged; **some risk**
+with fewer than two independent sources, a length that doesn't fit, a
+suspect quality or an extension to fix. **Auto-approve and hands-off only act
+on low-risk tracks**; everything else waits for a person.
 
 <img src="docs/stripe.svg" width="100%" height="6" alt="">
 
@@ -182,9 +203,14 @@ The **Evidence** tab shows every factor behind a score:
 (CSS selectors) or JSON API (dot-paths, e.g. WordPress `/wp-json`). Grime
 archives, clash databases and label shops all work. The built-in **Test**
 button shows exactly what gets extracted. Presets for Juno Download,
-Traxsource, Genius, Audius, Hype Machine, AllMusic and a sound-clash archive
+Traxsource, Genius, Audius, Hype Machine, AllMusic, Regime Radio Sound Tapes,
+ReggaeRecord, Grime Archive, GRM Daily, BritishHipHop.co.uk and SoundClash Hub
 ship switched off until you've verified them (site markup drifts, so test one
 before trusting it).
+
+- **Genre weights**: a scraper (or any source) can count more for particular genres in your crates, e.g. ReggaeRecord ×1.3 for reggae and dancehall.
+- **Supporting only**: a source like an events listing can back up a match the others found but never confirms one on its own (SoundClash Hub ships this way).
+- **Health check**: a site that redesigns or puts search behind a login starts answering with "Login" or its home page. After five junk or failed answers in a row the scraper is switched off, with the reason on the Sources and Health pages; switch it back on once its Test works.
 
 **🎯 Tuned to your crates**: each source knows which genres it's strong for
 (Bandcamp for jungle and dub, Mixcloud for DJ mixes and radio rips, the
@@ -399,11 +425,13 @@ A folder template decides where a track lives inside its library.
 | `{artist}/[{year} - ]{album}` | `Chronixx/2014 - Dread & Terrible/` |
 | `{initial}/{artist}` | `C/Chronixx/` |
 | `{genre}/{artist}` | `Reggae/Chronixx/` |
+| `[{region}]/{genre}` | `UK/UK Grime/`, `House Genres/` (with canonical genres) |
+| `[{region}]/{genre}/{artist}` | `UK/UK Grime/Wiley/` |
 | `{label}/{year}` | `Soul Circle/2014/` |
 | `[{bpmrange} BPM]/[{camelot}]` | `70-79 BPM/8A/` |
 
 Tokens: `{artist}` (main artists), `{firstartist}`, `{albumartist}`,
-`{album}`, `{year}`, `{decade}` (`1990s`), `{label}`, `{genre}`, `{version}`,
+`{album}`, `{year}`, `{decade}` (`1990s`), `{label}`, `{genre}` (with canonical genres, its folder name), `{region}` (the folder above it), `{version}`,
 `{initial}` (A-Z, `0-9` or `#`, ignoring a leading "The"), `{bpm}`,
 `{bpmrange}` (`140-149`), `{key}`, `{camelot}` and `{format}` (`FLAC`).
 
@@ -590,7 +618,8 @@ under **Settings → Artwork, lyrics & audio**.
 **Hands-off** (Libraries → Customise): tracks that come in to that library
 and are identified with at least the confidence you set (95 by default, in
 **Settings → Automation**) by the sources agreeing - not by the AI alone -
-are approved and cut straight away, with no stop in Review. Everything else
+and are low risk (see the Decision tab) are approved and cut straight away,
+with no stop in Review. Everything else
 waits for you as usual. In read-only mode they're approved but nothing is
 written. Every hands-off cut is a normal batch, so **Rewind** puts it back.
 
@@ -599,6 +628,111 @@ an inbox for your main library. Tracks are identified
 there, and cutting moves them into the main library using its filename and
 folder templates. Pair it with watching and hands-off for a drop folder that
 files itself. Rewind moves them back to the inbox.
+
+</details>
+
+<details>
+<summary><b>Releases: album, single, compilation or mix</b></summary>
+
+The same recording is often on the artist's album, a single, a "NOW!"
+compilation and a DJ mix. With **Settings → Matching → Prefer the artist's
+own release** on (the default), Dubplate picks in this order: the artist's
+own album, EP, single, then remixes and re-releases, live albums, mixtapes,
+compilations, DJ mixes. Evidence overrides the order:
+
+- the file's album tag or folder names a release: it keeps that one;
+- a continuous mix (20 minutes or longer, or "continuous mix" in the name) keeps its DJ mix;
+- a version whose length only fits some releases (a radio edit on the single, a mix-only edit) is kept to those.
+
+The chosen release decides the album tag and the MusicBrainz release and
+release-group IDs, so media servers group the track with the right record.
+MusicBrainz release types, Discogs formats and Spotify album types are all
+read. When a compilation is kept over the artist's own release, the Decision
+tab says what the artist's own one was.
+
+</details>
+
+<details>
+<summary><b>Second opinion & cover check</b></summary>
+
+**Settings → AI → Second opinion**: a small fast model reads everything; a
+bigger one (say a 27–35B model on Ollama, or a cloud model) looks again when
+the score lands in a range you set (60–89 by default) or the sources
+disagree. Its reading is scored instead of the first, and the track **always
+goes to Review** - it's never auto-approved or cut hands-off. A track no
+source knows isn't sent: a bigger model can't make up for missing data.
+
+**Cover check**: when the match is in doubt (a second opinion, a conflict, a
+compilation kept over the artist's own release, or several covers to choose
+from), a vision model looks at the found cover before it's used, and a cover
+it's sure is wrong is dropped. Works with Ollama, OpenAI-compatible and
+Anthropic models that take images.
+
+</details>
+
+<details>
+<summary><b>Canonical genres</b></summary>
+
+Off by default. **Settings → Genres** gives every track exactly one genre from
+your own list, decided by where the music's from and its style rather than
+whatever a source called it that day. Each rule has:
+
+- the **genre** written to the tag, and the **folder** it lives in when that's named differently (House → `House Genres`);
+- the **folder above** it (`UK`), if any;
+- the **source genres that mean it** (`grime`, `grime revival`, `eskibeat`…);
+- **title words** that send a track there whatever its style (a series like `daily duppy` or `sbtv`, or `instrumental`);
+- **words that rule it out** (`rock`, so garage rock isn't UK Garage; `punk`, so hardcore punk isn't Hardcore);
+- optionally **where the music has to be from** (`UK`; `?` for unknown), so `rap` means UK Rap for a London artist and Hip-Hop for anyone else. A source genre that names a place (`UK drill`, `British hip hop`) counts as from there.
+
+Your own choice wins, then title words, then the sources that agree on the
+track, then the AI, then the file's tag. The most specific match wins; on a
+tie, the rule higher up the list. Where nothing fits, the Decision tab says so
+and no genre is written. The sources' own genres are kept for reference; only
+the canonical one goes into files (over an existing genre, unless you turn
+that off). File by it with the **Region / Genre** folder preset
+(`[{region}]/{genre}`, e.g. `UK/UK Grime`, `Reggae`) or **Region / Genre /
+Artist**. The list can be saved to and loaded from a file.
+
+The built-in list follows Dee's folders: under `UK`, Daily Duppy, SBTV,
+Instrumentals, UK Drill, UK Grime, UK Garage and UK Rap; at the top, Drum And
+Bass, Jungle, Hardcore, Old Skool, House Genres, Hip-Hop, Reggae (dancehall
+included), Oldies and Christmas Classic Pop. Change it to suit your own.
+
+</details>
+
+<details>
+<summary><b>Sending fingerprints to AcoustID</b></summary>
+
+AcoustID gets better when people send back what they've verified. Add your
+AcoustID **user** key under **Sources → Fingerprint → AcoustID** (next to the
+application key), and switch on **Send fingerprints after cutting**. A
+fingerprint is only sent when every box is ticked:
+
+- the fingerprint was made (AcoustID was on while identifying);
+- artist, title and version are set, and the track is cut;
+- you approved it yourself, or two independent sources agree, with no conflict and no second opinion;
+- MusicBrainz's recording ID goes along whenever MusicBrainz knows the song;
+- it hasn't been sent before (never twice for the same audio).
+
+Each track's Decision tab shows the checklist. Submissions are checked every
+20 minutes until AcoustID has imported them, and **Tracks → select → Send
+fingerprints to AcoustID** sends a selection now.
+
+</details>
+
+<details>
+<summary><b>Adding releases to MusicBrainz</b></summary>
+
+For a record MusicBrainz doesn't have, **Add to MusicBrainz** (a track's
+Decision tab, or a selection in Tracks as one release) fills in MusicBrainz's
+release editor: title, type, artist credits, tracks and lengths, year, label,
+known recordings, links to the pages that identified it and an edit note. You
+check everything there and submit it yourself with your MusicBrainz account -
+Dubplate never submits edits on its own. MusicBrainz then sends you back to
+Dubplate with the new release's ID (or paste its link), and the IDs go into
+the tags: **Update the tags now** rewrites cut tracks, and the rest get them
+when they're cut. **Tracks → select → Update tags** does the same for any cut
+tracks, for example after changing genre rules.
 
 </details>
 
@@ -723,7 +857,9 @@ crates whose names aren't taken.
 - ↩️ Review decisions and bulk edits come with **Undo** for a few moments afterwards.
 - 🏠 The server binds to localhost, rejects unknown `Host` headers (DNS rebinding) and needs an `X-Dubplate` header on every write request (CSRF).
 - 🔑 An optional password keeps everyone else out when it's on a server or your network.
-- 🤖 Hands-off only cuts tracks the sources agree on, never on the AI's word alone, and every cut can be rewound.
+- 🤖 Hands-off and auto-approve only act on low-risk tracks the sources agree on, never on the AI's word alone or a second opinion, and every cut can be rewound.
+- 🗂️ Each file's original name, place and tags are kept from the first scan, whatever happens later.
+- 🌍 Dubplate never edits MusicBrainz itself: it fills in the release editor for you to check and submit. Fingerprints only go to AcoustID for tracks that are verified and cut, and only with your own user key.
 - 🎟️ API tokens are stored as hashes, shown once, deleted in one click, and a downloads-only token can't read or change anything else.
 - 🏷️ A file named as the wrong format has its tags written as what it really is, so an M4A called `.mp3` doesn't get an MP3 tag put in front of it.
 
@@ -756,6 +892,11 @@ crates whose names aren't taken.
 - 📤 **Upload from your phone**: send files into a library from the browser, or share them to the installed app from other apps.
 - 🪝 **Download tools**: qBittorrent, slskd and Lidarr tell Dubplate when a download finishes, with API tokens made for them.
 - 🎤 **Lyrics**: from LRCLIB, timed where possible, written into the file and optionally a `.lrc`.
+- 💿 **Release priority**: the artist's own album, EP or single before compilations and DJ mixes, unless the file says otherwise.
+- 🧭 **How it was decided**: recording, release, version, genre, risk, verification, AcoustID and MusicBrainz, step by step, with where each field came from.
+- 🧠 **Second opinion**: a bigger model for the uncertain ones, and a vision model to check covers.
+- 🏷️ **Canonical genres**: one genre per track from your own list, with region folders.
+- 🫆 **Give back**: send verified fingerprints to AcoustID and add missing releases to MusicBrainz.
 - 🩹 **Broken files**: wrong extensions (fixed when cutting), downloads that stopped short, damaged audio and long silences.
 - 📱 **Review on a phone**: swipe right to approve, left to leave as-is; **Approve all** clears a queue with Undo.
 - 🎧 **Audio preview** in the review screen, with streaming and seeking.
@@ -787,7 +928,7 @@ in the dance and in Dubplate:
 ## 🔧 Development
 
 ```bash
-npm test            # vitest: parser, confidence engine, naming, sources, BPM/key, artwork, undo, scan→cut→rewind on real files
+npm test            # vitest: parser, confidence engine, naming, sources, BPM/key, artwork, undo, scan→cut→rewind on real files, golden dataset
 npm run typecheck
 npm run lint
 ```
@@ -800,13 +941,18 @@ server/
   analysis/      BPM & key: decoding, onset/tempo and chroma/key estimation
   scanner.ts     read-only library walker
   watcher.ts     watched folders, periodic re-checks, nightly scan
-  pipeline.ts    interpret → scour → score (→ artwork, BPM & key)
+  pipeline.ts    fingerprint → interpret → scour → score → second opinion (→ artwork, BPM & key)
+  steps.ts       how a track was decided, step by step
+  genres.ts      canonical genre rules
+  acoustid-submit.ts, musicbrainz-seed.ts   giving back to AcoustID and MusicBrainz
   art.ts         cover-art cache, downloads, thumbnails
   worker-pool.ts CPU-heavy work (decoding, thumbnails) off the main thread
   executor.ts    plan / rename + tag / rewind
   undo.ts        short-lived undo for review decisions and bulk edits
   app.ts         Hono API + SSE
 shared/types.ts  types used by server and UI
+shared/risk.ts   how safe a change is, apart from how sure the match is
+server/test/golden.test.ts  hand-checked cases every change to the scoring must keep passing
 src/             React + Vite UI (shadcn/ui, Base UI)
 docs/            banner, screenshots
 ```

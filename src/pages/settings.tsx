@@ -12,6 +12,7 @@ import {
   RefreshIcon,
   ServerStack01Icon,
   Shield01Icon,
+  TagsIcon,
   Target02Icon,
   TestTube01Icon,
   Timer02Icon,
@@ -33,6 +34,7 @@ import { AiUsageCard } from "@/components/settings-usage"
 import { ChatSettings, MediaServerSettings } from "@/components/settings-integrations"
 import { DjSoftwareSettings } from "@/components/dj-export-dialog"
 import { ToolsSettings } from "@/components/settings-tools"
+import { CanonicalGenresCard, SecondOpinionCard } from "@/components/settings-rules"
 import { SectionNav, SettingRow, SettingRows, type SectionItem } from "@/components/settings-layout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -50,7 +52,7 @@ import { api, type PublicSettings } from "@/lib/api"
 import { disableNotify, enableNotify, notifyEnabled, notifySupport } from "@/lib/notify"
 import { cn } from "@/lib/utils"
 
-type SectionId = "ai" | "crates" | "confidence" | "naming" | "extras" | "automation" | "tools" | "exports" | "notifications" | "servers" | "safety" | "learning" | "backup"
+type SectionId = "ai" | "crates" | "confidence" | "naming" | "genres" | "extras" | "automation" | "tools" | "exports" | "notifications" | "servers" | "safety" | "learning" | "backup"
 
 /** Sections, and the part of the settings each one edits (for the unsaved-changes dots). */
 const SECTIONS: { id: SectionId; label: string; icon: SectionItem["icon"]; edits: (s: Settings) => unknown }[] = [
@@ -58,6 +60,7 @@ const SECTIONS: { id: SectionId; label: string; icon: SectionItem["icon"]; edits
   { id: "crates", label: "Your crates", icon: Vynil01Icon, edits: (s) => [s.llm.genres, s.llm.sceneHint] },
   { id: "confidence", label: "Matching", icon: Target02Icon, edits: (s) => s.confidence },
   { id: "naming", label: "Naming & tags", icon: FileEditIcon, edits: (s) => ({ ...s.naming, fixExtensions: undefined }) },
+  { id: "genres", label: "Genres", icon: TagsIcon, edits: (s) => s.canonicalGenres },
   { id: "extras", label: "Artwork, lyrics & audio", icon: Image01Icon, edits: (s) => [s.artwork, s.lyrics, s.analysis, s.naming.fixExtensions] },
   { id: "automation", label: "Automation", icon: Timer02Icon, edits: (s) => s.automation },
   { id: "tools", label: "Uploads & download tools", icon: CloudUploadIcon, edits: (s) => [s.uploads, s.hooks] },
@@ -575,6 +578,7 @@ export default function SettingsPage() {
                   </SettingRows>
                 </CardContent>
               </Card>
+              <SecondOpinionCard draft={draft} set={set} />
               <AiUsageCard draft={draft} set={set} />
             </>
           )}
@@ -640,8 +644,17 @@ export default function SettingsPage() {
                   <SettingRow title="Cap without a source" description="The most a reading no database confirms can score. Keep it below “matched from” so dubplates and specials always get a human check.">
                     <SliderControl label="Cap without a source" value={draft.confidence.parseOnlyMax} min={30} max={95} step={1} onChange={(v) => set((d) => void (d.confidence.parseOnlyMax = v))} />
                   </SettingRow>
-                  <SettingRow title="Approve matches automatically" description="Skip the sign-off for matched tracks. They still wait in Cut & Tag until you cut.">
+                  <SettingRow
+                    title="Approve matches automatically"
+                    description="Skip the sign-off for matched tracks that are also low risk: two independent sources, no conflict or second opinion, a whole file. They still wait in Cut & Tag until you cut."
+                  >
                     <Switch checked={draft.confidence.autoApprove} onCheckedChange={(v) => set((d) => void (d.confidence.autoApprove = v))} aria-label="Approve matches automatically" />
+                  </SettingRow>
+                  <SettingRow
+                    title="Prefer the artist's own release"
+                    description="Their album, EP or single over a compilation or DJ mix, however tidy its data. A file whose album tag or folder names the compilation, or whose length only fits the mix, keeps it."
+                  >
+                    <Switch checked={draft.confidence.preferOwnRelease} onCheckedChange={(v) => set((d) => void (d.confidence.preferOwnRelease = v))} aria-label="Prefer the artist's own release" />
                   </SettingRow>
                 </SettingRows>
               </CardContent>
@@ -745,6 +758,8 @@ export default function SettingsPage() {
               </Card>
             </>
           )}
+
+          {section === "genres" && <CanonicalGenresCard draft={draft} set={set} />}
 
           {section === "extras" && (
             <>

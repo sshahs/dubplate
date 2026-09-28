@@ -1,7 +1,10 @@
-import type { LlmProviderConfig, MediaServerConfig, PathMapping, ScraperDefinition, Settings, SourceConfig } from "../shared/types"
+import type { GenreRule, LlmProviderConfig, MediaServerConfig, PathMapping, ScraperDefinition, Settings, SourceConfig } from "../shared/types"
+import { STARTER_GENRE_RULES } from "../shared/genres"
 import { sanitizeFilename } from "./core/naming"
 import { getDb } from "./db"
 import { setContact } from "./sources/http"
+
+export { STARTER_GENRE_RULES }
 
 /** Streaming stores: strongest for anything that's had a proper digital release. */
 const STORE_GENRES = ["Pop", "Rock", "Indie", "Hip-hop", "R&B", "Afrobeats", "Amapiano", "Latin", "Country", "Soundtracks", "Electronic", "Metal", "Punk", "Folk", "Classical", "Gospel", "Soca"]
@@ -102,17 +105,18 @@ export const SCRAPER_PRESETS: ScraperDefinition[] = [
   },
   {
     id: "regime-radio",
-    name: "Regime Radio clash archive",
+    name: "Regime Radio Sound Tapes",
     enabled: false,
     weight: 0.45,
     kind: "json",
     searchUrl: "https://regimeradio.com/wp-json/wp/v2/posts?search={query}&per_page=10&_fields=title,link,date",
     items: "",
     fields: { combined: "title.rendered", url: "link", year: "date" },
-    scene: "Sound clash recordings",
-    notes: "WordPress REST search over a sound-clash archive.",
+    scene: "Sound clash recordings and sound tapes",
+    notes: "WordPress REST search over a sound-clash and sound-tape archive.",
     verified: false,
     genres: ["Sound clashes", "Dancehall", "Reggae", "Dubplates & specials"],
+    genreWeights: { "Sound clashes": 1.3, "Dubplates & specials": 1.3, Dancehall: 1.1, Reggae: 1.1 },
   },
   {
     id: "wordpress-template",
@@ -203,7 +207,85 @@ export const SCRAPER_PRESETS: ScraperDefinition[] = [
     verified: false,
     genres: ["Jazz", "Soul", "Funk", "Blues", "Gospel", "Rock", "Folk", "Country", "Classical", "Pop", "World"],
   },
+  // Added on request, without being able to open the sites: press Test before switching one on.
+  {
+    id: "reggaerecord",
+    name: "ReggaeRecord",
+    enabled: false,
+    weight: 0.75,
+    kind: "html",
+    searchUrl: "https://www.reggaerecord.com/en/search?q={query}",
+    items: ".product, .item, li.record",
+    fields: { artist: ".artist", title: ".title", url: "a@href", label: ".label", year: ".year" },
+    scene: "Reggae and dancehall 7\"s, 12\"s and LPs, with labels and riddims",
+    notes: "Untested: the search address and selectors are a guess. Open a search on the site, copy its address and the parts of each result, then press Test.",
+    verified: false,
+    genres: ["Reggae", "Dancehall", "Dub", "Roots", "Lovers rock"],
+    genreWeights: { Reggae: 1.3, Dancehall: 1.3, Dub: 1.2 },
+  },
+  {
+    id: "grime-archive",
+    name: "Grime Archive",
+    enabled: false,
+    weight: 0.5,
+    kind: "html",
+    searchUrl: "https://grimearchive.org/search?q={query}",
+    items: ".mix, .result, li",
+    fields: { combined: ".title, a", url: "a@href", year: ".date" },
+    scene: "Grime radio sets and mixes (Rinse, Deja Vu, Kiss…)",
+    notes: "Untested: a guess at the search address. Sets rather than tracks, so it backs up clash and set recordings more than singles.",
+    verified: false,
+    genres: ["Grime", "Radio rips"],
+    genreWeights: { Grime: 1.2, "Radio rips": 1.3 },
+  },
+  {
+    id: "grm-daily",
+    name: "GRM Daily",
+    enabled: false,
+    weight: 0.55,
+    kind: "json",
+    searchUrl: "https://grmdaily.com/wp-json/wp/v2/posts?search={query}&per_page=10&_fields=title,link,date",
+    items: "",
+    fields: { combined: "title.rendered", url: "link", year: "date" },
+    scene: "UK rap, grime and drill releases and videos",
+    notes: "Untested: assumes the site's WordPress search. Posts are titled \"Artist - Title\" with extras, so treat hits as backing up other sources.",
+    verified: false,
+    genres: ["Grime", "UK rap", "UK drill", "Hip-hop"],
+    genreWeights: { Grime: 1.2, "UK rap": 1.25, "UK drill": 1.25 },
+  },
+  {
+    id: "britishhiphop",
+    name: "BritishHipHop.co.uk",
+    enabled: false,
+    weight: 0.55,
+    kind: "json",
+    searchUrl: "https://www.britishhiphop.co.uk/wp-json/wp/v2/posts?search={query}&per_page=10&_fields=title,link,date",
+    items: "",
+    fields: { combined: "title.rendered", url: "link", year: "date" },
+    scene: "UK hip-hop reviews and releases",
+    notes: "Untested: assumes the site's WordPress search.",
+    verified: false,
+    genres: ["UK rap", "Hip-hop"],
+    genreWeights: { "UK rap": 1.25, "Hip-hop": 1.1 },
+  },
+  {
+    id: "soundclash-hub",
+    name: "SoundClash Hub",
+    enabled: false,
+    weight: 0.3,
+    kind: "json",
+    searchUrl: "https://soundclashhub.com/wp-json/wp/v2/posts?search={query}&per_page=10&_fields=title,link,date",
+    items: "",
+    fields: { combined: "title.rendered", url: "link", year: "date" },
+    scene: "Sound clash and juggling events",
+    notes: "Untested. An events calendar rather than a track archive, so it's supporting evidence only: it can back a clash up, never confirm one alone.",
+    verified: false,
+    supportingOnly: true,
+    genres: ["Sound clashes"],
+    genreWeights: { "Sound clashes": 1.1 },
+  },
 ]
+
 
 /** The presets every install already had before newer ones were added. */
 const ORIGINAL_PRESET_IDS = ["juno", "regime-radio", "wordpress-template"]
@@ -220,6 +302,8 @@ export const DEFAULT_SETTINGS: Settings = {
     sceneHint: "",
     monthlyBudget: 0,
     currency: "$",
+    escalation: { enabled: false, providerId: "ollama", model: "", from: 60, to: 89 },
+    vision: { enabled: false, providerId: "ollama", model: "" },
   },
   sources: DEFAULT_SOURCES,
   scrapers: SCRAPER_PRESETS,
@@ -229,6 +313,7 @@ export const DEFAULT_SETTINGS: Settings = {
     autoApprove: false,
     parseOnlyMax: 75,
     genreAware: true,
+    preferOwnRelease: true,
   },
   naming: {
     template: "{artist} - {title}",
@@ -264,6 +349,8 @@ export const DEFAULT_SETTINGS: Settings = {
   lyrics: { fetch: true, embed: true, embedSynced: false, lrcFile: false, replaceExisting: false },
   uploads: { maxMb: 2048 },
   hooks: { pathMap: [] },
+  acoustid: { submit: false },
+  canonicalGenres: { enabled: false, overwrite: true, rules: STARTER_GENRE_RULES },
   contact: "",
 }
 
@@ -324,6 +411,9 @@ function mergeProviders(stored: LlmProviderConfig[] | undefined): LlmProviderCon
   return merged
 }
 
+/** The example canonical genre list shipped before the built-in one followed Dee's folders. */
+const OLD_EXAMPLE_GENRES = "UK Grime|UK Garage|UK Rap|UK R&B|Hip Hop|Reggae|Dancehall"
+
 export function loadSettings(): Settings {
   const row = getDb().prepare("SELECT value_json FROM settings WHERE key = 'app'").get() as { value_json: string } | undefined
   const stored = row ? (JSON.parse(row.value_json) as Partial<Settings>) : {}
@@ -339,6 +429,10 @@ export function loadSettings(): Settings {
     s.llm.genres = [...LEGACY_GENRES]
     s.llm.sceneHint = ""
   }
+  // Settings are saved whole, so an install that saved anything while the old example genre list was
+  // the default still carries it. Never switched on, it was never chosen: the built-in list replaces it.
+  const cg = stored.canonicalGenres
+  if (cg && !cg.enabled && cg.rules?.map((r) => r.genre).join("|") === OLD_EXAMPLE_GENRES) s.canonicalGenres.rules = structuredClone(STARTER_GENRE_RULES)
   return s
 }
 
@@ -393,6 +487,7 @@ export function publicSettings(): Settings & { secretsFromEnv: string[]; zdrFrom
   s.integrations.mediaServers = s.integrations.mediaServers.map((m) => ({ ...m, token: mask(m.token) }))
   s.integrations.discord.webhookUrl = mask(s.integrations.discord.webhookUrl)
   s.integrations.telegram.botToken = mask(s.integrations.telegram.botToken)
+  s.acoustid.userKey = mask(s.acoustid.userKey)
   return { ...s, secretsFromEnv: fromEnv, zdrFromEnv: zdrForcedByEnv() }
 }
 
@@ -426,6 +521,33 @@ function keepSecret(incoming: string | undefined, previous: string | undefined) 
   return incoming.trim() || undefined
 }
 
+/** Genre rules as typed: names trimmed, match terms lower-cased, empty ones dropped, one rule per genre. */
+export function cleanGenreRules(rules: GenreRule[] | undefined): GenreRule[] {
+  const seen = new Set<string>()
+  const out: GenreRule[] = []
+  for (const r of Array.isArray(rules) ? rules : []) {
+    const genre = String(r?.genre ?? "").replace(/\s+/g, " ").trim().slice(0, 60)
+    if (!genre || seen.has(genre.toLowerCase())) continue
+    seen.add(genre.toLowerCase())
+    const words = (v: unknown) => [...new Set((Array.isArray(v) ? v : []).map((m) => String(m).toLowerCase().replace(/\s+/g, " ").trim()).filter(Boolean))].slice(0, 60)
+    const match = words(r.match)
+    const titles = words(r.titles)
+    const exclude = words(r.exclude)
+    const regions = (Array.isArray(r.regions) ? r.regions : []).map((x) => String(x).trim().toUpperCase().replace(/^UNKNOWN$/, "?")).filter(Boolean)
+    const folder = sanitizeFilename(String(r.folder ?? "").replace(/\s+/g, " ").trim()).slice(0, 60)
+    out.push({
+      genre,
+      ...(folder && folder !== genre ? { folder } : {}),
+      region: sanitizeFilename(String(r.region ?? "")).slice(0, 40),
+      match,
+      ...(titles.length ? { titles } : {}),
+      ...(exclude.length ? { exclude } : {}),
+      ...(regions.length ? { regions } : {}),
+    })
+  }
+  return out.slice(0, 200)
+}
+
 function cleanPathMap(map: PathMapping[] | undefined): PathMapping[] {
   return (Array.isArray(map) ? map : [])
     .map((m) => ({ from: String(m?.from ?? "").trim(), to: String(m?.to ?? "").trim() }))
@@ -452,6 +574,16 @@ export function saveSettings(patch: Partial<Settings>): Settings {
     next.exports.traktorVolume = String(next.exports.traktorVolume ?? "").trim() || DEFAULT_SETTINGS.exports.traktorVolume
   }
   if (patch.hooks) next.hooks.pathMap = cleanPathMap(next.hooks.pathMap)
+  if (patch.acoustid) next.acoustid.userKey = keepSecret(patch.acoustid.userKey, current.acoustid.userKey)
+  if (patch.llm?.escalation) {
+    const e = next.llm.escalation
+    const bound = (v: unknown, d: number) => Math.min(100, Math.max(0, Math.round(Number(v) || d)))
+    e.from = bound(e.from, 60)
+    e.to = Math.max(e.from, bound(e.to, 89))
+    e.model = String(e.model ?? "").trim()
+  }
+  if (patch.llm?.vision) next.llm.vision.model = String(next.llm.vision.model ?? "").trim()
+  if (patch.canonicalGenres) next.canonicalGenres.rules = cleanGenreRules(next.canonicalGenres.rules)
   if (patch.uploads) next.uploads.maxMb = Math.min(20_000, Math.max(1, Math.round(Number(next.uploads.maxMb) || DEFAULT_SETTINGS.uploads.maxMb)))
   if (patch.sources) {
     for (const [id, cfg] of Object.entries(patch.sources)) {
@@ -464,7 +596,8 @@ export function saveSettings(patch: Partial<Settings>): Settings {
       }
     }
   }
-  if (patch.scrapers) next.scrapers = patch.scrapers
+  // A scraper switched back on loses the health check's note.
+  if (patch.scrapers) next.scrapers = patch.scrapers.map(({ disabledReason, ...s }) => (s.enabled ? s : { ...s, ...(disabledReason ? { disabledReason } : {}) }))
   if (patch.llm && "genres" in patch.llm) next.llm.genres = cleanGenres(patch.llm.genres)
   if (patch.integrations) {
     const cur = current.integrations
