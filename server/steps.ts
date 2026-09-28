@@ -114,7 +114,13 @@ export function trackInsight(t: Track, settings: Settings): TrackInsight {
     const g = canonicalGenre(t, d, settings)
     steps.push(
       g
-        ? { key: "genre", label: "Genre", state: "ok", value: g.region ? `${g.genre} (${g.region})` : g.genre, detail: `From ${g.from}.${d?.sourceGenres?.length ? ` The sources said: ${d.sourceGenres.join(", ")}.` : ""}` }
+        ? {
+            key: "genre",
+            label: "Genre",
+            state: "ok",
+            value: g.genre,
+            detail: `From ${g.from}. Folder: ${[g.region, g.folder].filter(Boolean).join("/")}.${d?.sourceGenres?.length ? ` The sources said: ${d.sourceGenres.join(", ")}.` : ""}`,
+          }
         : { key: "genre", label: "Genre", state: "warn", value: "Not in your list", detail: `Nothing fits a canonical genre${d?.sourceGenres?.length ? ` (the sources said: ${d.sourceGenres.join(", ")})` : ""} - pick one, or add a rule. No genre is written until then.` }
     )
   } else if (d?.sourceGenres?.length) steps.push({ key: "genre", label: "Genre", state: "info", value: d.sourceGenres.slice(0, 3).join(", "), detail: "As the sources worded it (canonical genres are off)" })

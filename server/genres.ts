@@ -47,7 +47,7 @@ export function regionOf(t: Pick<Track, "ai">, d: Decision | null): string | nul
 const norm = (s: string) =>
   stripDiacritics(s)
     .toLowerCase()
-    .replace(/[_/]+/g, " ")
+    .replace(/[_/-]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
 
@@ -62,36 +62,86 @@ function matchStrength(term: string, word: string): number {
   return re.test(t) ? w.length : 0
 }
 
+/** Genre words that say where the music's from: "UK drill", "British hip hop", "US rap". */
+const REGION_WORDS: [string, RegExp][] = [
+  ["UK", /\b(?:uk|british|english|london|brit)\b/],
+  ["US", /\b(?:us|usa|american|east coast|west coast|dirty south|chicago|atlanta|brooklyn|new york|nyc|detroit|memphis|houston)\b/],
+  ["JM", /\b(?:jamaican|jamaica)\b/],
+]
+
+/** The region a genre word names itself, or null. */
+export function regionInTerm(term: string): string | null {
+  const t = norm(term)
+  return REGION_WORDS.find(([, re]) => re.test(t))?.[0] ?? null
+}
+
 function ruleApplies(rule: GenreRule, region: string | null): boolean {
   if (!rule.regions?.length) return true
   if (region) return rule.regions.includes(region)
   return rule.regions.includes("?")
 }
 
+/** How well one genre term fits one rule (0 = not at all, or it's excluded). */
+function scoreFor(term: string, rule: GenreRule): number {
+  if (rule.exclude?.some((x) => matchStrength(term, x) > 0)) return 0
+  // The canonical name (or its folder's) only counts when it's the whole term, like any exact word, so on
+  // a tie the rule higher up wins: "Hip Hop" from a UK artist still lands on UK Rap before the Hip-Hop folder.
+  const named = [rule.genre, rule.folder ?? ""].map((w) => matchStrength(term, w)).filter((x) => x >= 1000)
+  return Math.max(0, ...named, ...rule.match.map((w) => matchStrength(term, w)))
+}
+
+/** The best rule for one genre term, and how well it fits. A term naming a region ("UK drill") counts as that region. */
+function bestRule(term: string, rules: GenreRule[], region: string | null): { rule: GenreRule; score: number } | null {
+  const where = regionInTerm(term) ?? region
+  let best: { rule: GenreRule; score: number } | null = null
+  for (const rule of rules) {
+    if (!ruleApplies(rule, where)) continue
+    const score = scoreFor(term, rule)
+    // On a tie, the rule higher up the list wins.
+    if (score > 0 && (!best || score > best.score)) best = { rule, score }
+  }
+  return best
+}
+
 /** The best rule for one genre term, or null. */
 export function ruleFor(term: string, rules: GenreRule[], region: string | null): GenreRule | null {
-  let best: { rule: GenreRule; score: number; order: number } | null = null
-  rules.forEach((rule, order) => {
-    if (!ruleApplies(rule, region)) return
-    // A term that is the canonical name itself counts as its best match.
-    const score = Math.max(norm(term) === norm(rule.genre) ? 2000 : 0, ...rule.match.map((w) => matchStrength(term, w)))
-    if (score > 0 && (!best || score > best.score || (score === best.score && order < best.order))) best = { rule, score, order }
-  })
-  return (best as { rule: GenreRule } | null)?.rule ?? null
+  return bestRule(term, rules, region)?.rule ?? null
 }
+
+/** A rule whose title words appear in the track's title, version or album (a series like Daily Duppy, or instrumentals). */
+function titleRule(texts: string[], rules: GenreRule[], region: string | null): { rule: GenreRule; word: string } | null {
+  let best: { rule: GenreRule; word: string; score: number } | null = null
+  for (const rule of rules) {
+    if (!rule.titles?.length || !ruleApplies(rule, region)) continue
+    for (const word of rule.titles) {
+      const score = Math.max(0, ...texts.map((x) => matchStrength(x, word)))
+      if (score > 0 && (!best || score > best.score)) best = { rule, word, score }
+    }
+  }
+  return best
+}
+
+const canonicalOf = (rule: GenreRule, from: string): CanonicalGenre => ({ genre: rule.genre, folder: rule.folder || rule.genre, region: rule.region, from })
 
 /**
  * The one canonical genre for a track, or null (switched off, or nothing in
  * the list fits - it then needs a person to pick one). Your own choice wins,
- * then what the agreeing sources say, then the AI, then the file's own tag.
+ * then a series or kind named in the title (Daily Duppy, instrumentals), then
+ * what the agreeing sources say, then the AI, then the file's own tag.
  */
-export function canonicalGenre(t: Pick<Track, "final" | "ai" | "tags" | "escalation">, d: Decision | null, settings: Settings): CanonicalGenre | null {
+export function canonicalGenre(t: Pick<Track, "final" | "ai" | "tags" | "escalation"> & { filename?: string }, d: Decision | null, settings: Settings): CanonicalGenre | null {
   const cg = settings.canonicalGenres
   if (!cg.enabled || !cg.rules.length) return null
   const region = regionOf(t, d)
-  const exact = (g: string | undefined) => (g ? cg.rules.find((r) => norm(r.genre) === norm(g)) : undefined)
+  const exact = (g: string | undefined) => (g ? cg.rules.find((r) => norm(r.genre) === norm(g) || (!!r.folder && norm(r.folder) === norm(g))) : undefined)
   const mine = exact(t.final?.genre)
-  if (mine) return { genre: mine.genre, region: mine.region, from: "your choice" }
+  if (mine) return canonicalOf(mine, "your choice")
+  const ai = t.escalation?.ai ?? t.ai
+  const texts = [t.final?.title, t.final?.version, t.final?.album, d?.title, d?.version, d?.album, ai?.title, ai?.version, ai?.album, ai?.event, t.tags.title, t.tags.album, t.filename?.replace(/\.\w+$/, "")].filter(
+    (x): x is string => !!x
+  )
+  const titled = titleRule(texts, cg.rules, region)
+  if (titled) return canonicalOf(titled.rule, `the title ("${titled.word}")`)
   const inputs: [string[], string][] = [
     [d?.sourceGenres ?? [], "the sources"],
     [[t.escalation?.ai.genre, t.ai?.genre].filter((g): g is string => !!g), "the AI"],
@@ -99,18 +149,15 @@ export function canonicalGenre(t: Pick<Track, "final" | "ai" | "tags" | "escalat
   ]
   for (const [terms, from] of inputs) {
     // Across one input, the most specific match wins (a source saying "UK garage" over another saying "electronic").
-    let best: { rule: GenreRule; term: string } | null = null
-    let bestScore = 0
+    let best: { rule: GenreRule; term: string; score: number } | null = null
     for (const term of terms) {
-      const rule = ruleFor(term, cg.rules, region)
-      if (!rule) continue
-      const score = Math.max(norm(term) === norm(rule.genre) ? 2000 : 0, ...rule.match.map((w) => matchStrength(term, w)))
-      if (score > bestScore) {
-        best = { rule, term }
-        bestScore = score
-      }
+      const hit = bestRule(term, cg.rules, region)
+      if (hit && (!best || hit.score > best.score)) best = { ...hit, term }
     }
-    if (best) return { genre: best.rule.genre, region: best.rule.region, from: `${from} ("${best.term}"${region ? `, ${region}` : ""})` }
+    if (best) {
+      const where = regionInTerm(best.term) ?? region
+      return canonicalOf(best.rule, `${from} ("${best.term}"${where ? `, ${where}` : ""})`)
+    }
   }
   return null
 }

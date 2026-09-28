@@ -425,12 +425,13 @@ A folder template decides where a track lives inside its library.
 | `{artist}/[{year} - ]{album}` | `Chronixx/2014 - Dread & Terrible/` |
 | `{initial}/{artist}` | `C/Chronixx/` |
 | `{genre}/{artist}` | `Reggae/Chronixx/` |
-| `[{region}]/{genre}/{artist}` | `UK/UK Grime/Wiley/` (with canonical genres) |
+| `[{region}]/{genre}` | `UK/UK Grime/`, `House Genres/` (with canonical genres) |
+| `[{region}]/{genre}/{artist}` | `UK/UK Grime/Wiley/` |
 | `{label}/{year}` | `Soul Circle/2014/` |
 | `[{bpmrange} BPM]/[{camelot}]` | `70-79 BPM/8A/` |
 
 Tokens: `{artist}` (main artists), `{firstartist}`, `{albumartist}`,
-`{album}`, `{year}`, `{decade}` (`1990s`), `{label}`, `{genre}`, `{region}` (the canonical genre's folder), `{version}`,
+`{album}`, `{year}`, `{decade}` (`1990s`), `{label}`, `{genre}` (with canonical genres, its folder name), `{region}` (the folder above it), `{version}`,
 `{initial}` (A-Z, `0-9` or `#`, ignoring a leading "The"), `{bpm}`,
 `{bpmrange}` (`140-149`), `{key}`, `{camelot}` and `{format}` (`FLAC`).
 
@@ -674,21 +675,28 @@ Anthropic models that take images.
 
 Off by default. **Settings → Genres** gives every track exactly one genre from
 your own list, decided by where the music's from and its style rather than
-whatever a source called it that day. Each rule has a genre, the folder above
-it (`UK`, `US`…), the source genres that mean it (`grime`, `grime revival`,
-`eskibeat`…) and optionally where the music has to be from (`UK`; `?` for
-unknown), so `rap` can mean UK Rap for a London artist and Hip Hop for a US
-one. The most specific match wins.
+whatever a source called it that day. Each rule has:
 
-Your own choice wins, then the sources that agree on the track, then the AI,
-then the file's tag. Where nothing fits, the Decision tab says so and no genre
-is written. The sources' own genres are kept for reference; only the canonical
-one goes into files (over an existing genre, unless you turn that off). Use
-`{genre}` and `{region}` in a folder template to file by them (the **Region /
-Genre / Artist** preset). The list can be saved to and loaded from a file.
+- the **genre** written to the tag, and the **folder** it lives in when that's named differently (House → `House Genres`);
+- the **folder above** it (`UK`), if any;
+- the **source genres that mean it** (`grime`, `grime revival`, `eskibeat`…);
+- **title words** that send a track there whatever its style (a series like `daily duppy` or `sbtv`, or `instrumental`);
+- **words that rule it out** (`rock`, so garage rock isn't UK Garage; `punk`, so hardcore punk isn't Hardcore);
+- optionally **where the music has to be from** (`UK`; `?` for unknown), so `rap` means UK Rap for a London artist and Hip-Hop for anyone else. A source genre that names a place (`UK drill`, `British hip hop`) counts as from there.
 
-The starter list is only an example (UK Grime, UK Garage, UK Rap, UK R&B, Hip
-Hop, Reggae, Dancehall) - replace it with your own folders.
+Your own choice wins, then title words, then the sources that agree on the
+track, then the AI, then the file's tag. The most specific match wins; on a
+tie, the rule higher up the list. Where nothing fits, the Decision tab says so
+and no genre is written. The sources' own genres are kept for reference; only
+the canonical one goes into files (over an existing genre, unless you turn
+that off). File by it with the **Region / Genre** folder preset
+(`[{region}]/{genre}`, e.g. `UK/UK Grime`, `Reggae`) or **Region / Genre /
+Artist**. The list can be saved to and loaded from a file.
+
+The built-in list follows Dee's folders: under `UK`, Daily Duppy, SBTV,
+Instrumentals, UK Drill, UK Grime, UK Garage and UK Rap; at the top, Drum And
+Bass, Jungle, Hardcore, Old Skool, House Genres, Hip-Hop, Reggae (dancehall
+included), Oldies and Christmas Classic Pop. Change it to suit your own.
 
 </details>
 

@@ -22,7 +22,7 @@ import { processTracks, scoreAndSave } from "../pipeline"
 import { targetFolder } from "../placement"
 import * as repo from "../repo"
 import { scanLibrary } from "../scanner"
-import { DEFAULT_SETTINGS, loadSettings, saveSettings, STARTER_GENRE_RULES } from "../settings"
+import { cleanGenreRules, DEFAULT_SETTINGS, loadSettings, saveSettings, STARTER_GENRE_RULES } from "../settings"
 import { BAD_LIMIT, junkResults, recordScraperAnswer } from "../source-health"
 import { genreBoost, scourTrack } from "../sources"
 import { trackInsight } from "../steps"
@@ -354,16 +354,73 @@ describe("canonical genres", () => {
     expect(canonicalGenre(t(), d(["Grime"]), s())).toMatchObject({ genre: "UK Grime", region: "UK" })
     expect(canonicalGenre(t(), d(["UK Garage", "Electronic"]), s())).toMatchObject({ genre: "UK Garage" })
     expect(canonicalGenre(t(), d(["Hip Hop", "Trap"], "GB"), s())).toMatchObject({ genre: "UK Rap", region: "UK" })
-    expect(canonicalGenre(t(), d(["Hip Hop", "Trap"], "US"), s())).toMatchObject({ genre: "Hip Hop", region: "US" })
-    // Nobody says where it's from: the rule that allows "unknown".
-    expect(canonicalGenre(t(), d(["Boom Bap"]), s())).toMatchObject({ genre: "Hip Hop" })
+    expect(canonicalGenre(t(), d(["Hip Hop", "Trap"], "US"), s())).toMatchObject({ genre: "Hip-Hop", region: "" })
+    // Nobody says where it's from: only the rules that don't need to know.
+    expect(canonicalGenre(t(), d(["Boom Bap"]), s())).toMatchObject({ genre: "Hip-Hop" })
     expect(canonicalGenre(t({ ai: { country: "GB", genre: "rap" } as Track["ai"] }), d([]), s())).toMatchObject({ genre: "UK Rap" })
-    expect(canonicalGenre(t(), d(["Bashment"]), s())).toMatchObject({ genre: "Dancehall" })
+    expect(canonicalGenre(t(), d(["Bashment"]), s())).toMatchObject({ genre: "Reggae" })
     // Your own pick wins; nothing fitting leaves it for you; switched off is nothing at all.
     expect(canonicalGenre(t({ final: { artists: [], featuring: [], title: "", genre: "Reggae" } }), d(["Grime"]), s())).toMatchObject({ genre: "Reggae", from: "your choice" })
     expect(canonicalGenre(t(), d(["Polka"]), s())).toBeNull()
     expect(canonicalGenre(t(), d(["Grime"]), quiet())).toBeNull()
-    expect(ruleFor("uk drill", STARTER_GENRE_RULES, "UK")?.genre).toBe("UK Rap")
+    expect(ruleFor("uk drill", STARTER_GENRE_RULES, "UK")?.genre).toBe("UK Drill")
+  })
+
+  it("file into Dee's folders", () => {
+    const where = (g: ReturnType<typeof canonicalGenre>) => (g ? [g.region, g.folder].filter(Boolean).join("/") : null)
+    const at = (genres: string[], country?: string, over: Partial<Track> = {}, reading: Partial<Decision> = {}) => where(canonicalGenre(t(over), { ...d(genres, country), ...reading }, s()))
+    // UK styles live under UK; a genre that names a place counts as from there.
+    expect(at(["Grime"])).toBe("UK/UK Grime")
+    expect(at(["UK Drill"])).toBe("UK/UK Drill")
+    expect(at(["Drill"], "GB")).toBe("UK/UK Drill")
+    expect(at(["Drill"], "US")).toBe("Hip-Hop")
+    expect(at(["British Hip Hop"])).toBe("UK/UK Rap")
+    expect(at(["Hip-Hop"], "US")).toBe("Hip-Hop")
+    expect(at(["Hardcore Hip-Hop"], "US")).toBe("Hip-Hop")
+    // Words that look alike but aren't: garage rock, hardcore punk, dub techno, dubstep.
+    expect(at(["Garage Rock"])).toBeNull()
+    expect(at(["Hardcore Punk"])).toBeNull()
+    expect(at(["Dub Techno"])).toBeNull()
+    expect(at(["Dubstep"])).toBeNull()
+    expect(at(["Garage House"])).toBe("House Genres")
+    expect(at(["UK Garage", "House"])).toBe("UK/UK Garage")
+    // The tag says House; the folder's called House Genres.
+    expect(canonicalGenre(t(), d(["Deep House"]), s())).toMatchObject({ genre: "House", folder: "House Genres" })
+    expect(at(["Drum & Bass"])).toBe("Drum And Bass")
+    expect(at(["Liquid Funk"])).toBe("Drum And Bass")
+    expect(at(["Ragga Jungle"])).toBe("Jungle")
+    expect(at(["Happy Hardcore"])).toBe("Hardcore")
+    expect(at(["Breakbeat Hardcore"])).toBe("Old Skool")
+    expect(at(["Rave"])).toBe("Old Skool")
+    expect(at(["Dancehall"], "JM")).toBe("Reggae")
+    expect(at(["Roots Reggae"])).toBe("Reggae")
+    expect(at(["Northern Soul"])).toBe("Oldies")
+    expect(at(["Christmas"])).toBe("Christmas Classic Pop")
+    expect(at(["Techno"])).toBeNull()
+    // A series or instrumental in the title wins over the style.
+    expect(at(["UK Drill"], "GB", { filename: "Headie One - Daily Duppy.mp3" } as Partial<Track>)).toBe("UK/Daily Duppy")
+    expect(at(["Grime"], "GB", { tags: { album: "SBTV: Warm Up Sessions" } })).toBe("UK/SBTV")
+    expect(at(["Grime"], "GB", {}, { version: "Instrumental" })).toBe("UK/Instrumentals")
+    expect(at(["Hip Hop"], "US", {}, { version: "Instrumental" })).toBe("Hip-Hop")
+    expect(canonicalGenre(t({ filename: "Headie One - Daily Duppy.mp3" } as Partial<Track>), d(["UK Drill"], "GB"), s())?.from).toBe('the title ("daily duppy")')
+    // Picking the folder's name counts as picking the genre.
+    expect(canonicalGenre(t({ final: { artists: [], featuring: [], title: "", genre: "House Genres" } }), d(["Grime"]), s())).toMatchObject({ genre: "House", from: "your choice" })
+  })
+
+  it("replace the old example list nobody switched on with the built-in one", () => {
+    const old = ["UK Grime", "UK Garage", "UK Rap", "UK R&B", "Hip Hop", "Reggae", "Dancehall"].map((genre) => ({ genre, region: "", match: [genre.toLowerCase()] }))
+    saveSettings({ canonicalGenres: { enabled: false, overwrite: true, rules: old } })
+    expect(loadSettings().canonicalGenres.rules.map((r) => r.genre)).toEqual(STARTER_GENRE_RULES.map((r) => r.genre))
+    // Switched on, it was chosen: kept as it is.
+    saveSettings({ canonicalGenres: { enabled: true, overwrite: true, rules: old } })
+    expect(loadSettings().canonicalGenres.rules).toHaveLength(7)
+    saveSettings({ canonicalGenres: DEFAULT_SETTINGS.canonicalGenres })
+  })
+
+  it("keep a rule's folder name, title words and exclusions when saved", () => {
+    const [r] = cleanGenreRules([{ genre: " House ", folder: "House Genres", region: "", match: ["House", "Deep  House"], titles: ["Mix"], exclude: ["Rock"], regions: ["uk"] }])
+    expect(r).toEqual({ genre: "House", folder: "House Genres", region: "", match: ["house", "deep house"], titles: ["mix"], exclude: ["rock"], regions: ["UK"] })
+    expect(cleanGenreRules([{ genre: "Reggae", folder: "Reggae", region: "", match: [] }])[0]).toEqual({ genre: "Reggae", region: "", match: [] })
   })
 
   it("are the only genre written, over the file's own, and give folders their region", () => {

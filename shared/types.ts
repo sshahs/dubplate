@@ -399,19 +399,28 @@ export interface Escalation {
 
 export interface CanonicalGenre {
   genre: string
+  /** the genre's own folder: its name, unless the rule names the folder differently */
+  folder: string
   /** the folder above it (e.g. "UK", "US"), empty when it has none */
   region: string
-  /** what matched: a source genre, the AI, the file's tag, or you */
+  /** what matched: a source genre, the AI, the file's tag, the title, or you */
   from: string
 }
 
 /** One rule of the canonical genre list. */
 export interface GenreRule {
+  /** the genre written to the tag (and the folder's name, unless `folder` says otherwise) */
   genre: string
+  /** the folder's name when it isn't the genre, e.g. "House Genres" for House */
+  folder?: string
   /** folder above the genre ("UK", "US"); empty for none */
   region: string
   /** source genres and styles that mean this one, e.g. "grime", "grime revival" */
   match: string[]
+  /** words in the title, version or album that put a track here whatever its style, e.g. "daily duppy" */
+  titles?: string[]
+  /** source genres containing these words never count for it, e.g. "rock" so "garage rock" isn't UK Garage */
+  exclude?: string[]
   /** only when the music's from one of these (e.g. ["UK"]); "?" allows unknown; empty = anywhere */
   regions?: string[]
 }

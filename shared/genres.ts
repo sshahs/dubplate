@@ -15,21 +15,86 @@ export const GENRE_GROUPS: { label: string; genres: string[] }[] = [
 export const KNOWN_GENRES = new Set(GENRE_GROUPS.flatMap((g) => g.genres.map((x) => x.toLowerCase())))
 
 /**
- * A starting point for the canonical genre list, from the examples it was
- * asked for. Replace it with your own folders; region folders for reggae and
- * dancehall are left empty until they're decided.
+ * The canonical genre list, from Dee's folders on the Jellyfin server
+ * (Music/Albums): UK styles under a UK folder, everything else at the top.
+ * Series and kinds named in the title (Daily Duppy, SBTV, instrumentals) go
+ * to their own folders whatever their style. Order matters on a tie: the rule
+ * higher up wins, so the UK ones come before Hip-Hop.
  */
 export const STARTER_GENRE_RULES: GenreRule[] = [
-  { genre: "UK Grime", region: "UK", match: ["grime", "grime revival", "uk grime", "eskibeat"] },
-  { genre: "UK Garage", region: "UK", match: ["uk garage", "garage", "2-step", "2 step", "speed garage", "ukg", "bassline"] },
-  { genre: "UK Rap", region: "UK", match: ["uk rap", "uk hip hop", "british hip hop", "british hip-hop", "british rap", "uk drill", "rap", "hip hop", "hip-hop", "drill"], regions: ["UK"] },
-  { genre: "UK R&B", region: "UK", match: ["uk r&b", "r&b", "rnb", "contemporary r&b"], regions: ["UK"] },
+  { genre: "Daily Duppy", region: "UK", match: [], titles: ["daily duppy"] },
+  { genre: "SBTV", region: "UK", match: [], titles: ["sbtv", "warm up session", "warm up sessions", "f64"] },
+  { genre: "Instrumentals", region: "UK", match: ["instrumental"], titles: ["instrumental", "instrumentals"], regions: ["UK"] },
+  { genre: "UK Drill", region: "UK", match: ["uk drill", "drill", "london drill"], regions: ["UK"] },
+  { genre: "UK Grime", region: "UK", match: ["grime", "uk grime", "grime revival", "eskibeat", "sublow"] },
   {
-    genre: "Hip Hop",
-    region: "US",
-    match: ["us rap", "hip hop", "hip-hop", "rap", "trap", "drill", "boom bap", "hardcore rap", "hardcore hip-hop", "east coast", "east coast hip hop", "west coast", "underground hip hop", "gangsta rap", "conscious"],
-    regions: ["US", "?"],
+    genre: "UK Garage",
+    region: "UK",
+    match: ["uk garage", "garage", "ukg", "2 step", "two step", "speed garage", "bassline", "future garage", "old skool garage", "old school garage"],
+    exclude: ["rock", "punk", "psych"],
   },
-  { genre: "Reggae", region: "", match: ["reggae", "roots reggae", "roots", "lovers rock", "rocksteady", "dub", "ska", "one drop"] },
-  { genre: "Dancehall", region: "", match: ["dancehall", "bashment", "ragga", "raggamuffin"] },
+  {
+    genre: "UK Rap",
+    region: "UK",
+    match: ["uk rap", "uk hip hop", "british hip hop", "british rap", "road rap", "rap", "hip hop", "trap", "uk trap", "afroswing", "afro swing"],
+    regions: ["UK"],
+  },
+  {
+    genre: "Drum And Bass",
+    region: "",
+    match: ["drum and bass", "drum & bass", "drum n bass", "drum 'n' bass", "drum'n'bass", "dnb", "d&b", "liquid funk", "liquid drum and bass", "neurofunk", "jump up", "techstep", "rollers"],
+  },
+  { genre: "Jungle", region: "", match: ["jungle", "ragga jungle", "junglist", "old skool jungle", "old school jungle", "darkside jungle"] },
+  {
+    genre: "Hardcore",
+    region: "",
+    match: ["hardcore", "happy hardcore", "uk hardcore", "hardcore techno", "gabber", "gabba", "freeform", "bouncy techno", "makina"],
+    exclude: ["punk", "hip hop", "rap", "metal", "rock", "breakbeat", "breaks", "old skool", "oldskool", "old school"],
+  },
+  {
+    genre: "Old Skool",
+    region: "",
+    match: ["old skool", "oldskool", "old school", "rave", "old skool rave", "breakbeat hardcore", "hardcore breaks", "old skool hardcore", "bleep techno"],
+    exclude: ["hip hop", "rap", "garage", "jungle", "reggae", "dancehall", "soul", "funk"],
+  },
+  { genre: "House", folder: "House Genres", region: "", match: ["house", "deep house", "tech house", "soulful house", "afro house", "acid house", "garage house", "funky house", "disco house"] },
+  {
+    genre: "Hip-Hop",
+    region: "",
+    match: [
+      "hip hop",
+      "rap",
+      "us rap",
+      "trap",
+      "drill",
+      "boom bap",
+      "east coast hip hop",
+      "west coast hip hop",
+      "gangsta rap",
+      "g funk",
+      "conscious hip hop",
+      "old school hip hop",
+      "hardcore hip hop",
+      "hardcore rap",
+      "underground hip hop",
+      "southern hip hop",
+      "dirty south",
+      "crunk",
+      "jazz rap",
+      "abstract hip hop",
+      "pop rap",
+    ],
+  },
+  {
+    genre: "Reggae",
+    region: "",
+    match: ["reggae", "roots reggae", "dub", "lovers rock", "rocksteady", "ska", "dancehall", "bashment", "ragga", "raggamuffin", "reggae fusion", "one drop", "steppers", "sound clash"],
+    exclude: ["techno", "punk"],
+  },
+  {
+    genre: "Oldies",
+    region: "",
+    match: ["oldies", "doo wop", "rock and roll", "rock & roll", "rock n roll", "rock 'n' roll", "rockabilly", "motown", "northern soul", "classic soul", "girl group", "merseybeat"],
+  },
+  { genre: "Christmas Classic Pop", region: "", match: ["christmas", "xmas", "christmas music", "christmas pop", "holiday"] },
 ]

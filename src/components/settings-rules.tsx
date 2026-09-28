@@ -128,16 +128,43 @@ function parseRules(text: string): GenreRule[] {
   const data = JSON.parse(text) as unknown
   const raw = Array.isArray(data) ? data : (data as { rules?: unknown })?.rules
   if (!Array.isArray(raw)) throw new Error("Expected a list of rules")
+  const words = (v: unknown) => (Array.isArray(v) ? v.filter((m): m is string => typeof m === "string" && !!m.trim()) : [])
   return raw.map((r, i) => {
     const o = r as Partial<GenreRule>
     if (typeof o?.genre !== "string" || !o.genre.trim()) throw new Error(`Rule ${i + 1} has no genre`)
+    const titles = words(o.titles)
+    const exclude = words(o.exclude)
+    const regions = words(o.regions)
     return {
       genre: o.genre.trim(),
+      ...(typeof o.folder === "string" && o.folder.trim() ? { folder: o.folder.trim() } : {}),
       region: typeof o.region === "string" ? o.region.trim() : "",
-      match: Array.isArray(o.match) ? o.match.filter((m): m is string => typeof m === "string" && !!m.trim()) : [],
-      ...(Array.isArray(o.regions) && o.regions.length ? { regions: o.regions.filter((m): m is string => typeof m === "string") } : {}),
+      match: words(o.match),
+      ...(titles.length ? { titles } : {}),
+      ...(exclude.length ? { exclude } : {}),
+      ...(regions.length ? { regions } : {}),
     }
   })
+}
+
+/** A comma-separated list, committed when you leave the field (so typing a comma doesn't lose it). */
+function WordsInput({ value, onChange, label, placeholder, upper }: { value: string[] | undefined; onChange: (v: string[] | undefined) => void; label: string; placeholder: string; upper?: boolean }) {
+  const text = value?.join(", ") ?? ""
+  return (
+    <label className="grid gap-1">
+      <span className="text-muted-foreground text-[11px]">{label}</span>
+      <Input
+        key={text}
+        className="text-xs"
+        defaultValue={text}
+        onBlur={(e) => {
+          const next = list(e.target.value).map((x) => (upper && x !== "?" ? x.toUpperCase() : x))
+          if (next.join(", ") !== text) onChange(next.length ? next : undefined)
+        }}
+        placeholder={placeholder}
+      />
+    </label>
+  )
 }
 
 function saveFile(name: string, text: string) {
@@ -193,8 +220,9 @@ export function CanonicalGenresCard({ draft, set }: { draft: PublicSettings; set
         <CardHeader>
           <CardTitle>The list</CardTitle>
           <CardDescription className="text-pretty">
-            Each genre, the folder above it, and the source genres that mean it. “Only from” limits a rule to music from those places (UK, US, JM…; ? for unknown), so UK rap and US hip hop can share
-            the word “rap”. The most specific match wins; on a tie, the rule higher up.
+            Each genre, its folder, and the source genres that mean it. Title words send a series (Daily Duppy, SBTV) or instrumentals to their folder whatever the style. “Only if the music's
+            from” limits a rule to music from those places, so UK rap and US hip hop can share the word “rap”; a genre that names a place (“UK drill”) counts as from there. The most specific match
+            wins; on a tie, the rule higher up.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -209,7 +237,7 @@ export function CanonicalGenresCard({ draft, set }: { draft: PublicSettings; set
             </Button>
             <Button size="sm" variant="ghost" onClick={() => set((d) => void (d.canonicalGenres.rules = structuredClone(STARTER_GENRE_RULES)))}>
               <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} data-icon="inline-start" />
-              Start from the example list
+              Back to the built-in list
             </Button>
             <input
               ref={file}
@@ -227,37 +255,30 @@ export function CanonicalGenresCard({ draft, set }: { draft: PublicSettings; set
           {!cg.rules.length && <p className="text-muted-foreground text-sm">No rules yet.</p>}
           <ol className="space-y-2">
             {cg.rules.map((r, i) => (
-              <li key={i} className="bg-card/60 grid grid-cols-[1fr_5.5rem_auto] gap-2 rounded-2xl border p-3">
-                <Input value={r.genre} onChange={(e) => setRule(i, { genre: e.target.value })} placeholder="Genre, e.g. UK Grime" aria-label={`Rule ${i + 1} genre`} />
-                <Input value={r.region} onChange={(e) => setRule(i, { region: e.target.value })} placeholder="Folder" aria-label={`Rule ${i + 1} folder above`} />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="justify-self-end"
-                  aria-label={`Remove ${r.genre || `rule ${i + 1}`}`}
-                  onClick={() => set((d) => void d.canonicalGenres.rules.splice(i, 1))}
-                >
+              <li key={i} className="bg-card/60 grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-3 rounded-2xl border p-3">
+                <div className="grid gap-2 sm:grid-cols-[1fr_1fr_6rem]">
+                  <label className="grid gap-1">
+                    <span className="text-muted-foreground text-[11px]">Genre (the tag)</span>
+                    <Input value={r.genre} onChange={(e) => setRule(i, { genre: e.target.value })} placeholder="e.g. UK Grime" />
+                  </label>
+                  <label className="grid gap-1">
+                    <span className="text-muted-foreground text-[11px]">Folder name, if different</span>
+                    <Input value={r.folder ?? ""} onChange={(e) => setRule(i, { folder: e.target.value || undefined })} placeholder={r.genre || "same as the genre"} />
+                  </label>
+                  <label className="grid gap-1">
+                    <span className="text-muted-foreground text-[11px]">Folder above</span>
+                    <Input value={r.region} onChange={(e) => setRule(i, { region: e.target.value })} placeholder="none" />
+                  </label>
+                </div>
+                <Button variant="ghost" size="icon" className="mt-5" aria-label={`Remove ${r.genre || `rule ${i + 1}`}`} onClick={() => set((d) => void d.canonicalGenres.rules.splice(i, 1))}>
                   <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
                 </Button>
-                <Input
-                  className="col-span-3 text-xs sm:col-span-2"
-                  defaultValue={r.match.join(", ")}
-                  key={`m-${i}:${r.genre}:${r.match.join(",")}`}
-                  onBlur={(e) => setRule(i, { match: list(e.target.value) })}
-                  placeholder="Source genres that mean it, comma-separated"
-                  aria-label={`Rule ${i + 1} source genres`}
-                />
-                <Input
-                  className="col-span-3 text-xs sm:col-span-1"
-                  defaultValue={r.regions?.join(", ") ?? ""}
-                  key={`r-${i}:${r.genre}:${r.regions?.join(",") ?? ""}`}
-                  onBlur={(e) => {
-                    const regions = list(e.target.value).map((x) => (x === "?" ? x : x.toUpperCase()))
-                    setRule(i, { regions: regions.length ? regions : undefined })
-                  }}
-                  placeholder="Only from"
-                  aria-label={`Rule ${i + 1} only from`}
-                />
+                <div className="col-span-2 grid gap-2 sm:grid-cols-2">
+                  <WordsInput label="Source genres that mean it" value={r.match} onChange={(v) => setRule(i, { match: v ?? [] })} placeholder="grime, grime revival…" />
+                  <WordsInput label="Or when the title says" value={r.titles} onChange={(v) => setRule(i, { titles: v })} placeholder="e.g. daily duppy (whatever its style)" />
+                  <WordsInput label="Not when the genre says" value={r.exclude} onChange={(v) => setRule(i, { exclude: v })} placeholder="e.g. rock, so garage rock isn't UK Garage" />
+                  <WordsInput label="Only if the music's from" value={r.regions} onChange={(v) => setRule(i, { regions: v })} placeholder="anywhere (or UK, US, JM, ? for unknown)" upper />
+                </div>
               </li>
             ))}
           </ol>

@@ -42,7 +42,7 @@ export function folderValues(t: Track, meta: FinalMeta, settings: Settings): Fol
   const year = t.tags.year || meta.year
   // Canonical genres on: the folder follows the one genre from your list (and its region folder).
   const canonical = settings.canonicalGenres?.enabled ? canonicalGenre(t, t.decision, settings) : null
-  const genre = settings.canonicalGenres?.enabled ? (canonical?.genre ?? "") : (t.tags.genre?.[0] || meta.genre || "").split(/[,;/]/)[0].trim()
+  const genre = settings.canonicalGenres?.enabled ? (canonical?.folder ?? "") : (t.tags.genre?.[0] || meta.genre || "").split(/[,;/]/)[0].trim()
   const bpm = t.bpm ? Math.round(t.bpm) : null
   return {
     artist,

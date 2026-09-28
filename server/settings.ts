@@ -411,6 +411,9 @@ function mergeProviders(stored: LlmProviderConfig[] | undefined): LlmProviderCon
   return merged
 }
 
+/** The example canonical genre list shipped before the built-in one followed Dee's folders. */
+const OLD_EXAMPLE_GENRES = "UK Grime|UK Garage|UK Rap|UK R&B|Hip Hop|Reggae|Dancehall"
+
 export function loadSettings(): Settings {
   const row = getDb().prepare("SELECT value_json FROM settings WHERE key = 'app'").get() as { value_json: string } | undefined
   const stored = row ? (JSON.parse(row.value_json) as Partial<Settings>) : {}
@@ -426,6 +429,10 @@ export function loadSettings(): Settings {
     s.llm.genres = [...LEGACY_GENRES]
     s.llm.sceneHint = ""
   }
+  // Settings are saved whole, so an install that saved anything while the old example genre list was
+  // the default still carries it. Never switched on, it was never chosen: the built-in list replaces it.
+  const cg = stored.canonicalGenres
+  if (cg && !cg.enabled && cg.rules?.map((r) => r.genre).join("|") === OLD_EXAMPLE_GENRES) s.canonicalGenres.rules = structuredClone(STARTER_GENRE_RULES)
   return s
 }
 
@@ -522,9 +529,21 @@ export function cleanGenreRules(rules: GenreRule[] | undefined): GenreRule[] {
     const genre = String(r?.genre ?? "").replace(/\s+/g, " ").trim().slice(0, 60)
     if (!genre || seen.has(genre.toLowerCase())) continue
     seen.add(genre.toLowerCase())
-    const match = [...new Set((Array.isArray(r.match) ? r.match : []).map((m) => String(m).toLowerCase().replace(/\s+/g, " ").trim()).filter(Boolean))].slice(0, 60)
+    const words = (v: unknown) => [...new Set((Array.isArray(v) ? v : []).map((m) => String(m).toLowerCase().replace(/\s+/g, " ").trim()).filter(Boolean))].slice(0, 60)
+    const match = words(r.match)
+    const titles = words(r.titles)
+    const exclude = words(r.exclude)
     const regions = (Array.isArray(r.regions) ? r.regions : []).map((x) => String(x).trim().toUpperCase().replace(/^UNKNOWN$/, "?")).filter(Boolean)
-    out.push({ genre, region: sanitizeFilename(String(r.region ?? "")).slice(0, 40), match, ...(regions.length ? { regions } : {}) })
+    const folder = sanitizeFilename(String(r.folder ?? "").replace(/\s+/g, " ").trim()).slice(0, 60)
+    out.push({
+      genre,
+      ...(folder && folder !== genre ? { folder } : {}),
+      region: sanitizeFilename(String(r.region ?? "")).slice(0, 40),
+      match,
+      ...(titles.length ? { titles } : {}),
+      ...(exclude.length ? { exclude } : {}),
+      ...(regions.length ? { regions } : {}),
+    })
   }
   return out.slice(0, 200)
 }
