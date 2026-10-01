@@ -36,6 +36,11 @@ export interface ExistingTags {
   year?: number
   genre?: string[]
   track?: number
+  /** tracks on the disc, as the tag says */
+  trackTotal?: number
+  /** disc number, for releases on more than one CD or record */
+  disc?: number
+  discTotal?: number
   label?: string
   comment?: string
   bpm?: number
@@ -278,9 +283,27 @@ export interface TrackReading {
   genre?: string
 }
 
+/** Where a track sits on its record: disc, side and number, as its name and folders say. */
+export interface DiscPosition {
+  /** disc (or record) number, 1-based */
+  disc?: number
+  /** vinyl or tape side, "A".."H" */
+  side?: string
+  /** number on the side (A2 is 2), or on the disc */
+  number?: number
+  /** as the file or folder put it: "CD2", "Side B", "B2" */
+  label?: string
+  /** the file is a whole side or disc (or a part of one), not one track */
+  whole?: boolean
+  /** which part of a side or disc split over several files ("Side B Part 2") */
+  part?: number
+}
+
 export interface HeuristicParse extends TrackReading {
   cleaned: string
   trackNumber?: string
+  /** disc, side and number, from the filename and folders (CD1/CD2, Side A, A1…) */
+  position?: DiscPosition
   hints: string[]
   confidence: number // 0..1
   notes: string[]

@@ -391,7 +391,11 @@ secrets, and keys entered in the UI take precedence.
 
 The default template is `{artist} - {title}`. The available tokens are
 `{artist}`, `{title}`, `{song}` (the title without the version),
-`{version}`, `{year}`, `{album}`, `{label}`, `{featuring}` and `{genre}`.
+`{version}`, `{year}`, `{album}`, `{label}`, `{featuring}`, `{genre}`,
+`{position}` (a vinyl position like `B2`, or the track number as `05`),
+`{track}` and `{disc}` (only on releases with more than one disc). A token
+with no value leaves no gap, so `{position} - {artist} - {title}` is just
+`Artist - Title` for a file with no position.
 
 - Clashes are joined with ` vs `, collaborations with ` & `, and three or more names become `A, B & C`.
 - Featured artists go in the artist (`A feat. B - Title`) or the title (`A - Title (feat. B)`), as you prefer.
@@ -437,13 +441,14 @@ A folder template decides where a track lives inside its library.
 | `{artist}/[{year} - ]{album}` | `Chronixx/2014 - Dread & Terrible/` |
 | `{initial}/{artist}` | `C/Chronixx/` |
 | `{genre}/{artist}` | `Reggae/Chronixx/` |
+| `{artist}/{album}/[Disc {disc}]` | `Wiley/Treddin On Thin Ice/Disc 2/` (only for multi-disc releases) |
 | `[{region}]/{genre}` | `UK/UK Grime/`, `House Genres/` (with canonical genres) |
 | `[{region}]/{genre}/{artist}` | `UK/UK Grime/Wiley/` |
 | `{label}/{year}` | `Soul Circle/2014/` |
 | `[{bpmrange} BPM]/[{camelot}]` | `70-79 BPM/8A/` |
 
 Tokens: `{artist}` (main artists), `{firstartist}`, `{albumartist}`,
-`{album}`, `{year}`, `{decade}` (`1990s`), `{label}`, `{genre}` (with canonical genres, its folder name), `{region}` (the folder above it), `{version}`,
+`{album}`, `{disc}` (only on releases with more than one disc), `{year}`, `{decade}` (`1990s`), `{label}`, `{genre}` (with canonical genres, its folder name), `{region}` (the folder above it), `{version}`,
 `{initial}` (A-Z, `0-9` or `#`, ignoring a leading "The"), `{bpm}`,
 `{bpmrange}` (`140-149`), `{key}`, `{camelot}` and `{format}` (`FLAC`).
 
@@ -640,6 +645,25 @@ an inbox for your main library. Tracks are identified
 there, and cutting moves them into the main library using its filename and
 folder templates. Pair it with watching and hands-off for a drop folder that
 files itself. Rewind moves them back to the inbox.
+
+</details>
+
+<details>
+<summary><b>Discs and sides: CD1/CD2, Side A/B, A1, B2</b></summary>
+
+Multi-disc albums and vinyl rips are read for where each track sits:
+
+- **Folders** like `CD1`, `CD 2`, `Disc 2`, `Disc 2 - Bonus`, `LP2`, `Tape 2`, `Side A`, `A-Side` or a tape's `Side 1` say the disc or side. They're never taken for the album or the artist: in `Wiley/Treddin On Thin Ice/CD2/05 - Ice Rink.mp3` the album is *Treddin On Thin Ice*. `LP2/Side C` is side C of the second record.
+- **Filenames** starting `A1`, `B2`, `C1` (vinyl positions), `CD1-05`, `Disc 2 - 03` or `1-05` (disc 1, track 5) give the position too, and it's taken off the name.
+- **Whole sides**: a file that's just `Side A.mp3` (or `CD2.mp3`) is that side of what its folder names, and one ending in a side or disc - `Stone Love vs Killamanjaro - Clash 1995 (Side B)`, `Bodyguard vs Killamanjaro (Tape 2 Side A)`, `juggling side b pt2`, `Fabric 99 CD2` - is that part of the recording. The title is the recording and `Side B` / `Tape 2 Side A` / `Side B Part 2` its version, so the halves of a clash tape stay together. A whole side isn't mistaken for a DJ mix for being long, and its length isn't held against the match.
+
+When cutting, a file without **track or disc numbers** in its tags gets them:
+`CD2/05` is disc 2 of 2, track 5. Vinyl positions count on across the sides
+of a record using the other files from it, so on a record whose side A has
+four tracks, B2 is track 6 (and C1 is track 1 of record 2). Numbers a file
+already has are left alone, and Rewind takes them out again. Jellyfin,
+Navidrome and Plex then keep a multi-disc album together and in order. The
+track's File tab shows where it sits.
 
 </details>
 
@@ -925,6 +949,7 @@ crates whose names aren't taken.
 - 🪝 **Download tools**: qBittorrent, slskd and Lidarr tell Dubplate when a download finishes, with API tokens made for them.
 - 🎤 **Lyrics**: from LRCLIB, timed where possible, written into the file and optionally a `.lrc`.
 - 💿 **Release priority**: the artist's own album, EP or single before compilations and DJ mixes, unless the file says otherwise.
+- 📀 **Discs and sides**: CD1/CD2 and Side A/B folders, A1/B2 positions and whole-side rips understood, with disc and track numbers written.
 - 🧭 **How it was decided**: recording, release, version, genre, risk, verification, AcoustID and MusicBrainz, step by step, with where each field came from.
 - 🧠 **Second opinion**: a bigger model for the uncertain ones, and a vision model to check covers.
 - 🏷️ **Canonical genres**: one genre per track from your own list, with region folders.

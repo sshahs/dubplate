@@ -12,6 +12,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
+import { describePosition, placeValues } from "@core/discs"
 import { renderTemplate } from "@core/naming"
 import { RISK_LABEL, riskOf } from "@shared/risk"
 import type { Candidate, FinalMeta, Track } from "@shared/types"
@@ -77,7 +78,7 @@ export function TrackDetail({
     if (!meta.title || !meta.artists.length) return null
     // A library can have its own naming template.
     const template = libraries?.find((l) => l.id === track.libraryId)?.settings.template ?? settings.naming.template
-    return `${renderTemplate(template, meta, settings.naming)}.${track.ext.toLowerCase()}`
+    return `${renderTemplate(template, meta, settings.naming, placeValues(track.tags, track.heuristic?.position))}.${track.ext.toLowerCase()}`
   }, [draft, settings, track, libraries])
 
   const refresh = () => {
@@ -401,6 +402,15 @@ export function TrackDetail({
             </dd>
             <dt className="text-muted-foreground">Duration</dt>
             <dd>{fmtDuration(track.duration)}</dd>
+            {describePosition(track.heuristic?.position, track.tags.track, track.tags.disc, track.tags.discTotal) && (
+              <>
+                <dt className="text-muted-foreground">Position</dt>
+                <dd>
+                  {describePosition(track.heuristic?.position, track.tags.track, track.tags.disc, track.tags.discTotal)}
+                  {track.heuristic?.position?.label && !track.heuristic.position.whole ? <span className="text-muted-foreground"> (named “{track.heuristic.position.label}”)</span> : null}
+                </dd>
+              </>
+            )}
             <dt className="text-muted-foreground">Size</dt>
             <dd>{fmtBytes(track.size)}</dd>
             <dt className="text-muted-foreground">Content hash</dt>

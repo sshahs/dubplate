@@ -24,6 +24,7 @@ import { settingsNow } from "./settings"
 import { readManagedTags, writeTags } from "./tagger"
 import { rewindConversion } from "./convert"
 import { videoMoved } from "./videos"
+import { placementsFor } from "./positions"
 
 export { metaFor, proposedFilename } from "./placement"
 
@@ -107,6 +108,7 @@ export function relDirOf(lib: Library | null | undefined, file: string): string 
  */
 export function buildPlan(tracks: Track[], settings: Settings, opts: { tagsOnly?: boolean } = {}): PlanItem[] {
   const libs = new Map(listLibraries().map((l) => [l.id, l]))
+  const placements = placementsFor(tracks)
   const targets = new Map<string, number>()
   const items: PlanItem[] = tracks.map((t) => {
     const lib = libs.get(t.libraryId)
@@ -131,7 +133,7 @@ export function buildPlan(tracks: Track[], settings: Settings, opts: { tagsOnly?
     }
     const toPath = path.join(dir, name)
     const rename = toPath !== t.path
-    const tags = meta && s.naming.writeTags ? tagsFor(meta, t.tags, s.naming, extrasFor(t, s)) : {}
+    const tags = meta && s.naming.writeTags ? tagsFor(meta, t.tags, s.naming, { ...extrasFor(t, s), placement: placements.get(t.id) }) : {}
     const tagChanges = tagDiff(t.tags, tags)
     if (!meta) issues.push("No approved artist/title yet")
     if (!fs.existsSync(t.path)) issues.push("File is missing on disk - rescan the library")

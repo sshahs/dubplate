@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import { Link } from "react-router"
 import type { AiParse, HeuristicParse } from "@shared/types"
+import { describePosition } from "@core/discs"
 import { PageHeader } from "@/components/app-shell"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -139,7 +140,7 @@ export default function UntanglerPage() {
                     title={r.heuristic.title}
                     version={r.heuristic.version}
                     year={r.heuristic.year}
-                    extra={r.heuristic.hints}
+                    extra={[...r.heuristic.hints, ...(r.heuristic.position ? [describePosition(r.heuristic.position) ?? ""] : [])].filter(Boolean)}
                     confidence={r.heuristic.confidence}
                   />
                   {r.ai ? (

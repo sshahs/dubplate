@@ -177,6 +177,10 @@ export function readManagedTags(file: string): ExistingTags {
       label: t.publisher || (asf ? readCustom(f, ext, ASF_LABEL) : undefined),
       comment: t.comment || undefined,
       bpm: t.beatsPerMinute || undefined,
+      track: t.track || undefined,
+      trackTotal: t.trackCount || undefined,
+      disc: t.disc || undefined,
+      discTotal: t.discCount || undefined,
       key: t.initialKey || (asf ? readCustom(f, ext, ASF_KEY) : undefined),
       cover: cover ? storeArt(cover.data.toByteArray(), "embedded")?.hash : undefined,
       mbRecordingId: t.musicBrainzTrackId || undefined,
@@ -214,6 +218,11 @@ export function writeTags(file: string, changes: Partial<Record<keyof ExistingTa
     if ("label" in changes) t.publisher = str(changes.label)
     if ("comment" in changes) t.comment = str(changes.comment)
     if ("bpm" in changes) t.beatsPerMinute = Math.round(Number(changes.bpm)) || 0
+    // 0 clears a number.
+    if ("track" in changes) t.track = Math.round(Number(changes.track)) || 0
+    if ("trackTotal" in changes) t.trackCount = Math.round(Number(changes.trackTotal)) || 0
+    if ("disc" in changes) t.disc = Math.round(Number(changes.disc)) || 0
+    if ("discTotal" in changes) t.discCount = Math.round(Number(changes.discTotal)) || 0
     if ("key" in changes) t.initialKey = str(changes.key)
     if ("mbRecordingId" in changes) t.musicBrainzTrackId = str(changes.mbRecordingId)
     if ("mbReleaseId" in changes) t.musicBrainzReleaseId = str(changes.mbReleaseId)

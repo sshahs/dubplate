@@ -45,7 +45,7 @@ const SAMPLES: { file: string; values: FolderValues }[] = [
   },
   {
     file: "Skepta - Shutdown.flac",
-    values: { artist: "Skepta", firstartist: "Skepta", albumartist: "Skepta", album: "Konnichiwa", year: "2016", decade: "2010s", label: "Boy Better Know", genre: "Grime", initial: "S", bpm: "140", bpmrange: "140-149", key: "Gm", camelot: "6A", format: "FLAC" },
+    values: { artist: "Skepta", firstartist: "Skepta", albumartist: "Skepta", album: "Konnichiwa", disc: "2", year: "2016", decade: "2010s", label: "Boy Better Know", genre: "Grime", initial: "S", bpm: "140", bpmrange: "140-149", key: "Gm", camelot: "6A", format: "FLAC" },
   },
   {
     file: "Buju Banton vs Beenie Man - Live Clash (Dubplate).mp3",

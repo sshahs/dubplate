@@ -74,7 +74,8 @@ export function metadataRulebook(naming?: Pick<Settings["naming"], "artistJoiner
 - Dubplates and specials: version "Dubplate", or "Dubplate for <Sound>" / "<Sound> Special" when the sound it was cut for is named. Never put "dubplate" or "special" in the title.
 - VIPs and remixes: version "VIP" (or "<Artist> VIP"), "<Remixer> Remix", "Refix", "Edit". The title stays the song's own name.
 - Never invent an album, year, label or catalogue number. Give year or label only when the filename, folder or embedded tags state them; otherwise null. Never fill them from memory - the sources supply those.
-- Keep an artist's own spelling and capitalisation ("JME", "Ms. Dynamite", "D Double E").`
+- Keep an artist's own spelling and capitalisation ("JME", "Ms. Dynamite", "D Double E").
+- Discs and sides: "CD1", "Disc 2", "LP2", "Side A" (folders or filename parts) and positions like "A1", "B2", "1-05" say where a track sits on its record. They are never the artist, album or title - an album folder above a "CD1" folder is the album. A file that's just "Side A" or "CD2" (or ends with it) is that whole side or disc of a longer recording: title it as the recording (the album, the clash, the mix) and put "Side A" / "CD2" in version.`
 }
 
 export function systemPrompt(context: string, naming?: Pick<Settings["naming"], "artistJoiner" | "clashJoiner" | "featuring">) {
@@ -153,6 +154,9 @@ export function buildUserPrompt(track: Track, corrections: Correction[]): string
         (h.year ? `, year=${h.year}` : "") +
         (h.hints.length ? `, hints=${JSON.stringify(h.hints)}` : "")
     )
+    const p = h.position
+    if (p?.whole) lines.push(`Position: the whole of ${p.label ?? (p.side ? `side ${p.side}` : `disc ${p.disc}`)} - one part of a longer recording, not a track`)
+    else if (p?.side || p?.disc) lines.push(`Position: ${p.side ? `side ${p.side}, ${p.side}${p.number ?? ""}` : `disc ${p.disc}${p.number ? `, track ${p.number}` : ""}`} (a position on the record, not part of any name)`)
   }
   if (corrections.length) {
     lines.push("", "The owner previously confirmed these readings of similar files - follow their spelling and style:")

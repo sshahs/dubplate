@@ -3,15 +3,34 @@
 // the preview, and decodes what the built-in decoders can't. Everything else in
 // Dubplate works without it.
 
-import { execFile, spawn, spawnSync } from "node:child_process"
+import { execFile, spawn } from "node:child_process"
+import fs from "node:fs"
 import path from "node:path"
 import type { MediaProbe } from "../../shared/types"
 
 let ffmpegPath: string | null | undefined
 let ffprobePath: string | null | undefined
 
+function executable(file: string): boolean {
+  try {
+    fs.accessSync(file, fs.constants.X_OK)
+    return fs.statSync(file).isFile()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Whether `bin` (a path, or a name to find on PATH) is there to run. Looked up
+ * rather than started: ffmpeg takes a moment to load, and the Health page asks.
+ */
 function works(bin: string): boolean {
-  return spawnSync(bin, ["-version"], { encoding: "utf8", timeout: 10_000 }).status === 0
+  if (bin.includes("/") || bin.includes("\\")) return executable(bin)
+  const exts = process.platform === "win32" ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";") : [""]
+  for (const dir of (process.env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
+    for (const ext of exts) if (executable(path.join(dir, bin + ext))) return true
+  }
+  return false
 }
 
 /** The ffmpeg to run (FFMPEG_PATH, else the one on PATH), or null when there isn't one. */
