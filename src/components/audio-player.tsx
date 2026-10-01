@@ -12,17 +12,28 @@ export function AudioPlayer({ src, className }: { src: string; className?: strin
   const [time, setTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [error, setError] = useState(false)
+  const [reason, setReason] = useState<string | null>(null)
 
   useEffect(() => {
     setPlaying(false)
     setTime(0)
     setError(false)
+    setReason(null)
   }, [src])
+
+  // The server says why it can't (a format browsers can't play, without ffmpeg to convert it).
+  const failed = () => {
+    setError(true)
+    void fetch(src, { headers: { range: "bytes=0-1", "x-dubplate": "1" } })
+      .then((r) => (r.ok ? null : r.json()))
+      .then((j: { error?: string } | null) => setReason(j?.error ?? null))
+      .catch(() => {})
+  }
 
   const toggle = () => {
     const a = ref.current
     if (!a) return
-    if (a.paused) void a.play().catch(() => setError(true))
+    if (a.paused) void a.play().catch(failed)
     else a.pause()
   }
 
@@ -36,7 +47,7 @@ export function AudioPlayer({ src, className }: { src: string; className?: strin
         onPause={() => setPlaying(false)}
         onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
         onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
-        onError={() => setError(true)}
+        onError={failed}
       />
       <Button size="icon-sm" className="rounded-full" onClick={toggle} disabled={error} aria-label={playing ? "Pause" : "Play"}>
         <HugeiconsIcon icon={playing ? PauseIcon : PlayIcon} strokeWidth={2} />
@@ -59,7 +70,7 @@ export function AudioPlayer({ src, className }: { src: string; className?: strin
         className="h-1 flex-1 cursor-pointer accent-[var(--rasta-gold)]"
         aria-label="Seek"
       />
-      <span className="text-muted-foreground w-20 text-right font-mono text-[11px] tabular-nums">
+      <span className="text-muted-foreground w-20 text-right font-mono text-[11px] tabular-nums" title={reason ?? undefined}>
         {error ? "can't play" : `${fmtDuration(time)} / ${fmtDuration(duration)}`}
       </span>
     </div>

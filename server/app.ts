@@ -46,7 +46,12 @@ import { allAdapters, buildQuery, clearLookupCache, sourceStatus } from "./sourc
 import { collectionStatus, syncCollection } from "./sources/discogs-collection"
 import { runScraper } from "./sources/scraper"
 import { restore, snapshot } from "./undo"
-import { scanSoon, syncWatchers } from "./watcher"
+import { convertFound, scanSoon, syncWatchers } from "./watcher"
+import { browserPlays, previewCopy } from "./media/preview"
+import { findFfmpeg, findFfprobe } from "./media/ffmpeg"
+import { enqueueConversion } from "./convert"
+import { getVideo, listVideos } from "./videos"
+import { planConversion } from "../shared/convert"
 
 const AUDIO_MIME: Record<string, string> = {
   mp3: "audio/mpeg",
@@ -342,7 +347,8 @@ export function createApp() {
     const lib = repo.getLibrary(id)
     if (!lib) throw new Error("Library not found")
     return enqueueJob("scan", `Scan ${lib.name}`, async (ctx) => {
-      const { added } = await scanLibrary(lib, settingsNow(), ctx)
+      const { added, videos } = await scanLibrary(lib, settingsNow(), ctx)
+      convertFound(videos, lib.name)
       if (opts.process && added.length) {
         enqueueJob("process", `Identify ${added.length} track${added.length === 1 ? "" : "s"} in ${lib.name}`, (c) =>
           processTracks(added, settingsNow(), { interpret: true, scour: true, force: false }, c)
@@ -508,17 +514,15 @@ export function createApp() {
     return c.json(scoreAndSave(t, settingsNow()))
   })
 
-  app.get("/api/tracks/:id/audio", async (c) => {
-    const t = repo.getTrack(Number(c.req.param("id")))
-    if (!t || !fs.existsSync(t.path)) return c.json({ error: "Not found" }, 404)
-    const size = fs.statSync(t.path).size
-    const type = AUDIO_MIME[t.ext] ?? "application/octet-stream"
+  /** A file with byte ranges, so the browser can seek. */
+  const sendAudio = (c: Context, file: string, type: string) => {
+    const size = fs.statSync(file).size
     const range = c.req.header("range")?.match(/bytes=(\d*)-(\d*)/)
     if (range) {
       const start = range[1] ? Number(range[1]) : 0
       const end = range[2] ? Math.min(Number(range[2]), size - 1) : Math.min(start + 2 * 1024 * 1024, size - 1)
       if (start >= size) return c.body(null, 416, { "content-range": `bytes */${size}` })
-      const stream = Readable.toWeb(fs.createReadStream(t.path, { start, end })) as ReadableStream
+      const stream = Readable.toWeb(fs.createReadStream(file, { start, end })) as ReadableStream
       return c.body(stream, 206, {
         "content-type": type,
         "content-length": String(end - start + 1),
@@ -526,8 +530,22 @@ export function createApp() {
         "accept-ranges": "bytes",
       })
     }
-    const stream = Readable.toWeb(fs.createReadStream(t.path)) as ReadableStream
+    const stream = Readable.toWeb(fs.createReadStream(file)) as ReadableStream
     return c.body(stream, 200, { "content-type": type, "content-length": String(size), "accept-ranges": "bytes" })
+  }
+
+  app.get("/api/tracks/:id/audio", async (c) => {
+    const t = repo.getTrack(Number(c.req.param("id")))
+    if (!t || !fs.existsSync(t.path)) return c.json({ error: "Not found" }, 404)
+    // What it really is decides whether a browser can play it (a WMA named .mp3 can't).
+    const ext = t.fileCheck?.realExt ?? t.ext
+    if (browserPlays(ext)) return sendAudio(c, t.path, AUDIO_MIME[ext] ?? "application/octet-stream")
+    try {
+      const st = fs.statSync(t.path)
+      return sendAudio(c, await previewCopy(t.path, st.size, st.mtimeMs), "audio/mpeg")
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 415)
+    }
   })
 
   // ---- artwork ----
@@ -678,6 +696,26 @@ export function createApp() {
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
     }
+  })
+
+  // ---- videos: the audio pulled out with ffmpeg ----
+  app.get("/api/videos", (c) => {
+    const s = settingsNow()
+    const libs = new Map(repo.listLibraries().map((l) => [l.id, l.name]))
+    const items = listVideos().map((v) => ({ ...v, library: libs.get(v.libraryId) ?? "", plan: v.probe?.audio[0] ? planConversion(v.probe.audio[0], s.convert) : null }))
+    return c.json({ items, ffmpeg: !!findFfmpeg(), ffprobe: !!findFfprobe() })
+  })
+
+  app.post("/api/videos/convert", async (c) => {
+    const body = await c.req.json<{ ids?: number[] }>().catch(() => ({}) as { ids?: number[] })
+    if (!findFfmpeg()) return c.json({ error: "ffmpeg isn't installed - it's what pulls the audio out of videos. It comes with the Docker image; elsewhere install it and restart Dubplate." }, 409)
+    const ids = (body.ids?.length ? body.ids.map(Number) : listVideos().filter((v) => v.status === "found" || v.status === "failed").map((v) => v.id)).filter((id) => getVideo(id))
+    if (!ids.length) return c.json({ error: "No videos to convert" }, 400)
+    return c.json(
+      enqueueConversion(ids, `Convert ${ids.length} video${ids.length === 1 ? "" : "s"}`, (libs) => {
+        for (const id of libs) scanSoon(id, `New audio from videos in ${repo.getLibrary(id)?.name ?? "a library"}`, 500)
+      })
+    )
   })
 
   // ---- AcoustID submissions ----

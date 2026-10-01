@@ -39,7 +39,9 @@ import type {
   TrackStatus,
   TrackSummary,
   Candidate,
+  ConvertPlan,
   UploadResult,
+  VideoFile,
 } from "@shared/types"
 
 export class ApiError extends Error {
@@ -216,6 +218,9 @@ export interface AcoustIdSubmissions {
   submit: boolean
 }
 
+/** A video in a library, what's inside, and what converting it will make. */
+export type VideoItem = VideoFile & { library: string; plan: ConvertPlan | null }
+
 /** The release editor's address and the fields to post to it. */
 export interface MbSeed {
   submission: MbSubmission
@@ -376,6 +381,9 @@ export const api = {
   createToken: (name: string, scope: ApiToken["scope"]) => post<ApiToken & { token: string }>("/api/tokens", { name, scope }),
   deleteToken: (id: number) => del<{ ok: true }>(`/api/tokens/${id}`),
   hookCalls: () => get<HookCall[]>("/api/hooks/recent"),
+
+  videos: () => get<{ items: VideoItem[]; ffmpeg: boolean; ffprobe: boolean }>("/api/videos"),
+  convertVideos: (ids?: number[]) => post<Job>("/api/videos/convert", ids ? { ids } : {}),
 
   acoustidSubmissions: () => get<AcoustIdSubmissions>("/api/acoustid/submissions"),
   acoustidSubmit: (s?: Selection) => post<Job>("/api/acoustid/submit", s ? sel(s) : {}),

@@ -979,7 +979,36 @@ export default function SettingsPage() {
                         }
                       />
                     </SettingRow>
-                    <SettingRow htmlFor="holding" title="Folder for duplicates set aside" description="Made at the top of a library when you set duplicates aside. Scans skip it.">
+                    <SettingRow
+                      stack
+                      htmlFor="video-exts"
+                      title="Video extensions"
+                      description={
+                        <>
+                          Listed on the{" "}
+                          <Link to="/videos" className="underline underline-offset-2">
+                            Videos
+                          </Link>{" "}
+                          page so their audio can be pulled out. Comma-separated; a format listed as audio is read as audio.
+                        </>
+                      }
+                    >
+                      <Input
+                        id="video-exts"
+                        className="font-mono text-xs"
+                        value={(draft.scanner.videoExtensions ?? []).join(", ")}
+                        onChange={(e) =>
+                          set(
+                            (d) =>
+                              void (d.scanner.videoExtensions = e.target.value
+                                .split(",")
+                                .map((x) => x.trim().replace(/^\./, "").toLowerCase())
+                                .filter(Boolean))
+                          )
+                        }
+                      />
+                    </SettingRow>
+                    <SettingRow htmlFor="holding" title="Folder for duplicates set aside" description="Made at the top of a library when you set duplicates aside (and converted videos, if you choose). Scans skip it.">
                       <Input
                         id="holding"
                         className="w-full sm:w-64"

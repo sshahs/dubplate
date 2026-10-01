@@ -95,7 +95,13 @@
             ".aiff",
             ".wma",
             ".ape",
-            ".wv"
+            ".wv",
+            "video/*",
+            ".avi",
+            ".3gp",
+            ".wmv",
+            ".mp4",
+            ".mov"
           ]
         }
       ]

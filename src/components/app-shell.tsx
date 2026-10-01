@@ -17,6 +17,7 @@ import {
   Settings02Icon,
   SquareLock02Icon,
   Sun03Icon,
+  Video01Icon,
   Vynil02Icon,
 } from "@hugeicons/core-free-icons"
 import { useQuery } from "@tanstack/react-query"
@@ -66,11 +67,12 @@ export const NAV = [
   { to: "/untangler", label: "Untangler", icon: AiMagicIcon, group: "Tools" },
   { to: "/sources", label: "Sources", icon: DatabaseIcon, group: "Tools" },
   { to: "/duplicates", label: "Duplicates", icon: Copy01Icon, group: "Tools" },
+  { to: "/videos", label: "Videos", icon: Video01Icon, group: "Tools", badge: "videos" as const },
   { to: "/health", label: "Health", icon: HealthIcon, group: "Tools" },
   { to: "/settings", label: "Settings", icon: Settings02Icon, group: "Tools" },
 ]
 
-type BadgeKind = "pending" | "review" | "approved"
+type BadgeKind = "pending" | "review" | "approved" | "videos"
 
 /** Sidebar counters: what each one counts, how it reads to a screen reader, and its colour. */
 const BADGES: Record<BadgeKind, { count: (s: Stats) => number; says: string; text: string; dot: string }> = {
@@ -78,6 +80,7 @@ const BADGES: Record<BadgeKind, { count: (s: Stats) => number; says: string; tex
   pending: { count: (s) => s.byStatus.matched + s.byStatus.review + s.byStatus.conflict, says: "waiting for approval", text: "text-rasta-green", dot: "bg-rasta-green" },
   review: { count: (s) => s.byStatus.review + s.byStatus.conflict, says: "need a listen", text: "text-rasta-gold", dot: "bg-rasta-gold" },
   approved: { count: (s) => s.byStatus.approved, says: "approved, ready to cut", text: "text-primary", dot: "bg-primary" },
+  videos: { count: (s) => s.videos ?? 0, says: "videos to convert", text: "text-muted-foreground", dot: "bg-muted-foreground" },
 }
 
 const compactCount = (n: number) => (n >= 10_000 ? `${Math.floor(n / 1000)}k` : String(n))

@@ -214,7 +214,7 @@ export default function UploadPage() {
                   ref={input}
                   type="file"
                   multiple
-                  accept="audio/*,.mp3,.flac,.m4a,.aac,.ogg,.oga,.opus,.wav,.aif,.aiff,.wma,.ape,.wv,.mpc"
+                  accept="audio/*,.mp3,.flac,.m4a,.aac,.ogg,.oga,.opus,.wav,.aif,.aiff,.wma,.ape,.wv,.mpc,video/*,.avi,.3gp,.3g2,.wmv,.mp4,.m4v,.mov,.mkv,.webm,.flv,.mpg,.mpeg"
                   className="hidden"
                   onChange={(e) => {
                     add([...(e.target.files ?? [])], lib?.id)

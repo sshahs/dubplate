@@ -7,6 +7,8 @@ import path from "node:path"
 import type { Library } from "../shared/types"
 import { enqueueJob, log } from "./jobs"
 import { checkSubmissions, pendingSubmissions } from "./acoustid-submit"
+import { enqueueConversion } from "./convert"
+import { findFfmpeg } from "./media/ffmpeg"
 import { processTracks } from "./pipeline"
 import { getLibrary, listLibraries } from "./repo"
 import { libraryHasChanges, scanLibrary } from "./scanner"
@@ -102,12 +104,26 @@ function queueScan(lib: Library, label: string) {
     const settings = settingsNow()
     const fresh = getLibrary(lib.id)
     if (!fresh) return
-    const { added } = await scanLibrary(fresh, settings, ctx)
+    const { added, videos } = await scanLibrary(fresh, settings, ctx)
+    convertFound(videos, fresh.name)
     if (added.length && (settings.automation.autoProcess || identify)) {
       enqueueJob("process", `Identify ${added.length} new track${added.length === 1 ? "" : "s"} in ${fresh.name}`, (c) =>
         processTracks(added, settingsNow(), { interpret: true, scour: true, force: false }, c)
       )
     }
+  })
+}
+
+/**
+ * Videos a scan just found: converted straight away when that's switched on
+ * (and ffmpeg is there), and the audio files they give are scanned and
+ * identified like anything else that's just come in.
+ */
+export function convertFound(videoIds: number[], libraryName: string) {
+  const s = settingsNow()
+  if (!videoIds.length || !s.convert.auto || !findFfmpeg()) return
+  enqueueConversion(videoIds, `Convert ${videoIds.length} new video${videoIds.length === 1 ? "" : "s"} in ${libraryName}`, (libs) => {
+    for (const id of libs) scanSoon(id, `New audio from videos in ${getLibrary(id)?.name ?? "a library"}`, 500)
   })
 }
 
@@ -137,7 +153,7 @@ function minuteTick() {
     lastAcoustIdCheck = Date.now()
     void checkSubmissions(s, (level, m) => log(level, m))
   }
-  extensions = new Set(s.scanner.extensions)
+  extensions = new Set([...s.scanner.extensions, ...(s.scanner.videoExtensions ?? [])])
   const now = new Date()
   // Periodic re-check of watched folders (and a fallback for ones without file events).
   for (const [id, w] of watched) {

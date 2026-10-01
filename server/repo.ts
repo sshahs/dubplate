@@ -492,17 +492,18 @@ function rowToOperation(r: Row): Operation {
     statusBefore: (r.status_before as TrackStatus) ?? null,
     createdDirs: parseJson<string[]>(r.created_dirs_json, []),
     batchLabel: (r.batch_label as string) ?? null,
+    hashAfter: (r.hash_after as string) ?? null,
   }
 }
 
-export type NewOperation = Omit<Operation, "id" | "createdAt" | "revertedAt" | "statusBefore" | "createdDirs" | "batchLabel"> &
-  Partial<Pick<Operation, "statusBefore" | "createdDirs" | "batchLabel">>
+export type NewOperation = Omit<Operation, "id" | "createdAt" | "revertedAt" | "statusBefore" | "createdDirs" | "batchLabel" | "hashAfter"> &
+  Partial<Pick<Operation, "statusBefore" | "createdDirs" | "batchLabel" | "hashAfter">>
 
 export function insertOperation(op: NewOperation): number {
   const r = getDb()
     .prepare(
-      `INSERT INTO operations (batch_id, track_id, kind, from_path, to_path, tags_before_json, tags_after_json, status, error, status_before, created_dirs_json, batch_label)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
+      `INSERT INTO operations (batch_id, track_id, kind, from_path, to_path, tags_before_json, tags_after_json, status, error, status_before, created_dirs_json, batch_label, hash_after)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
     )
     .get(
       op.batchId,
@@ -516,7 +517,8 @@ export function insertOperation(op: NewOperation): number {
       op.error,
       op.statusBefore ?? null,
       op.createdDirs?.length ? JSON.stringify(op.createdDirs) : null,
-      op.batchLabel ?? null
+      op.batchLabel ?? null,
+      op.hashAfter ?? null
     ) as { id: number }
   return r.id
 }
@@ -591,6 +593,7 @@ export function stats(): Stats {
     libraries,
     operations,
     duplicates,
+    videos: (db.prepare("SELECT COUNT(*) AS n FROM videos WHERE missing = 0 AND status = 'found'").get() as { n: number }).n,
     sources: [...sourceCounts.entries()].map(([source, hits]) => ({ source, hits })).sort((a, b) => b.hits - a.hits),
   }
 }

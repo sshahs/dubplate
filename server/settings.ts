@@ -338,10 +338,12 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   scanner: {
     extensions: ["mp3", "flac", "m4a", "aac", "ogg", "oga", "opus", "wav", "aif", "aiff", "wma", "ape", "wv", "mpc"],
+    videoExtensions: ["avi", "3gp", "3g2", "wmv", "asf", "mp4", "m4v", "mov", "mkv", "webm", "flv", "mpg", "mpeg", "vob"],
     hashFiles: true,
     ignore: [".AppleDouble", "@eaDir", ".Trash*", "$RECYCLE.BIN"],
   },
   safety: { readOnly: true },
+  convert: { keepAudio: true, encodeTo: "mp3", originals: "keep", auto: false },
   artwork: { fetch: true, embed: true, replaceExisting: false },
   analysis: { onProcess: true, writeTags: true, keyNotation: "musical", bpmMin: 88, quality: true, loudness: true, writeReplayGain: true, integrity: true },
   automation: { autoProcess: true, pollMinutes: 15, nightly: false, nightlyAt: "03:00", handsOffMin: 95 },
@@ -584,6 +586,19 @@ export function saveSettings(patch: Partial<Settings>): Settings {
   }
   if (patch.llm?.vision) next.llm.vision.model = String(next.llm.vision.model ?? "").trim()
   if (patch.canonicalGenres) next.canonicalGenres.rules = cleanGenreRules(next.canonicalGenres.rules)
+  if (patch.scanner) {
+    const exts = (v: unknown) => [...new Set((Array.isArray(v) ? v : []).map((e) => String(e).trim().toLowerCase().replace(/^\./, "")).filter((e) => /^[a-z0-9]{1,8}$/.test(e)))]
+    next.scanner.extensions = exts(next.scanner.extensions)
+    // A format listed as audio is read as audio, never converted.
+    next.scanner.videoExtensions = exts(next.scanner.videoExtensions).filter((e) => !next.scanner.extensions.includes(e))
+  }
+  if (patch.convert) {
+    const c = next.convert
+    if (!["mp3", "m4a", "flac"].includes(c.encodeTo)) c.encodeTo = DEFAULT_SETTINGS.convert.encodeTo
+    if (!["keep", "aside"].includes(c.originals)) c.originals = DEFAULT_SETTINGS.convert.originals
+    c.keepAudio = c.keepAudio !== false
+    c.auto = !!c.auto
+  }
   if (patch.uploads) next.uploads.maxMb = Math.min(20_000, Math.max(1, Math.round(Number(next.uploads.maxMb) || DEFAULT_SETTINGS.uploads.maxMb)))
   if (patch.sources) {
     for (const [id, cfg] of Object.entries(patch.sources)) {

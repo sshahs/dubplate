@@ -25,12 +25,18 @@ LABEL org.opencontainers.image.title="Dubplate" \
       org.opencontainers.image.source="https://github.com/sshahs/dubplate"
 
 # libchromaprint-tools provides fpcalc for AcoustID audio fingerprinting;
-# tzdata lets TZ set the clock the nightly scan runs by.
-# Build with --build-arg WITH_FPCALC=0 to skip both (e.g. without apt access).
+# tzdata lets TZ set the clock the nightly scan runs by; ffmpeg pulls the audio
+# out of videos (AVI, 3GP, WMV…) and lets the browser preview WMA, APE and AIFF.
+# Build with --build-arg WITH_FPCALC=0 (fpcalc and tzdata) or WITH_FFMPEG=0 to
+# leave them out (e.g. without apt access).
 ARG WITH_FPCALC=1
-RUN if [ "$WITH_FPCALC" = "1" ]; then \
+ARG WITH_FFMPEG=1
+RUN pkgs="" \
+  && if [ "$WITH_FPCALC" = "1" ]; then pkgs="$pkgs libchromaprint-tools tzdata"; fi \
+  && if [ "$WITH_FFMPEG" = "1" ]; then pkgs="$pkgs ffmpeg"; fi \
+  && if [ -n "$pkgs" ]; then \
       apt-get update \
-      && apt-get install -y --no-install-recommends libchromaprint-tools tzdata \
+      && apt-get install -y --no-install-recommends $pkgs \
       && rm -rf /var/lib/apt/lists/*; \
     fi \
   && mkdir -p /data /music \

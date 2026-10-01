@@ -21,6 +21,7 @@ const PAGES = {
   sources: () => import("@/pages/sources"),
   tracks: () => import("@/pages/tracks"),
   untangler: () => import("@/pages/untangler"),
+  videos: () => import("@/pages/videos"),
 }
 
 const CratesPage = lazy(PAGES.crates)
@@ -37,6 +38,7 @@ const SourcesPage = lazy(PAGES.sources)
 const TracksPage = lazy(PAGES.tracks)
 const UntanglerPage = lazy(PAGES.untangler)
 const UploadPage = lazy(PAGES.upload)
+const VideosPage = lazy(PAGES.videos)
 
 function PageFallback() {
   return (
@@ -114,6 +116,7 @@ export default function App() {
                 <Route path="/sources" element={<SourcesPage />} />
                 <Route path="/duplicates" element={<DuplicatesPage />} />
                 <Route path="/health" element={<HealthPage />} />
+                <Route path="/videos" element={<VideosPage />} />
                 <Route path="/upload" element={<UploadPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/musicbrainz/done" element={<MusicBrainzDonePage />} />

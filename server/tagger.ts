@@ -1,6 +1,7 @@
 // Writes tags in place with node-taglib-sharp (pure TypeScript TagLib port,
 // so it covers MP3, FLAC, M4A, OGG/Opus, WAV, AIFF, WMA and APE alike).
 
+import fs from "node:fs"
 import path from "node:path"
 import {
   ApeTag,
@@ -44,6 +45,9 @@ const TAG_TYPE_BY_EXT: Record<string, TagTypes> = {
 
 /** The field name most taggers (Mp3tag, foobar2000, Picard plugins) use for a Discogs release. */
 const DISCOGS_RELEASE = "DISCOGS_RELEASE_ID"
+/** WMA's own names for the label and the musical key. */
+export const ASF_LABEL = "WM/Publisher"
+export const ASF_KEY = "WM/InitialKey"
 
 /**
  * Open a file with TagLib as what it really is: a .mp3 that's really an M4A is
@@ -97,6 +101,59 @@ function writeCustom(f: TagFile, ext: string, key: string, value: string | undef
   else if (t instanceof AsfTag) t.setDescriptorString(value ?? "", key)
 }
 
+/**
+ * Save the tags. node-taglib-sharp 6.0.3 (the latest) saves a WMA's header by
+ * overwriting as many bytes as the new header is long instead of replacing the
+ * old one, so a header that grows (it always gains padding) destroys the start
+ * of the audio and the file no longer plays. For WMA/ASF the old header is
+ * replaced by its own length - the size its header object states.
+ */
+function saveTagFile(f: TagFile, file: string, ext: string) {
+  if (TAG_TYPE_BY_EXT[ext] !== TagTypes.Asf) return f.save()
+  const head = Buffer.alloc(24)
+  const fd = fs.openSync(file, "r")
+  try {
+    fs.readSync(fd, head, 0, 24, 0)
+  } finally {
+    fs.closeSync(fd)
+  }
+  if (!head.subarray(0, 16).equals(ASF_HEADER)) throw new Error("Not a WMA file inside - its tags weren't written")
+  const oldHeader = Number(head.readBigUInt64LE(16))
+  const insert = TagFile.prototype.insert
+  TagFile.prototype.insert = function (this: TagFile, data: ByteVector, start: number, replace?: number) {
+    return insert.call(this, data, start, this === f && start === 0 ? oldHeader : replace)
+  }
+  try {
+    f.save()
+  } finally {
+    TagFile.prototype.insert = insert
+  }
+}
+
+/** The ASF header object's GUID: every WMA/WMV starts with it. */
+const ASF_HEADER = Buffer.from("3026b2758e66cf11a6d900aa0062ce6c", "hex")
+
+/**
+ * Whether a WMA's header runs straight into its audio, as it must. One saved
+ * by the bug above has its header followed by part of the overwritten audio.
+ */
+export function asfDamage(file: string): string | null {
+  const fd = fs.openSync(file, "r")
+  try {
+    const head = Buffer.alloc(24)
+    if (fs.readSync(fd, head, 0, 24, 0) < 24 || !head.subarray(0, 16).equals(ASF_HEADER)) return null
+    const size = Number(head.readBigUInt64LE(16))
+    const next = Buffer.alloc(16)
+    if (fs.readSync(fd, next, 0, 16, size) < 16) return "the file ends inside its header"
+    return next.equals(ASF_DATA) ? null : "its header runs over the start of the audio (saved by an earlier Dubplate's WMA tag bug)"
+  } finally {
+    fs.closeSync(fd)
+  }
+}
+
+/** The ASF data object's GUID: the audio packets follow the header. */
+const ASF_DATA = Buffer.from("3626b2758e66cf11a6d900aa0062ce6c", "hex")
+
 function frontCover(pictures: IPicture[]): IPicture | undefined {
   return pictures.find((p) => p.type === PictureType.FrontCover) ?? pictures.find((p) => p.type === PictureType.Other) ?? pictures[0]
 }
@@ -109,6 +166,7 @@ export function readManagedTags(file: string): ExistingTags {
   const { f, ext } = openTagFile(file)
   try {
     const t = f.tag
+    const asf = TAG_TYPE_BY_EXT[ext] === TagTypes.Asf
     const cover = frontCover(t.pictures ?? [])
     return {
       artist: t.performers?.length ? t.performers.join("; ") : undefined,
@@ -116,10 +174,10 @@ export function readManagedTags(file: string): ExistingTags {
       album: t.album || undefined,
       year: t.year || undefined,
       genre: t.genres?.length ? [...t.genres] : undefined,
-      label: t.publisher || undefined,
+      label: t.publisher || (asf ? readCustom(f, ext, ASF_LABEL) : undefined),
       comment: t.comment || undefined,
       bpm: t.beatsPerMinute || undefined,
-      key: t.initialKey || undefined,
+      key: t.initialKey || (asf ? readCustom(f, ext, ASF_KEY) : undefined),
       cover: cover ? storeArt(cover.data.toByteArray(), "embedded")?.hash : undefined,
       mbRecordingId: t.musicBrainzTrackId || undefined,
       mbReleaseId: t.musicBrainzReleaseId || undefined,
@@ -163,6 +221,11 @@ export function writeTags(file: string, changes: Partial<Record<keyof ExistingTa
     if ("mbArtistId" in changes) t.musicBrainzArtistId = str(changes.mbArtistId)
     if ("discogsReleaseId" in changes) writeCustom(f, ext, DISCOGS_RELEASE, str(changes.discogsReleaseId))
     if ("lyrics" in changes) t.lyrics = str(changes.lyrics)
+    // TagLib's WMA tag has no label or key; these are the names WMA players and taggers use.
+    if (type === TagTypes.Asf) {
+      if ("label" in changes) writeCustom(f, ext, ASF_LABEL, str(changes.label))
+      if ("key" in changes) writeCustom(f, ext, ASF_KEY, str(changes.key))
+    }
     // NaN clears a ReplayGain field.
     const num = (v: unknown) => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? NaN : Number(v))
     if ("replayGainTrackGain" in changes) t.replayGainTrackGain = num(changes.replayGainTrackGain)
@@ -175,7 +238,7 @@ export function writeTags(file: string, changes: Partial<Record<keyof ExistingTa
       if (hash && !bytes) throw new Error("Artwork is missing from the cache - find it again")
       t.pictures = bytes ? [Picture.fromFullData(ByteVector.fromByteArray(bytes), PictureType.FrontCover, sniffImage(bytes)?.mime ?? "image/jpeg", ""), ...others] : others
     }
-    f.save()
+    saveTagFile(f, file, ext)
   } finally {
     f.dispose()
   }

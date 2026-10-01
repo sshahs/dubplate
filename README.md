@@ -345,7 +345,9 @@ docker compose -f compose.yaml -f compose.build.yaml up -d --build
 docker build -t dubplate .
 ```
 
-Add `--build-arg WITH_FPCALC=0` to leave out Chromaprint.
+Add `--build-arg WITH_FPCALC=0` to leave out Chromaprint, or
+`--build-arg WITH_FFMPEG=0` to leave out ffmpeg (the video converter and
+browser previews of WMA, APE and AIFF need it).
 
 Every push to `main` and every `v*` tag is built by
 [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml).
@@ -379,6 +381,7 @@ secrets, and keys entered in the UI take precedence.
 | `CMD_ZDR` | – | `1` or `true` forces Command Code's Zero Data Retention on (the Settings switch is locked) |
 | `DISCOGS_TOKEN`, `LASTFM_API_KEY`, `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `YOUTUBE_API_KEY`, `ACOUSTID_API_KEY` | – | |
 | `FPCALC_PATH` | `fpcalc` on `PATH` | |
+| `FFMPEG_PATH`, `FFPROBE_PATH` | `ffmpeg`, `ffprobe` on `PATH` | For the video converter and previews; `ffprobe` is also looked for next to `FFMPEG_PATH` |
 | `TZ` | `UTC` | The clock the nightly scan runs by, e.g. `Europe/London` |
 
 </details>
@@ -402,6 +405,15 @@ are empty. BPM and key are written too (key as `Am` or Camelot `8A`, your
 choice), and a found cover becomes the front cover - other pictures in the
 file are left alone, and a file's existing cover is only replaced if you
 allow it.
+
+WMA files are tagged too, with their label and key under the names WMA
+players use (`WM/Publisher`, `WM/InitialKey`). The library Dubplate tags with
+has a bug that overwrote the start of a WMA's audio when its header grew, so
+earlier versions could leave a cut WMA unplayable; Dubplate now works around
+it, and scans mark a WMA damaged that way as **Damaged** (Tracks → File
+problems) so you can find them. Browsers can't play WMA, APE, WavPack, Musepack or
+AIFF, so with ffmpeg installed their previews are converted to MP3 on the fly
+(the file itself is only read).
 
 When the sources pinned a track down, its **MusicBrainz** recording, release
 and artist IDs and its **Discogs** release ID are written in the standard
@@ -737,6 +749,25 @@ tracks, for example after changing genre rules.
 </details>
 
 <details>
+<summary><b>Videos: pulling the audio out</b></summary>
+
+Music videos, phone clips and old rips (`.avi`, `.3gp`, `.wmv`, `.mp4`,
+`.mov`, `.mkv`, `.flv`, `.mpg`… - the list is in **Settings → Sign-in &
+safety → Scanner**) are listed on the **Videos** page when a scan finds them.
+Scans only look at them; nothing changes until you convert. Converting needs
+ffmpeg (it's in the Docker image).
+
+- The audio file goes **next to the video, with the same name**, and is then scanned and identified like any new track. A name that's taken gets " (2)"; nothing is overwritten.
+- The audio is **kept exactly as it is** where an audio file can hold it: AAC becomes `.m4a`, MP3 `.mp3`, WMA `.wma`, Vorbis `.ogg`, Opus `.opus`. Uncompressed audio becomes lossless FLAC.
+- What an audio file can't hold - AMR from old phones, Dolby Digital, ADPCM - is **re-encoded** to MP3 (V0), AAC 256 kbps or FLAC, your choice. Switch off "Keep the audio as it is" to re-encode everything.
+- The video's own title and artist come along. Each file is checked before it's given its name: it must have audio and be the video's length.
+- Afterwards the video **stays where it is**, or moves to the holding folder (like a set-aside duplicate). In read-only mode videos stay put; the new audio files are added (nothing that's already there changes).
+- **Convert new videos automatically** does it whenever a scan finds one. Uploads from your phone take videos too.
+- A conversion shows up in the Cut & Tag history; **Rewind** takes the audio file away again (only while it's exactly as made - rewind its cut first) and brings the video back.
+
+</details>
+
+<details>
 <summary><b>Uploads from your phone</b></summary>
 
 **Upload** sends files from a phone or computer straight into a library,
@@ -859,6 +890,7 @@ crates whose names aren't taken.
 - 🔑 An optional password keeps everyone else out when it's on a server or your network.
 - 🤖 Hands-off and auto-approve only act on low-risk tracks the sources agree on, never on the AI's word alone or a second opinion, and every cut can be rewound.
 - 🗂️ Each file's original name, place and tags are kept from the first scan, whatever happens later.
+- 🎬 Converting a video only adds an audio file next to it, made under a hidden name and only named once it's complete and checked, never over another file.
 - 🌍 Dubplate never edits MusicBrainz itself: it fills in the release editor for you to check and submit. Fingerprints only go to AcoustID for tracks that are verified and cut, and only with your own user key.
 - 🎟️ API tokens are stored as hashes, shown once, deleted in one click, and a downloads-only token can't read or change anything else.
 - 🏷️ A file named as the wrong format has its tags written as what it really is, so an M4A called `.mp3` doesn't get an MP3 tag put in front of it.
@@ -897,6 +929,7 @@ crates whose names aren't taken.
 - 🧠 **Second opinion**: a bigger model for the uncertain ones, and a vision model to check covers.
 - 🏷️ **Canonical genres**: one genre per track from your own list, with region folders.
 - 🫆 **Give back**: send verified fingerprints to AcoustID and add missing releases to MusicBrainz.
+- 🎬 **Video converter**: the audio out of AVI, 3GP, WMV, MP4 and more, kept as it is where it can be.
 - 🩹 **Broken files**: wrong extensions (fixed when cutting), downloads that stopped short, damaged audio and long silences.
 - 📱 **Review on a phone**: swipe right to approve, left to leave as-is; **Approve all** clears a queue with Undo.
 - 🎧 **Audio preview** in the review screen, with streaming and seeking.
@@ -945,6 +978,8 @@ server/
   steps.ts       how a track was decided, step by step
   genres.ts      canonical genre rules
   acoustid-submit.ts, musicbrainz-seed.ts   giving back to AcoustID and MusicBrainz
+  media/         ffmpeg: probing, converting, previews of formats browsers can't play
+  videos.ts, convert.ts   videos scans find, and pulling their audio out
   art.ts         cover-art cache, downloads, thumbnails
   worker-pool.ts CPU-heavy work (decoding, thumbnails) off the main thread
   executor.ts    plan / rename + tag / rewind

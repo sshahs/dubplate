@@ -64,6 +64,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
             void qc.invalidateQueries({ queryKey: ["jobs"] })
             void qc.invalidateQueries({ queryKey: ["libraries"] })
             void qc.invalidateQueries({ queryKey: ["batches"] })
+            void qc.invalidateQueries({ queryKey: ["videos"] })
             if (e.job.status === "done") toast.success(e.job.label, { description: `${e.job.done} done${e.job.failed ? ` · ${e.job.failed} failed` : ""}` })
             if (e.job.status === "failed") toast.error(e.job.label, { description: e.job.message ?? "Failed" })
             // In another tab? Flag it in the title (and a system notification, if allowed).

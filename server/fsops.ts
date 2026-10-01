@@ -81,6 +81,29 @@ export async function moveFile(from: string, to: string) {
   }
 }
 
+/** `name`, or "name (2)", "name (3)"… - whichever doesn't exist yet, claimed without a race. */
+export async function claimFreeName(tmp: string, dir: string, name: string): Promise<string> {
+  const ext = path.extname(name)
+  const stem = name.slice(0, name.length - ext.length)
+  for (let i = 1; i < 1000; i++) {
+    const to = path.join(dir, i === 1 ? name : `${stem} (${i})${ext}`)
+    try {
+      // A hard link fails if the name's taken, so two uploads can't both get it.
+      await fs.promises.link(tmp, to)
+      await fs.promises.unlink(tmp)
+      return to
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === "EEXIST") continue
+      // No hard links here (some network shares): check, then rename.
+      if (fs.existsSync(to)) continue
+      await fs.promises.rename(tmp, to)
+      return to
+    }
+  }
+  throw new Error("Too many files with that name already")
+}
+
 /** A folder with nothing in it but OS junk. */
 async function emptyish(dir: string): Promise<string[] | null> {
   let entries: fs.Dirent[]

@@ -22,6 +22,8 @@ import { enqueueJob } from "./jobs"
 import { getLibrary, getTrack, getTracks, insertOperation, libraryForPath, listLibraries, listOperations, markOperationReverted, updateTrack } from "./repo"
 import { settingsNow } from "./settings"
 import { readManagedTags, writeTags } from "./tagger"
+import { rewindConversion } from "./convert"
+import { videoMoved } from "./videos"
 
 export { metaFor, proposedFilename } from "./placement"
 
@@ -343,6 +345,14 @@ export async function rewind(opIds: number[] | null, batchId: string | null, ctx
         ctx.tick(true, path.basename(op.toPath))
         continue
       }
+      if (op.kind === "convert") {
+        // An audio file made from a video: taken away again while it's exactly as made.
+        await rewindConversion(op)
+        markOperationReverted(op.id)
+        undone++
+        ctx.tick(true, path.basename(op.toPath))
+        continue
+      }
       if (!fs.existsSync(op.toPath)) throw new Error(`${path.basename(op.toPath)} is no longer there`)
       const moves = op.kind !== "tag" && op.fromPath !== op.toPath
       if (moves && fs.existsSync(op.fromPath) && !sameFile(op.fromPath, op.toPath)) {
@@ -357,6 +367,8 @@ export async function rewind(opIds: number[] | null, batchId: string | null, ctx
       }
       markOperationReverted(op.id)
       undone++
+      // A converted video put back where it was.
+      if (!op.trackId && op.kind === "set-aside") videoMoved(op.toPath, op.fromPath, null)
       if (op.trackId) {
         const t = getTrack(op.trackId)
         const st = await fs.promises.stat(op.fromPath)
