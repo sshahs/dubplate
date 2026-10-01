@@ -20,6 +20,8 @@ import { SOURCE_META } from "./settings"
 import { allAdapters } from "./sources"
 import { findFpcalc } from "./sources/acoustid"
 import { collectionStatus } from "./sources/discogs-collection"
+import { findFfmpeg, findFfprobe } from "./media/ffmpeg"
+import { videosToConvert } from "./videos"
 
 const GB = 1024 ** 3
 const TIMEOUT_MS = 10_000
@@ -101,6 +103,19 @@ function serverChecks(settings: Settings): HealthCheck[] {
           label: "Audio fingerprinting (fpcalc)",
           status: acoustidOn ? "warn" : "info",
           detail: acoustidOn ? "AcoustID is set up but fpcalc (Chromaprint) isn't installed, so fingerprints are skipped." : "Not installed. Only needed for AcoustID fingerprints.",
+        }
+  )
+  const waiting = videosToConvert()
+  out.push(
+    findFfmpeg() && findFfprobe()
+      ? { id: "ffmpeg", group: "Server", label: "Converter (ffmpeg)", status: "ok", detail: "Installed: videos can be converted, and WMA and other formats browsers can't play are previewed as MP3." }
+      : {
+          id: "ffmpeg",
+          group: "Server",
+          label: "Converter (ffmpeg)",
+          status: waiting ? "warn" : "info",
+          detail: `${findFfmpeg() ? "ffprobe" : "ffmpeg"} isn't installed.${waiting ? ` ${waiting} video${waiting === 1 ? " is" : "s are"} waiting to be converted.` : ""} It pulls the audio out of videos and lets the browser preview WMA, APE and AIFF; it comes with the Docker image.`,
+          fix: waiting ? { label: "Videos", to: "/videos" } : undefined,
         }
   )
   return out

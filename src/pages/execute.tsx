@@ -42,6 +42,9 @@ const TAG_NAMES: Partial<Record<keyof ExistingTags, string>> = {
   replayGainTrackGain: "ReplayGain",
   replayGainTrackPeak: "ReplayGain",
   lyrics: "lyrics",
+  track: "track number",
+  disc: "disc number",
+  discTotal: "disc number",
 }
 
 export default function ExecutePage() {

@@ -93,6 +93,8 @@ export interface ReleaseContext {
   /** version, filename: to spot a continuous mix */
   version?: string
   filename: string
+  /** a whole side or disc in one file: long, but a record's side, not a DJ mix */
+  wholeSide?: boolean
   /** recordings an audio fingerprint pointed at */
   fingerprintRecordings: Set<string>
   preferOwn: boolean
@@ -170,7 +172,7 @@ export function pickRelease(releases: ReleaseInfo[], ctx: ReleaseContext): Relea
 
   // 2. A continuous mix belongs to the DJ mix it's from.
   const mixes = pool.filter((r) => r.kind === "dj-mix")
-  const continuous = (ctx.duration ?? 0) >= 20 * 60 || CONTINUOUS.test(`${ctx.version ?? ""} ${ctx.filename}`)
+  const continuous = CONTINUOUS.test(`${ctx.version ?? ""} ${ctx.filename}`) || (!ctx.wholeSide && (ctx.duration ?? 0) >= 20 * 60)
   if (mixes.length && continuous) {
     const mix = [...mixes].sort(compare)[0]
     return withOwn({ release: mix, reason: "a continuous mix, so it keeps the DJ mix it's from", considered: releases.length })

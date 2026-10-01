@@ -4,6 +4,7 @@
 import { formatKey } from "../shared/keys"
 import type { FinalMeta, Settings, Track } from "../shared/types"
 import { bpmRange, decadeOf, initialOf, renderFolderTemplate, type FolderValues } from "./core/folders"
+import { placeValues } from "./core/discs"
 import { decisionToFinal, formatArtist, renderTemplate } from "./core/naming"
 import { canonicalGenre } from "./genres"
 import { placementLibraryId, settingsForLibrary } from "./library-settings"
@@ -19,7 +20,7 @@ export function proposedFilename(t: Track, settings: Settings): string | null {
   const meta = metaFor(t)
   if (!meta || !meta.title || !meta.artists.length) return null
   const s = settingsForLibrary(settings, placementLibraryId(t.libraryId))
-  const base = renderTemplate(s.naming.template, meta, s.naming)
+  const base = renderTemplate(s.naming.template, meta, s.naming, placeValues(t.tags, t.heuristic?.position))
   return base ? `${base}.${extFor(t, settings)}` : null
 }
 
@@ -49,6 +50,7 @@ export function folderValues(t: Track, meta: FinalMeta, settings: Settings): Fol
     firstartist: meta.artists[0] ?? "",
     albumartist: t.tags.albumArtist || artist,
     album: t.tags.album || meta.album || "",
+    disc: placeValues(t.tags, t.heuristic?.position).disc ?? "",
     year: year ? String(year) : "",
     decade: decadeOf(year),
     label: t.tags.label || meta.label || "",

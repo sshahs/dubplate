@@ -22,6 +22,9 @@ import { enqueueJob } from "./jobs"
 import { getLibrary, getTrack, getTracks, insertOperation, libraryForPath, listLibraries, listOperations, markOperationReverted, updateTrack } from "./repo"
 import { settingsNow } from "./settings"
 import { readManagedTags, writeTags } from "./tagger"
+import { rewindConversion } from "./convert"
+import { videoMoved } from "./videos"
+import { placementsFor } from "./positions"
 
 export { metaFor, proposedFilename } from "./placement"
 
@@ -105,6 +108,7 @@ export function relDirOf(lib: Library | null | undefined, file: string): string 
  */
 export function buildPlan(tracks: Track[], settings: Settings, opts: { tagsOnly?: boolean } = {}): PlanItem[] {
   const libs = new Map(listLibraries().map((l) => [l.id, l]))
+  const placements = placementsFor(tracks)
   const targets = new Map<string, number>()
   const items: PlanItem[] = tracks.map((t) => {
     const lib = libs.get(t.libraryId)
@@ -129,7 +133,7 @@ export function buildPlan(tracks: Track[], settings: Settings, opts: { tagsOnly?
     }
     const toPath = path.join(dir, name)
     const rename = toPath !== t.path
-    const tags = meta && s.naming.writeTags ? tagsFor(meta, t.tags, s.naming, extrasFor(t, s)) : {}
+    const tags = meta && s.naming.writeTags ? tagsFor(meta, t.tags, s.naming, { ...extrasFor(t, s), placement: placements.get(t.id) }) : {}
     const tagChanges = tagDiff(t.tags, tags)
     if (!meta) issues.push("No approved artist/title yet")
     if (!fs.existsSync(t.path)) issues.push("File is missing on disk - rescan the library")
@@ -343,6 +347,14 @@ export async function rewind(opIds: number[] | null, batchId: string | null, ctx
         ctx.tick(true, path.basename(op.toPath))
         continue
       }
+      if (op.kind === "convert") {
+        // An audio file made from a video: taken away again while it's exactly as made.
+        await rewindConversion(op)
+        markOperationReverted(op.id)
+        undone++
+        ctx.tick(true, path.basename(op.toPath))
+        continue
+      }
       if (!fs.existsSync(op.toPath)) throw new Error(`${path.basename(op.toPath)} is no longer there`)
       const moves = op.kind !== "tag" && op.fromPath !== op.toPath
       if (moves && fs.existsSync(op.fromPath) && !sameFile(op.fromPath, op.toPath)) {
@@ -357,6 +369,8 @@ export async function rewind(opIds: number[] | null, batchId: string | null, ctx
       }
       markOperationReverted(op.id)
       undone++
+      // A converted video put back where it was.
+      if (!op.trackId && op.kind === "set-aside") videoMoved(op.toPath, op.fromPath, null)
       if (op.trackId) {
         const t = getTrack(op.trackId)
         const st = await fs.promises.stat(op.fromPath)

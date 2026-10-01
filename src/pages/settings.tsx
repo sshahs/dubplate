@@ -471,7 +471,7 @@ const FEATURING = [
   { value: "title" as const, label: "Artist - Title (feat. Guest)" },
   { value: "drop" as const, label: "Leave featuring out" },
 ]
-const TOKENS = ["artist", "title", "song", "version", "year", "album", "label", "featuring", "genre"]
+const TOKENS = ["artist", "title", "song", "version", "year", "album", "label", "featuring", "genre", "position", "track", "disc"]
 
 // ---------- page ----------
 
@@ -512,7 +512,8 @@ export default function SettingsPage() {
     if (!draft) return []
     const meta = { artists: ["Buju Banton", "Beenie Man"], relation: "vs" as const, featuring: [], title: "Live Clash", version: "Dubplate", year: 1993 }
     const meta2 = { artists: ["Chronixx"], featuring: ["Protoje"], title: "Here Comes Trouble", version: "Special", year: 2013, label: "Soul Circle" }
-    return [renderTemplate(draft.naming.template, meta, draft.naming), renderTemplate(draft.naming.template, meta2, draft.naming)]
+    // The second as a vinyl rip: B2, the sixth track of its record.
+    return [renderTemplate(draft.naming.template, meta, draft.naming), renderTemplate(draft.naming.template, meta2, draft.naming, { position: "B2", track: "06" })]
   }, [draft])
 
   const header = <PageHeader eyebrow="Mixing desk" title="Settings" description="How Dubplate reads, matches, names and tags your music." />
@@ -670,7 +671,12 @@ export default function SettingsPage() {
                 </CardHeader>
                 <CardContent>
                   <SettingRows>
-                    <SettingRow stack htmlFor="template" title="Template" description="Click a token to add it.">
+                    <SettingRow
+                      stack
+                      htmlFor="template"
+                      title="Template"
+                      description="Click a token to add it. {position} is a vinyl position like B2 or the track number; {disc} only shows on releases with more than one disc. A token with no value leaves no gap: {position} - {artist} - {title} is just Artist - Title for a file with no position."
+                    >
                       <div className="space-y-2">
                         <Input id="template" value={draft.naming.template} onChange={(e) => set((d) => void (d.naming.template = e.target.value))} className="font-mono" />
                         <div className="flex flex-wrap gap-1">
@@ -979,7 +985,36 @@ export default function SettingsPage() {
                         }
                       />
                     </SettingRow>
-                    <SettingRow htmlFor="holding" title="Folder for duplicates set aside" description="Made at the top of a library when you set duplicates aside. Scans skip it.">
+                    <SettingRow
+                      stack
+                      htmlFor="video-exts"
+                      title="Video extensions"
+                      description={
+                        <>
+                          Listed on the{" "}
+                          <Link to="/videos" className="underline underline-offset-2">
+                            Videos
+                          </Link>{" "}
+                          page so their audio can be pulled out. Comma-separated; a format listed as audio is read as audio.
+                        </>
+                      }
+                    >
+                      <Input
+                        id="video-exts"
+                        className="font-mono text-xs"
+                        value={(draft.scanner.videoExtensions ?? []).join(", ")}
+                        onChange={(e) =>
+                          set(
+                            (d) =>
+                              void (d.scanner.videoExtensions = e.target.value
+                                .split(",")
+                                .map((x) => x.trim().replace(/^\./, "").toLowerCase())
+                                .filter(Boolean))
+                          )
+                        }
+                      />
+                    </SettingRow>
+                    <SettingRow htmlFor="holding" title="Folder for duplicates set aside" description="Made at the top of a library when you set duplicates aside (and converted videos, if you choose). Scans skip it.">
                       <Input
                         id="holding"
                         className="w-full sm:w-64"

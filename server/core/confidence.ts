@@ -18,6 +18,7 @@ import type {
 } from "../../shared/types"
 import { artistSimilarity, collapseSpaces, normArtist, similarity, splitArtists, titleSimilarity } from "./normalize"
 import { KIND_LABEL, pickRelease, releasesOf } from "./releases"
+import { withoutDiscFolders } from "./discs"
 
 export interface ScoreInput {
   heuristic: HeuristicParse | null
@@ -251,7 +252,8 @@ export function scoreTrack(input: ScoreInput): Decision {
     // ---- duration ----
     const isVersion = VERSION_OK_FOR_DURATION.test(`${reading.version ?? ""} ${input.heuristic?.hints.join(" ") ?? ""}`)
     const durations = best.candidates.map((c) => c.duration).filter((d): d is number => !!d)
-    if (input.duration && durations.length) {
+    // A whole side or disc in one file is meant to be longer than any one track.
+    if (input.duration && durations.length && !input.heuristic?.position?.whole) {
       const delta = Math.min(...durations.map((d) => Math.abs(d - input.duration!)))
       let adj = 0
       if (delta <= 3) adj = 0.04
@@ -301,10 +303,12 @@ export function scoreTrack(input: ScoreInput): Decision {
       ? pickRelease(releasesOf(best.candidates), {
           artists: reading.artists,
           albumTag: input.tags.album,
-          folders: input.context?.folders ?? [],
+          // "CD1", "Side A" folders say where the track sits; the album folder is the one above.
+          folders: withoutDiscFolders(input.context?.folders ?? []),
           duration: input.duration,
           version: reading.version,
           filename: input.context?.filename ?? "",
+          wholeSide: !!input.heuristic?.position?.whole,
           fingerprintRecordings,
           preferOwn: input.context?.preferOwnRelease ?? true,
         })
@@ -314,7 +318,7 @@ export function scoreTrack(input: ScoreInput): Decision {
     reading = { ...reading, album: release.release.title, label: reading.label ?? release.release.label }
     provenance.album = `${sourceName(release.release.source)} (${KIND_LABEL[release.release.kind]})`
   }
-  const versionCheck = checkVersion(reading, release, best, clusters, input.duration)
+  const versionCheck = checkVersion(reading, release, best, clusters, input.heuristic?.position?.whole ? null : input.duration)
 
   const confidence = Math.round(Math.max(0, Math.min(1, final)) * 100)
   let status: Decision["status"]

@@ -3,7 +3,8 @@
 // "Artist - Title" split. The AI interpreter gets this as context and the
 // confidence engine uses it as an independent reading.
 
-import type { HeuristicParse } from "../../shared/types"
+import type { DiscPosition, HeuristicParse } from "../../shared/types"
+import { discMarker, folderPosition, leadingPosition, trailingPart, withoutDiscFolders } from "./discs"
 import { collapseSpaces, normArtist, smartCase, splitArtists } from "./normalize"
 
 export interface ParseContext {
@@ -80,18 +81,24 @@ function decode(raw: string): { text: string; hadUnderscores: boolean } {
   return { text: collapseSpaces(s), hadUnderscores }
 }
 
-function extractTrackNumber(s: string): { rest: string; track?: string } {
-  // vinyl sides "A1", "B2"; CD markers "1-05", "CD1-05"; plain "01", "12."
-  const m =
-    s.match(/^(?:cd\s?\d+\s?[-.]?\s?)?(\d{1,3})(?:\s*[-.)_]\s*|\s+)(?=\S)/i) ??
-    s.match(/^([a-d]\d{1,2})(?:\s*[-.)_]\s*|\s+)(?=\S)/i)
-  if (!m) return { rest: s }
-  const n = m[1]
-  // Don't eat years or numeric artist names ("112", "50 Cent").
-  if (/^\d{4}$/.test(n)) return { rest: s }
-  const after = s.slice(m[0].length)
-  if (/^(?:cent|seconds|foot|pence)\b/i.test(after)) return { rest: s }
-  return { rest: after, track: n }
+/** A leading track number or position, kept off the artist ("50 Cent", "112" and years stay). */
+function extractTrackNumber(s: string): { rest: string; track?: string; position?: DiscPosition } {
+  const lead = leadingPosition(s)
+  if (!lead) return { rest: s }
+  if (/^(?:cent|seconds|foot|pence)\b/i.test(lead.rest)) return { rest: s }
+  return lead
+}
+
+/** The folders' disc or side, with the filename's number or position on it. */
+function mergePosition(folder: DiscPosition | null, file: DiscPosition | undefined): DiscPosition | undefined {
+  if (!folder) return file
+  if (!file) return folder
+  // "1-05", "CD2-03": the filename says it all.
+  if (file.disc && !file.side) return file
+  // "LP2/A1": side A of the second record.
+  if (file.side) return { ...file, disc: folder.disc && !folder.side ? folder.disc : file.disc }
+  // "CD2/05", "Side B/03": the folder's disc or side, the filename's number.
+  return { ...folder, number: file.number }
 }
 
 function extractYear(s: string): { year?: number; rest: string } {
@@ -162,8 +169,12 @@ function splitClash(s: string, known: Set<string>): { artistPart: string; rest: 
   return { artistPart: `${left} vs ${rightWords.slice(0, take).join(" ")}`, rest: rightWords.slice(take).join(" ") }
 }
 
-export function parseFilename(filename: string, ctx: ParseContext = {}): HeuristicParse {
+export function parseFilename(filename: string, context: ParseContext = {}): HeuristicParse {
   const notes: string[] = []
+  // "CD1", "Disc 2", "Side A" folders say where the track sits, never the album or artist.
+  const folderPos = folderPosition(context.folders ?? [])
+  const ctx: ParseContext = { ...context, folders: withoutDiscFolders(context.folders ?? []) }
+  if (folderPos) notes.push(`folder "${folderPos.label}" is a disc or side, not the album`)
   const known = ctx.knownArtists ?? new Set<string>()
   const base = filename.replace(/\.[a-z0-9]{2,5}$/i, "")
   const { text: decoded, hadUnderscores } = decode(base)
@@ -173,9 +184,40 @@ export function parseFilename(filename: string, ctx: ParseContext = {}): Heurist
   for (const re of JUNK_PATTERNS) s = s.replace(re, " ")
   s = collapseSpaces(s.replace(/[([]\s*[)\]]/g, " "))
 
-  const { rest: afterTrack, track } = extractTrackNumber(s)
+  const { rest: afterTrack, track, position: filePos } = extractTrackNumber(s)
   if (track) notes.push(`leading track number "${track}" removed`)
   s = afterTrack
+  let position = mergePosition(folderPos, filePos)
+
+  // A file that's just "Side A", "CD2": the whole side or disc of what its folder names.
+  const whole = discMarker(s)
+  if (whole) {
+    const [outer, ...rest] = ctx.folders ?? []
+    // "Tape 2/Side A.mp3": side A of the second tape.
+    const disc = whole.side && position?.disc && !position.side ? position.disc : (whole.disc ?? position?.disc)
+    const pos: DiscPosition = { ...position, ...whole, disc, whole: true }
+    if (outer) {
+      const inner = parseFilename(`${outer}.mp3`, { ...ctx, folders: rest })
+      return {
+        ...inner,
+        version: whole.label,
+        trackNumber: track,
+        position: pos,
+        notes: [...notes, `the file is ${whole.label} of "${outer}", read from the folder`, ...inner.notes],
+        confidence: Math.min(inner.confidence, 0.6),
+        cleaned: s,
+      }
+    }
+    position = pos
+  }
+
+  // "Clash 1995 (Side B)", "Fabric 99 CD2", "juggling side b pt2": that part of a longer recording.
+  const part = trailingPart(s)
+  if (part) {
+    s = part.rest
+    position = { ...position, ...part.position }
+    notes.push(`"${part.position.label}" is the part of the recording, not the title`)
+  }
 
   const { hints, version: bracketVersion } = detectVersion(s)
   const { year, rest: afterYear } = extractYear(s)
@@ -287,6 +329,7 @@ export function parseFilename(filename: string, ctx: ParseContext = {}): Heurist
   if (version && bracketVersion) {
     title = collapseSpaces(title.replace(new RegExp(`[([]${bracketVersion.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[)\\]]`, "i"), " "))
   }
+  if (part?.position.label) version = version ? `${version}, ${part.position.label}` : part.position.label
 
   return {
     artists: artists.map(smartCase),
@@ -297,6 +340,7 @@ export function parseFilename(filename: string, ctx: ParseContext = {}): Heurist
     year,
     cleaned: s,
     trackNumber: track,
+    ...(position ? { position } : {}),
     hints,
     confidence,
     notes,

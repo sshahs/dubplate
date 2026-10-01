@@ -1,9 +1,11 @@
 // Decodes just the part of a file the analysers need, as mono at ~11 kHz.
-// Pure JS/WASM decoders (no ffmpeg); streamed where the format allows, so a
-// long FLAC never sits in memory as a full float buffer.
+// Pure JS/WASM decoders; streamed where the format allows, so a long FLAC
+// never sits in memory as a full float buffer. Where they can't read a file at
+// all, ffmpeg does (when it's installed).
 
 import fs from "node:fs"
 import decode, { decodeChunked } from "@audio/decode"
+import { decodeWithFfmpeg, findFfmpeg } from "../media/ffmpeg"
 
 type ChunkFormat = Parameters<typeof decodeChunked>[1]
 
@@ -101,9 +103,39 @@ async function oggFlavour(file: string): Promise<ChunkFormat> {
 
 /**
  * Decode the file, handing every chunk to each sink until they're all done (or
- * the file ends). Streamed where the format allows.
+ * the file ends). Streamed where the format allows. When the built-in decoders
+ * get nothing out of it - a format they don't know, or one they stumble on from
+ * the start - ffmpeg has a go. A file that breaks off partway isn't retried:
+ * that's a finding, not a decoder problem.
  */
 export async function decodeInto(file: string, ext: string, sinks: PcmSink[]): Promise<void> {
+  let pushed = false
+  const counted: PcmSink[] = sinks.map((s) => ({
+    get done() {
+      return s.done
+    },
+    push(channels: Float32Array[], sampleRate: number) {
+      if (channels[0]?.length) pushed = true
+      s.push(channels, sampleRate)
+    },
+  }))
+  try {
+    await decodeBuiltIn(file, ext, counted)
+  } catch (err) {
+    if (pushed || !findFfmpeg()) throw err
+    return decodeViaFfmpeg(file, sinks)
+  }
+  if (!pushed && findFfmpeg()) await decodeViaFfmpeg(file, sinks)
+}
+
+async function decodeViaFfmpeg(file: string, sinks: PcmSink[]): Promise<void> {
+  for await (const pcm of decodeWithFfmpeg(file)) {
+    for (const sink of sinks) if (!sink.done) sink.push(pcm.channelData, pcm.sampleRate)
+    if (sinks.every((s) => s.done)) break
+  }
+}
+
+async function decodeBuiltIn(file: string, ext: string, sinks: PcmSink[]): Promise<void> {
   const e = ext.toLowerCase()
   const format = e === "ogg" ? await oggFlavour(file) : CHUNKED[e]
   if (format) {

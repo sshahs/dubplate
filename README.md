@@ -345,7 +345,9 @@ docker compose -f compose.yaml -f compose.build.yaml up -d --build
 docker build -t dubplate .
 ```
 
-Add `--build-arg WITH_FPCALC=0` to leave out Chromaprint.
+Add `--build-arg WITH_FPCALC=0` to leave out Chromaprint, or
+`--build-arg WITH_FFMPEG=0` to leave out ffmpeg (the video converter and
+browser previews of WMA, APE and AIFF need it).
 
 Every push to `main` and every `v*` tag is built by
 [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml).
@@ -379,6 +381,7 @@ secrets, and keys entered in the UI take precedence.
 | `CMD_ZDR` | – | `1` or `true` forces Command Code's Zero Data Retention on (the Settings switch is locked) |
 | `DISCOGS_TOKEN`, `LASTFM_API_KEY`, `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `YOUTUBE_API_KEY`, `ACOUSTID_API_KEY` | – | |
 | `FPCALC_PATH` | `fpcalc` on `PATH` | |
+| `FFMPEG_PATH`, `FFPROBE_PATH` | `ffmpeg`, `ffprobe` on `PATH` | For the video converter and previews; `ffprobe` is also looked for next to `FFMPEG_PATH` |
 | `TZ` | `UTC` | The clock the nightly scan runs by, e.g. `Europe/London` |
 
 </details>
@@ -388,7 +391,11 @@ secrets, and keys entered in the UI take precedence.
 
 The default template is `{artist} - {title}`. The available tokens are
 `{artist}`, `{title}`, `{song}` (the title without the version),
-`{version}`, `{year}`, `{album}`, `{label}`, `{featuring}` and `{genre}`.
+`{version}`, `{year}`, `{album}`, `{label}`, `{featuring}`, `{genre}`,
+`{position}` (a vinyl position like `B2`, or the track number as `05`),
+`{track}` and `{disc}` (only on releases with more than one disc). A token
+with no value leaves no gap, so `{position} - {artist} - {title}` is just
+`Artist - Title` for a file with no position.
 
 - Clashes are joined with ` vs `, collaborations with ` & `, and three or more names become `A, B & C`.
 - Featured artists go in the artist (`A feat. B - Title`) or the title (`A - Title (feat. B)`), as you prefer.
@@ -402,6 +409,15 @@ are empty. BPM and key are written too (key as `Am` or Camelot `8A`, your
 choice), and a found cover becomes the front cover - other pictures in the
 file are left alone, and a file's existing cover is only replaced if you
 allow it.
+
+WMA files are tagged too, with their label and key under the names WMA
+players use (`WM/Publisher`, `WM/InitialKey`). The library Dubplate tags with
+has a bug that overwrote the start of a WMA's audio when its header grew, so
+earlier versions could leave a cut WMA unplayable; Dubplate now works around
+it, and scans mark a WMA damaged that way as **Damaged** (Tracks → File
+problems) so you can find them. Browsers can't play WMA, APE, WavPack, Musepack or
+AIFF, so with ffmpeg installed their previews are converted to MP3 on the fly
+(the file itself is only read).
 
 When the sources pinned a track down, its **MusicBrainz** recording, release
 and artist IDs and its **Discogs** release ID are written in the standard
@@ -425,13 +441,14 @@ A folder template decides where a track lives inside its library.
 | `{artist}/[{year} - ]{album}` | `Chronixx/2014 - Dread & Terrible/` |
 | `{initial}/{artist}` | `C/Chronixx/` |
 | `{genre}/{artist}` | `Reggae/Chronixx/` |
+| `{artist}/{album}/[Disc {disc}]` | `Wiley/Treddin On Thin Ice/Disc 2/` (only for multi-disc releases) |
 | `[{region}]/{genre}` | `UK/UK Grime/`, `House Genres/` (with canonical genres) |
 | `[{region}]/{genre}/{artist}` | `UK/UK Grime/Wiley/` |
 | `{label}/{year}` | `Soul Circle/2014/` |
 | `[{bpmrange} BPM]/[{camelot}]` | `70-79 BPM/8A/` |
 
 Tokens: `{artist}` (main artists), `{firstartist}`, `{albumartist}`,
-`{album}`, `{year}`, `{decade}` (`1990s`), `{label}`, `{genre}` (with canonical genres, its folder name), `{region}` (the folder above it), `{version}`,
+`{album}`, `{disc}` (only on releases with more than one disc), `{year}`, `{decade}` (`1990s`), `{label}`, `{genre}` (with canonical genres, its folder name), `{region}` (the folder above it), `{version}`,
 `{initial}` (A-Z, `0-9` or `#`, ignoring a leading "The"), `{bpm}`,
 `{bpmrange}` (`140-149`), `{key}`, `{camelot}` and `{format}` (`FLAC`).
 
@@ -632,6 +649,25 @@ files itself. Rewind moves them back to the inbox.
 </details>
 
 <details>
+<summary><b>Discs and sides: CD1/CD2, Side A/B, A1, B2</b></summary>
+
+Multi-disc albums and vinyl rips are read for where each track sits:
+
+- **Folders** like `CD1`, `CD 2`, `Disc 2`, `Disc 2 - Bonus`, `LP2`, `Tape 2`, `Side A`, `A-Side` or a tape's `Side 1` say the disc or side. They're never taken for the album or the artist: in `Wiley/Treddin On Thin Ice/CD2/05 - Ice Rink.mp3` the album is *Treddin On Thin Ice*. `LP2/Side C` is side C of the second record.
+- **Filenames** starting `A1`, `B2`, `C1` (vinyl positions), `CD1-05`, `Disc 2 - 03` or `1-05` (disc 1, track 5) give the position too, and it's taken off the name.
+- **Whole sides**: a file that's just `Side A.mp3` (or `CD2.mp3`) is that side of what its folder names, and one ending in a side or disc - `Stone Love vs Killamanjaro - Clash 1995 (Side B)`, `Bodyguard vs Killamanjaro (Tape 2 Side A)`, `juggling side b pt2`, `Fabric 99 CD2` - is that part of the recording. The title is the recording and `Side B` / `Tape 2 Side A` / `Side B Part 2` its version, so the halves of a clash tape stay together. A whole side isn't mistaken for a DJ mix for being long, and its length isn't held against the match.
+
+When cutting, a file without **track or disc numbers** in its tags gets them:
+`CD2/05` is disc 2 of 2, track 5. Vinyl positions count on across the sides
+of a record using the other files from it, so on a record whose side A has
+four tracks, B2 is track 6 (and C1 is track 1 of record 2). Numbers a file
+already has are left alone, and Rewind takes them out again. Jellyfin,
+Navidrome and Plex then keep a multi-disc album together and in order. The
+track's File tab shows where it sits.
+
+</details>
+
+<details>
 <summary><b>Releases: album, single, compilation or mix</b></summary>
 
 The same recording is often on the artist's album, a single, a "NOW!"
@@ -733,6 +769,25 @@ Dubplate with the new release's ID (or paste its link), and the IDs go into
 the tags: **Update the tags now** rewrites cut tracks, and the rest get them
 when they're cut. **Tracks → select → Update tags** does the same for any cut
 tracks, for example after changing genre rules.
+
+</details>
+
+<details>
+<summary><b>Videos: pulling the audio out</b></summary>
+
+Music videos, phone clips and old rips (`.avi`, `.3gp`, `.wmv`, `.mp4`,
+`.mov`, `.mkv`, `.flv`, `.mpg`… - the list is in **Settings → Sign-in &
+safety → Scanner**) are listed on the **Videos** page when a scan finds them.
+Scans only look at them; nothing changes until you convert. Converting needs
+ffmpeg (it's in the Docker image).
+
+- The audio file goes **next to the video, with the same name**, and is then scanned and identified like any new track. A name that's taken gets " (2)"; nothing is overwritten.
+- The audio is **kept exactly as it is** where an audio file can hold it: AAC becomes `.m4a`, MP3 `.mp3`, WMA `.wma`, Vorbis `.ogg`, Opus `.opus`. Uncompressed audio becomes lossless FLAC.
+- What an audio file can't hold - AMR from old phones, Dolby Digital, ADPCM - is **re-encoded** to MP3 (V0), AAC 256 kbps or FLAC, your choice. Switch off "Keep the audio as it is" to re-encode everything.
+- The video's own title and artist come along. Each file is checked before it's given its name: it must have audio and be the video's length.
+- Afterwards the video **stays where it is**, or moves to the holding folder (like a set-aside duplicate). In read-only mode videos stay put; the new audio files are added (nothing that's already there changes).
+- **Convert new videos automatically** does it whenever a scan finds one. Uploads from your phone take videos too.
+- A conversion shows up in the Cut & Tag history; **Rewind** takes the audio file away again (only while it's exactly as made - rewind its cut first) and brings the video back.
 
 </details>
 
@@ -859,6 +914,7 @@ crates whose names aren't taken.
 - 🔑 An optional password keeps everyone else out when it's on a server or your network.
 - 🤖 Hands-off and auto-approve only act on low-risk tracks the sources agree on, never on the AI's word alone or a second opinion, and every cut can be rewound.
 - 🗂️ Each file's original name, place and tags are kept from the first scan, whatever happens later.
+- 🎬 Converting a video only adds an audio file next to it, made under a hidden name and only named once it's complete and checked, never over another file.
 - 🌍 Dubplate never edits MusicBrainz itself: it fills in the release editor for you to check and submit. Fingerprints only go to AcoustID for tracks that are verified and cut, and only with your own user key.
 - 🎟️ API tokens are stored as hashes, shown once, deleted in one click, and a downloads-only token can't read or change anything else.
 - 🏷️ A file named as the wrong format has its tags written as what it really is, so an M4A called `.mp3` doesn't get an MP3 tag put in front of it.
@@ -893,10 +949,12 @@ crates whose names aren't taken.
 - 🪝 **Download tools**: qBittorrent, slskd and Lidarr tell Dubplate when a download finishes, with API tokens made for them.
 - 🎤 **Lyrics**: from LRCLIB, timed where possible, written into the file and optionally a `.lrc`.
 - 💿 **Release priority**: the artist's own album, EP or single before compilations and DJ mixes, unless the file says otherwise.
+- 📀 **Discs and sides**: CD1/CD2 and Side A/B folders, A1/B2 positions and whole-side rips understood, with disc and track numbers written.
 - 🧭 **How it was decided**: recording, release, version, genre, risk, verification, AcoustID and MusicBrainz, step by step, with where each field came from.
 - 🧠 **Second opinion**: a bigger model for the uncertain ones, and a vision model to check covers.
 - 🏷️ **Canonical genres**: one genre per track from your own list, with region folders.
 - 🫆 **Give back**: send verified fingerprints to AcoustID and add missing releases to MusicBrainz.
+- 🎬 **Video converter**: the audio out of AVI, 3GP, WMV, MP4 and more, kept as it is where it can be.
 - 🩹 **Broken files**: wrong extensions (fixed when cutting), downloads that stopped short, damaged audio and long silences.
 - 📱 **Review on a phone**: swipe right to approve, left to leave as-is; **Approve all** clears a queue with Undo.
 - 🎧 **Audio preview** in the review screen, with streaming and seeking.
@@ -945,6 +1003,8 @@ server/
   steps.ts       how a track was decided, step by step
   genres.ts      canonical genre rules
   acoustid-submit.ts, musicbrainz-seed.ts   giving back to AcoustID and MusicBrainz
+  media/         ffmpeg: probing, converting, previews of formats browsers can't play
+  videos.ts, convert.ts   videos scans find, and pulling their audio out
   art.ts         cover-art cache, downloads, thumbnails
   worker-pool.ts CPU-heavy work (decoding, thumbnails) off the main thread
   executor.ts    plan / rename + tag / rewind

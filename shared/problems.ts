@@ -24,7 +24,10 @@ export function fileProblems(t: Pick<Track, "fileCheck" | "analysis" | "ext">): 
   const f = t.fileCheck
   const i = t.analysis?.integrity
   if (f?.empty) out.push({ kind: "empty", severity: "error", label: "Empty file", detail: "The file has nothing in it (0 bytes)." })
-  if (i?.damagedAt !== null && i?.damagedAt !== undefined) {
+  if (f?.containerDamage) {
+    // The cause is known, so the decoder giving up on it isn't news.
+    out.push({ kind: "damaged", severity: "error", label: "Damaged", detail: `It won't play: ${f.containerDamage}.` })
+  } else if (i?.damagedAt !== null && i?.damagedAt !== undefined) {
     out.push({
       kind: "damaged",
       severity: "error",

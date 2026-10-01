@@ -46,8 +46,11 @@ export function sanitizeFilename(s: string, maxLength = 180): string {
 }
 
 /** Render a naming template like "{artist} - {title}" (without extension). */
-export function renderTemplate(template: string, meta: FinalMeta, naming: Naming): string {
+export function renderTemplate(template: string, meta: FinalMeta, naming: Naming, place: { position?: string; track?: string; disc?: string } = {}): string {
   const values: Record<string, string> = {
+    position: place.position ?? "",
+    track: place.track ?? "",
+    disc: place.disc ?? "",
     artist: formatArtist(meta, naming),
     artists: formatArtist(meta, naming, false),
     title: formatTitle(meta, naming),
@@ -103,6 +106,8 @@ export interface TagExtras {
    * or the AI's), over whatever the file has when `overwrite` is set.
    */
   canonicalGenre?: { genre: string | null; overwrite: boolean }
+  /** disc and track numbers from the file's name and folders, for a file whose tags don't have them */
+  placement?: { disc?: number; discTotal?: number; track?: number }
 }
 
 /**
@@ -122,6 +127,11 @@ export function tagsFor(meta: FinalMeta, current: ExistingTags, naming: Naming, 
     if (g && !same && (extras.canonicalGenre.overwrite || !current.genre?.length)) out.genre = [g]
   } else if (!current.genre?.length && meta.genre) out.genre = [meta.genre]
   if (!current.label && meta.label) out.label = meta.label
+  // Where it sits on its record, only where the file doesn't say already.
+  const place = extras.placement
+  if (place?.track && !current.track) out.track = place.track
+  if (place?.disc && !current.disc) out.disc = place.disc
+  if (place?.discTotal && !current.discTotal) out.discTotal = place.discTotal
   if (naming.tagComment) out.comment = "Identified by Dubplate"
   if (extras.bpm && Math.round(extras.bpm) !== Math.round(current.bpm ?? 0)) out.bpm = Math.round(extras.bpm)
   if (extras.key && extras.key !== current.key) out.key = extras.key

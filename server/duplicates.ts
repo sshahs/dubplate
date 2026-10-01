@@ -136,7 +136,7 @@ export function validResolutions(input: Resolution[]): Resolution[] {
 }
 
 /** Somewhere free for `file` under the holding folder, mirroring where it lived. */
-function holdingPath(libPath: string, holding: string, file: string) {
+export function holdingPath(libPath: string, holding: string, file: string) {
   const inside = path.relative(libPath, file)
   let to = path.join(libPath, holding, inside)
   const ext = path.extname(to)

@@ -276,6 +276,30 @@ export const MIGRATIONS: string[] = [
     disabled_at TEXT
   );
   `,
+  // 7: videos the scanner found (AVI, 3GP, WMV…), whose audio the converter pulls out, and the
+  // content hash of a file Dubplate made, so a rewind only takes it away if it's unchanged.
+  `
+  CREATE TABLE videos (
+    id INTEGER PRIMARY KEY,
+    library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+    path TEXT NOT NULL UNIQUE,
+    rel_dir TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    ext TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    mtime_ms REAL NOT NULL,
+    probe_json TEXT,
+    status TEXT NOT NULL DEFAULT 'found',
+    output_path TEXT,
+    error TEXT,
+    converted_at TEXT,
+    aside_from TEXT,
+    missing INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_videos_library ON videos(library_id);
+  ALTER TABLE operations ADD COLUMN hash_after TEXT;
+  `,
 ]
 
 export type Db = DatabaseSync

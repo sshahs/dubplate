@@ -8,18 +8,20 @@ import { parseFile, parseStream, type IAudioMetadata } from "music-metadata"
 import type { ArtRef, ExistingTags, FileCheck, Library, Settings } from "../shared/types"
 import { parseKey } from "../shared/keys"
 import { lyricsSummary } from "../shared/lyrics"
-import { mismatch, sniffFile } from "./sniff"
+import { familyOfExt, mismatch, sniffFile } from "./sniff"
 import { describeArt, pickFrontCover } from "./art"
 import { parseFilename } from "./core/filename-parser"
 import { getDb } from "./db"
 import type { JobContext } from "./jobs"
 import { mapLimit } from "./jobs"
 import { getTrack, knownArtists, touchLibraryScan, updateTrack } from "./repo"
+import { asfDamage } from "./tagger"
+import { recordVideos } from "./videos"
 import type { Track } from "../shared/types"
 
 const HASH_CHUNK = 64 * 1024
 /** Bump when readAudio starts collecting something new, so unchanged files get re-read once. */
-export const TAGS_VERSION = 4
+export const TAGS_VERSION = 6
 
 /** Fast content fingerprint: size + first and last 64 KiB. Enough to spot
  *  duplicates and follow files that were moved outside Dubplate. */
@@ -100,6 +102,9 @@ export async function readAudio(file: string) {
     if (wrong) fileCheck = { realExt: wrong.ext, realFormat: wrong.label }
     const size = (await fs.promises.stat(file)).size
     if (!size) fileCheck = { ...fileCheck, empty: true }
+    const isAsf = wrong ? wrong.family === "asf" : familyOfExt(path.extname(file).slice(1).toLowerCase()) === "asf"
+    const asfBroken = isAsf && size ? asfDamage(file) : null
+    if (asfBroken) fileCheck = { ...fileCheck, containerDamage: asfBroken }
     // Named as something it isn't: let the content decide how it's read.
     const meta = wrong ? await parseStream(fs.createReadStream(file), { size, mimeType: wrong.mime }, opts) : await parseFile(file, opts)
     const c = meta.common
@@ -115,10 +120,14 @@ export async function readAudio(file: string) {
       year: c.year || undefined,
       genre: c.genre?.length ? c.genre : undefined,
       track: c.track?.no ?? undefined,
+      trackTotal: c.track?.of ?? undefined,
+      disc: c.disk?.no ?? undefined,
+      discTotal: c.disk?.of ?? undefined,
       label: firstString(c.label),
       comment: firstString(c.comment),
       bpm: c.bpm && c.bpm > 0 ? Math.round(c.bpm * 10) / 10 : undefined,
-      key: firstString(c.key),
+      // music-metadata doesn't map a WMA's key; it's under its native name.
+      key: firstString(c.key) ?? firstString(meta.native.asf?.find((x) => x.id === "WM/InitialKey")?.value),
       cover: art?.hash,
       mbRecordingId: c.musicbrainz_recordingid || undefined,
       mbReleaseId: c.musicbrainz_albumid || undefined,
@@ -170,7 +179,18 @@ export interface ScanResult {
   /** ids of tracks seen for the first time */
   added: number[]
   changed: number[]
+  /** videos seen for the first time (or changed), with audio to convert */
+  videos: number[]
 }
+
+/** The scanner's audio and video extensions; a format listed as audio is never treated as video. */
+function extensionSets(settings: Settings): { audio: Set<string>; video: Set<string> } {
+  const audio = new Set(settings.scanner.extensions.map((e) => e.toLowerCase().replace(/^\./, "")))
+  const video = new Set((settings.scanner.videoExtensions ?? []).map((e) => e.toLowerCase().replace(/^\./, "")).filter((e) => !audio.has(e)))
+  return { audio, video }
+}
+
+const extOf = (file: string) => path.extname(file).slice(1).toLowerCase()
 
 /**
  * Top-level folders scans leave alone: the holding folder for duplicates, and any
@@ -188,17 +208,19 @@ export function holdingFolders(lib: Library, settings: Settings): string[] {
 export async function scanLibrary(lib: Library, settings: Settings, ctx: JobContext): Promise<ScanResult> {
   const db = getDb()
   if (!fs.existsSync(lib.path)) throw new Error(`Library folder not found: ${lib.path}`)
-  const extensions = new Set(settings.scanner.extensions.map((e) => e.toLowerCase().replace(/^\./, "")))
+  const { audio: audioExts, video: videoExts } = extensionSets(settings)
   const ignore = settings.scanner.ignore.map(globToRegex)
 
   ctx.message("Walking folders…")
   const files: string[] = []
-  for await (const f of walk(lib.path, extensions, ignore, ctx.signal, holdingFolders(lib, settings))) {
-    files.push(f)
-    if (files.length % 500 === 0) ctx.message(`Found ${files.length} files…`)
+  const videoFiles: string[] = []
+  for await (const f of walk(lib.path, new Set([...audioExts, ...videoExts]), ignore, ctx.signal, holdingFolders(lib, settings))) {
+    if (videoExts.has(extOf(f))) videoFiles.push(f)
+    else files.push(f)
+    if ((files.length + videoFiles.length) % 500 === 0) ctx.message(`Found ${files.length + videoFiles.length} files…`)
   }
   ctx.setTotal(files.length)
-  ctx.log("info", `${lib.name}: found ${files.length} audio files`)
+  ctx.log("info", `${lib.name}: found ${files.length} audio files${videoFiles.length ? ` and ${videoFiles.length} video${videoFiles.length === 1 ? "" : "s"}` : ""}`)
 
   const existing = new Map<string, { id: number; size: number; mtime: number; tagsVersion: number }>()
   for (const r of db.prepare("SELECT id, path, size, mtime_ms, tags_version FROM tracks WHERE library_id = ?").all(lib.id) as {
@@ -319,14 +341,16 @@ export async function scanLibrary(lib: Library, settings: Settings, ctx: JobCont
     }
   })
 
-  if (ctx.signal.aborted) return { added: addedIds, changed }
+  if (ctx.signal.aborted) return { added: addedIds, changed, videos: [] }
+  const videos = await recordVideos(lib, videoFiles, ctx)
+  if (ctx.signal.aborted) return { added: addedIds, changed, videos }
 
   const added = addedIds.length
   missing -= moved
   touchLibraryScan(lib.id)
   ctx.tracksChanged(changed)
-  ctx.log("success", `${lib.name}: ${added} new, ${changed.length - added - moved} updated, ${moved} moved, ${missing} missing`)
-  return { added: addedIds, changed }
+  ctx.log("success", `${lib.name}: ${added} new, ${changed.length - added - moved} updated, ${moved} moved, ${missing} missing${videos.length ? `; ${videos.length} new video${videos.length === 1 ? "" : "s"} to convert` : ""}`)
+  return { added: addedIds, changed, videos }
 }
 
 /**
@@ -336,7 +360,7 @@ export async function scanLibrary(lib: Library, settings: Settings, ctx: JobCont
  */
 export async function libraryHasChanges(lib: Library, settings: Settings, signal?: AbortSignal): Promise<boolean> {
   if (!fs.existsSync(lib.path)) return false
-  const extensions = new Set(settings.scanner.extensions.map((e) => e.toLowerCase().replace(/^\./, "")))
+  const { audio: extensions, video: videoExts } = extensionSets(settings)
   const ignore = settings.scanner.ignore.map(globToRegex)
   const stale = getDb().prepare("SELECT 1 FROM tracks WHERE library_id = ? AND missing = 0 AND tags_version < ? LIMIT 1").get(lib.id, TAGS_VERSION)
   if (stale) return true
@@ -344,14 +368,28 @@ export async function libraryHasChanges(lib: Library, settings: Settings, signal
   for (const r of getDb().prepare("SELECT path, size, mtime_ms, missing FROM tracks WHERE library_id = ?").all(lib.id) as { path: string; size: number; mtime_ms: number; missing: number }[]) {
     known.set(r.path, { size: r.size, mtime: r.mtime_ms, missing: r.missing })
   }
+  const videos = new Map<string, { size: number; mtime: number; missing: number }>()
+  for (const r of getDb().prepare("SELECT path, size, mtime_ms, missing FROM videos WHERE library_id = ? AND aside_from IS NULL").all(lib.id) as { path: string; size: number; mtime_ms: number; missing: number }[]) {
+    videos.set(r.path, { size: r.size, mtime: r.mtime_ms, missing: r.missing })
+  }
   let present = 0
-  for await (const file of walk(lib.path, extensions, ignore, signal, holdingFolders(lib, settings))) {
-    const k = known.get(file)
+  let videosPresent = 0
+  for await (const file of walk(lib.path, new Set([...extensions, ...videoExts]), ignore, signal, holdingFolders(lib, settings))) {
+    const isVideo = videoExts.has(extOf(file))
+    const k = isVideo ? videos.get(file) : known.get(file)
+    if (isVideo) {
+      if (!k || k.missing) return true
+      const st = await fs.promises.stat(file).catch(() => null)
+      if (!st || st.size !== k.size || Math.round(st.mtimeMs) !== Math.round(k.mtime)) return true
+      videosPresent++
+      continue
+    }
     if (!k || k.missing) return true
     const st = await fs.promises.stat(file).catch(() => null)
     if (!st || st.size !== k.size || Math.round(st.mtimeMs) !== Math.round(k.mtime)) return true
     present++
   }
   const stillKnown = [...known.values()].filter((k) => !k.missing).length
-  return present !== stillKnown
+  const videosKnown = [...videos.values()].filter((k) => !k.missing).length
+  return present !== stillKnown || videosPresent !== videosKnown
 }

@@ -36,6 +36,11 @@ export interface ExistingTags {
   year?: number
   genre?: string[]
   track?: number
+  /** tracks on the disc, as the tag says */
+  trackTotal?: number
+  /** disc number, for releases on more than one CD or record */
+  disc?: number
+  discTotal?: number
   label?: string
   comment?: string
   bpm?: number
@@ -143,6 +148,62 @@ export interface IntegrityCheck {
 }
 
 /** What reading the file (not its audio) found out about it. */
+/** A video the scanner found in a library; the converter makes an audio file from it. */
+export interface VideoFile {
+  id: number
+  libraryId: number
+  path: string
+  relDir: string
+  filename: string
+  ext: string
+  size: number
+  /** what's inside, when ffprobe could look */
+  probe: MediaProbe | null
+  /** "no-audio": there's nothing to pull out */
+  status: "found" | "converted" | "failed" | "no-audio"
+  /** the audio file made from it */
+  outputPath: string | null
+  error: string | null
+  convertedAt: string | null
+  /** where it was before it was moved to the holding folder after converting */
+  asideFrom: string | null
+  missing: boolean
+}
+
+/** How a video's audio becomes an audio file. */
+export interface ConvertPlan {
+  /** "copy": the audio as it is, nothing lost; "encode": re-encoded */
+  mode: "copy" | "encode"
+  /** the audio file's extension */
+  ext: string
+  /** in words, e.g. "AAC, kept as it is (.m4a)" */
+  label: string
+}
+
+/** One audio stream inside a media file, as ffprobe sees it. */
+export interface MediaAudioStream {
+  /** its position among the file's audio streams */
+  index: number
+  /** ffmpeg's codec id, e.g. "aac", "mp3", "wmav2", "amr_nb" */
+  codec: string
+  /** a readable name, e.g. "AAC", "AMR (phone)" */
+  codecName: string
+  sampleRate: number | null
+  channels: number | null
+  /** bits per second */
+  bitRate: number | null
+  duration: number | null
+}
+
+export interface MediaProbe {
+  /** ffmpeg's container name(s), e.g. "avi", "mov,mp4,m4a,3gp,3g2,mj2" */
+  format: string
+  duration: number | null
+  /** has a picture track (not just cover art) */
+  video: boolean
+  audio: MediaAudioStream[]
+}
+
 export interface FileCheck {
   /** what the file really is, by its content, when its extension says otherwise (e.g. "m4a") */
   realExt?: string
@@ -152,6 +213,8 @@ export interface FileCheck {
   unreadable?: string
   /** a zero-byte file */
   empty?: boolean
+  /** the container itself is broken, e.g. a WMA whose header runs over its audio */
+  containerDamage?: string
 }
 
 export type FileProblemKind = "format" | "unreadable" | "empty" | "damaged" | "truncated" | "silence"
@@ -220,9 +283,27 @@ export interface TrackReading {
   genre?: string
 }
 
+/** Where a track sits on its record: disc, side and number, as its name and folders say. */
+export interface DiscPosition {
+  /** disc (or record) number, 1-based */
+  disc?: number
+  /** vinyl or tape side, "A".."H" */
+  side?: string
+  /** number on the side (A2 is 2), or on the disc */
+  number?: number
+  /** as the file or folder put it: "CD2", "Side B", "B2" */
+  label?: string
+  /** the file is a whole side or disc (or a part of one), not one track */
+  whole?: boolean
+  /** which part of a side or disc split over several files ("Side B Part 2") */
+  part?: number
+}
+
 export interface HeuristicParse extends TrackReading {
   cleaned: string
   trackNumber?: string
+  /** disc, side and number, from the filename and folders (CD1/CD2, Side A, A1…) */
+  position?: DiscPosition
   hints: string[]
   confidence: number // 0..1
   notes: string[]
@@ -595,7 +676,7 @@ export interface LibrarySettings {
   inboxFor?: number
 }
 
-export type JobKind = "scan" | "interpret" | "scour" | "score" | "process" | "execute" | "rewind" | "analyze" | "artwork" | "organise" | "duplicates" | "sync" | "lyrics" | "upload" | "acoustid" | "retag"
+export type JobKind = "convert" | "scan" | "interpret" | "scour" | "score" | "process" | "execute" | "rewind" | "analyze" | "artwork" | "organise" | "duplicates" | "sync" | "lyrics" | "upload" | "acoustid" | "retag"
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled"
 
 export interface Job {
@@ -624,10 +705,11 @@ export interface Operation {
   /** null for a file that isn't a track (cover images, cue sheets moved along with a folder) */
   trackId: number | null
   /**
-   * "move": into another folder, name and tags untouched; "set-aside": a duplicate moved to the
-   * holding folder; "write": a new file Dubplate made (a .lrc), its contents in tagsAfter.lyrics
+   * "move": into another folder, name and tags untouched; "set-aside": a duplicate (or a converted
+   * video) moved to the holding folder; "write": a new file Dubplate made (a .lrc), its contents in
+   * tagsAfter.lyrics; "convert": an audio file made from the video at fromPath
    */
-  kind: "rename" | "tag" | "rename+tag" | "move" | "set-aside" | "write"
+  kind: "rename" | "tag" | "rename+tag" | "move" | "set-aside" | "write" | "convert"
   fromPath: string
   toPath: string
   tagsBefore: ExistingTags | null
@@ -642,6 +724,8 @@ export interface Operation {
   createdDirs: string[]
   /** what the batch was, e.g. "Cut" or "Organise" */
   batchLabel: string | null
+  /** content hash of a file Dubplate made, so a rewind only takes it away while it's unchanged */
+  hashAfter: string | null
 }
 
 export interface OperationBatch {
@@ -683,6 +767,8 @@ export interface Stats {
   libraries: number
   operations: number
   duplicates: number
+  /** videos waiting to have their audio pulled out */
+  videos: number
   sources: { source: string; hits: number }[]
 }
 
@@ -831,8 +917,21 @@ export interface Settings {
   }
   scanner: {
     extensions: string[]
+    /** videos whose audio the converter can pull out (AVI, 3GP, WMV…); scans list them, never change them */
+    videoExtensions: string[]
     hashFiles: boolean
     ignore: string[]
+  }
+  /** pulling the audio out of videos (needs ffmpeg) */
+  convert: {
+    /** keep the audio exactly as it is when an audio file can hold it (AAC, MP3, WMA…): nothing lost */
+    keepAudio: boolean
+    /** what to make when it has to be re-encoded (AMR from old phones, AC-3, ADPCM…) */
+    encodeTo: "mp3" | "m4a" | "flac"
+    /** the video afterwards: left where it is, or moved to the holding folder */
+    originals: "keep" | "aside"
+    /** convert videos scans find straight away */
+    auto: boolean
   }
   safety: {
     readOnly: boolean
