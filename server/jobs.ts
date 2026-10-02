@@ -1,5 +1,7 @@
 // In-process job queue + event bus. Jobs run one at a time so rate limits
-// and file operations never race each other; progress streams over SSE.
+// and file operations never race each other; progress streams over SSE. A
+// second, quick lane takes small jobs that only read and identify (re-running
+// one track, say), so they don't wait hours behind a whole library.
 
 import { AsyncLocalStorage } from "node:async_hooks"
 import { randomUUID } from "node:crypto"
@@ -76,8 +78,10 @@ export function onJobFinished(l: FinishListener) {
   return () => finishListeners.delete(l)
 }
 
-const queue: QueuedJob[] = []
-let running: QueuedJob | null = null
+type Lane = { queue: QueuedJob[]; running: QueuedJob | null }
+const main: Lane = { queue: [], running: null }
+const quick: Lane = { queue: [], running: null }
+const lanes = [main, quick]
 
 /** Which job the current code is running for (AI usage is booked against it). */
 const jobScope = new AsyncLocalStorage<string>()
@@ -121,7 +125,12 @@ function publish(job: Job, force = false) {
   emit({ type: "job", job: { ...job } })
 }
 
-export function enqueueJob(kind: JobKind, label: string, fn: JobFn): Job {
+export interface EnqueueOptions {
+  /** a small job that doesn't move files: it may run alongside the main queue */
+  quick?: boolean
+}
+
+export function enqueueJob(kind: JobKind, label: string, fn: JobFn, opts: EnqueueOptions = {}): Job {
   const job: Job = {
     id: randomUUID(),
     kind,
@@ -135,17 +144,18 @@ export function enqueueJob(kind: JobKind, label: string, fn: JobFn): Job {
     startedAt: null,
     finishedAt: null,
   }
-  queue.push({ job, fn, controller: new AbortController(), outcome: { filesChanged: false, report: null } })
+  const lane = opts.quick ? quick : main
+  lane.queue.push({ job, fn, controller: new AbortController(), outcome: { filesChanged: false, report: null } })
   publish(job, true)
-  void pump()
+  void pump(lane)
   return job
 }
 
-async function pump() {
-  if (running) return
-  const next = queue.shift()
+async function pump(lane: Lane) {
+  if (lane.running) return
+  const next = lane.queue.shift()
   if (!next) return
-  running = next
+  lane.running = next
   const { job, fn, controller, outcome } = next
   job.status = "running"
   job.startedAt = new Date().toISOString()
@@ -192,28 +202,30 @@ async function pump() {
     publish(job, true)
     lastEmit.delete(job.id)
     emit({ type: "stats" })
-    running = null
+    lane.running = null
     for (const l of finishListeners) {
       Promise.resolve()
         .then(() => l({ ...job }, outcome))
         .catch((err) => log("warn", `After "${job.label}": ${err instanceof Error ? err.message : err}`))
     }
-    void pump()
+    void pump(lane)
   }
 }
 
 export function cancelJob(id: string): boolean {
-  if (running?.job.id === id) {
-    running.controller.abort()
-    return true
-  }
-  const i = queue.findIndex((q) => q.job.id === id)
-  if (i >= 0) {
-    const [q] = queue.splice(i, 1)
-    q.job.status = "cancelled"
-    q.job.finishedAt = new Date().toISOString()
-    publish(q.job, true)
-    return true
+  for (const lane of lanes) {
+    if (lane.running?.job.id === id) {
+      lane.running.controller.abort()
+      return true
+    }
+    const i = lane.queue.findIndex((q) => q.job.id === id)
+    if (i >= 0) {
+      const [q] = lane.queue.splice(i, 1)
+      q.job.status = "cancelled"
+      q.job.finishedAt = new Date().toISOString()
+      publish(q.job, true)
+      return true
+    }
   }
   return false
 }
@@ -224,7 +236,7 @@ export function listJobs(limit = 30): Job[] {
 }
 
 export function activeJobs(): Job[] {
-  return [running?.job, ...queue.map((q) => q.job)].filter((j): j is Job => !!j)
+  return lanes.flatMap((l) => [l.running?.job, ...l.queue.map((q) => q.job)]).filter((j): j is Job => !!j)
 }
 
 /** Jobs that were mid-flight when the server stopped can never finish. */
@@ -247,7 +259,9 @@ export async function mapLimit<T>(items: T[], limit: number, signal: AbortSignal
 }
 
 export function resetJobStateForTests() {
-  queue.length = 0
-  running = null
+  for (const lane of lanes) {
+    lane.queue.length = 0
+    lane.running = null
+  }
   lastEmit = new Map()
 }

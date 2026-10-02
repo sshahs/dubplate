@@ -171,7 +171,7 @@ export async function scourTrack(
   const results = await Promise.all(
     jobs.map(async ({ adapter, cfg }) => {
       if (precomputed[adapter.id]) return precomputed[adapter.id]!
-      const key = adapter.id === "acoustid" ? null : lookupKey(adapter.id, q)
+      const key = adapter.id === "acoustid" ? null : lookupKey(adapter.cacheKey ?? adapter.id, q)
       const cached = key && !opts.fresh ? cachedLookup(key) : null
       if (cached) return cached
       const scraper = adapter.id.startsWith("scraper:")

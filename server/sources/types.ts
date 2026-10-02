@@ -26,6 +26,8 @@ export interface SourceContext {
 export interface SourceAdapter {
   id: SourceId
   label: string
+  /** what its lookups are cached under, when that's more than its id */
+  cacheKey?: string
   /** null when usable, otherwise the reason it's skipped */
   unavailable(ctx: SourceContext): string | null
   search(q: SourceQuery, ctx: SourceContext): Promise<Candidate[]>

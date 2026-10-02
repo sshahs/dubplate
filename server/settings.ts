@@ -3,6 +3,7 @@ import { STARTER_GENRE_RULES } from "../shared/genres"
 import { sanitizeFilename } from "./core/naming"
 import { getDb } from "./db"
 import { setContact } from "./sources/http"
+import { recipeKey } from "./sources/recipe"
 
 export { STARTER_GENRE_RULES }
 
@@ -80,8 +81,9 @@ export function zdrForcedByEnv(): boolean {
 }
 
 /**
- * Community scraper presets. Site markup drifts, so these ship disabled and
- * unverified - use "Test" in Sources to check them before switching on.
+ * Community scraper presets. They ship switched off; the ones marked verified
+ * answered with real results when checked against the live site (the month is
+ * in their notes). Site markup drifts, so Test one before trusting it.
  */
 export const SCRAPER_PRESETS: ScraperDefinition[] = [
   {
@@ -113,8 +115,8 @@ export const SCRAPER_PRESETS: ScraperDefinition[] = [
     items: "",
     fields: { combined: "title.rendered", url: "link", year: "date" },
     scene: "Sound clash recordings and sound tapes",
-    notes: "WordPress REST search over a sound-clash and sound-tape archive.",
-    verified: false,
+    notes: "WordPress REST search over a sound-clash and sound-tape archive. Checked October 2026.",
+    verified: true,
     genres: ["Sound clashes", "Dancehall", "Reggae", "Dubplates & specials"],
     genreWeights: { "Sound clashes": 1.3, "Dubplates & specials": 1.3, Dancehall: 1.1, Reggae: 1.1 },
   },
@@ -141,8 +143,8 @@ export const SCRAPER_PRESETS: ScraperDefinition[] = [
     items: ".trk-row",
     fields: { title: ".title a", artist: ".artists a", label: ".label a", url: ".title a@href", year: ".r-date" },
     scene: "House, techno, disco and afro house downloads",
-    notes: "DJ download store with deep house, soulful and afro catalogues.",
-    verified: false,
+    notes: "DJ download store with deep house, soulful and afro catalogues. Checked October 2026.",
+    verified: true,
     genres: ["House", "Techno", "Disco", "Electronic", "Afrobeats", "Amapiano", "Soul", "Funk"],
   },
   {
@@ -161,8 +163,8 @@ export const SCRAPER_PRESETS: ScraperDefinition[] = [
       artwork: "result.song_art_image_url",
     },
     scene: "Hip-hop, R&B, pop and afrobeats",
-    notes: "The lyrics site's own search: good on credits and spellings for rap and R&B.",
-    verified: false,
+    notes: "The lyrics site's own search: good on credits and spellings for rap and R&B. Checked October 2026.",
+    verified: true,
     genres: ["Hip-hop", "R&B", "Pop", "Afrobeats", "Amapiano", "Latin", "Grime", "Soul", "Gospel", "Rock", "Indie", "Country"],
   },
   {
@@ -173,10 +175,10 @@ export const SCRAPER_PRESETS: ScraperDefinition[] = [
     kind: "json",
     searchUrl: "https://discoveryprovider.audius.co/v1/tracks/search?query={query}&app_name=dubplate",
     items: "data",
-    fields: { title: "title", artist: "user.name", year: "release_date", artwork: "artwork.480x480" },
+    fields: { title: "title", artist: "user.name", year: "release_date", url: "https://audius.co{permalink}", artwork: "artwork.480x480" },
     scene: "Independent electronic and hip-hop uploads",
-    notes: "Open music platform with a public search API. Uploads are self-published, so it's weighted low.",
-    verified: false,
+    notes: "Open music platform with a public search API. Uploads are self-published, so it's weighted low. Checked October 2026.",
+    verified: true,
     genres: ["Electronic", "Hip-hop", "House", "Techno", "Drum & bass", "Dubstep", "Ambient", "Edits & bootlegs"],
   },
   {
@@ -184,44 +186,16 @@ export const SCRAPER_PRESETS: ScraperDefinition[] = [
     name: "Hype Machine",
     enabled: false,
     weight: 0.45,
-    kind: "html",
+    kind: "json",
     searchUrl: "https://hypem.com/search/{query}/1/",
-    items: ".section-track",
-    fields: { artist: ".track_name .artist", title: ".track_name .base-title", url: ".track_name a.track@href" },
+    // The list itself is behind a login now; the page carries the same tracks as JSON.
+    embedded: "script#displayList-data",
+    items: "tracks",
+    fields: { artist: "artist", title: "song", url: "posturl" },
     scene: "Indie, electronic and remixes from music blogs",
-    notes: "Blog aggregator: good for remixes and edits that never got a store release.",
-    verified: false,
+    notes: "Blog aggregator: good for remixes and edits that never got a store release. Checked October 2026.",
+    verified: true,
     genres: ["Indie", "Electronic", "Pop", "House", "Hip-hop", "Edits & bootlegs"],
-  },
-  {
-    id: "allmusic",
-    name: "AllMusic",
-    enabled: false,
-    weight: 0.7,
-    kind: "html",
-    searchUrl: "https://www.allmusic.com/search/songs/{query}",
-    items: ".song",
-    fields: { title: ".title a", artist: ".performers a", url: ".title a@href" },
-    scene: "Jazz, soul, blues, rock and classical",
-    notes: "Editorial database with deep coverage of older recordings.",
-    verified: false,
-    genres: ["Jazz", "Soul", "Funk", "Blues", "Gospel", "Rock", "Folk", "Country", "Classical", "Pop", "World"],
-  },
-  // Added on request, without being able to open the sites: press Test before switching one on.
-  {
-    id: "reggaerecord",
-    name: "ReggaeRecord",
-    enabled: false,
-    weight: 0.75,
-    kind: "html",
-    searchUrl: "https://www.reggaerecord.com/en/search?q={query}",
-    items: ".product, .item, li.record",
-    fields: { artist: ".artist", title: ".title", url: "a@href", label: ".label", year: ".year" },
-    scene: "Reggae and dancehall 7\"s, 12\"s and LPs, with labels and riddims",
-    notes: "Untested: the search address and selectors are a guess. Open a search on the site, copy its address and the parts of each result, then press Test.",
-    verified: false,
-    genres: ["Reggae", "Dancehall", "Dub", "Roots", "Lovers rock"],
-    genreWeights: { Reggae: 1.3, Dancehall: 1.3, Dub: 1.2 },
   },
   {
     id: "grime-archive",
@@ -229,29 +203,14 @@ export const SCRAPER_PRESETS: ScraperDefinition[] = [
     enabled: false,
     weight: 0.5,
     kind: "html",
-    searchUrl: "https://grimearchive.org/search?q={query}",
-    items: ".mix, .result, li",
-    fields: { combined: ".title, a", url: "a@href", year: ".date" },
+    searchUrl: "https://www.grimearchive.org/search?title={query}",
+    items: "tr.mix-row",
+    fields: { title: "a.mix-link", artist: ".td-dj a, .td-mcs a", url: "a.mix-link@href", year: ".td-date" },
     scene: "Grime radio sets and mixes (Rinse, Deja Vu, Kiss…)",
-    notes: "Untested: a guess at the search address. Sets rather than tracks, so it backs up clash and set recordings more than singles.",
-    verified: false,
+    notes: "Sets rather than tracks, so it backs up clash and set recordings more than singles. Checked October 2026.",
+    verified: true,
     genres: ["Grime", "Radio rips"],
     genreWeights: { Grime: 1.2, "Radio rips": 1.3 },
-  },
-  {
-    id: "grm-daily",
-    name: "GRM Daily",
-    enabled: false,
-    weight: 0.55,
-    kind: "json",
-    searchUrl: "https://grmdaily.com/wp-json/wp/v2/posts?search={query}&per_page=10&_fields=title,link,date",
-    items: "",
-    fields: { combined: "title.rendered", url: "link", year: "date" },
-    scene: "UK rap, grime and drill releases and videos",
-    notes: "Untested: assumes the site's WordPress search. Posts are titled \"Artist - Title\" with extras, so treat hits as backing up other sources.",
-    verified: false,
-    genres: ["Grime", "UK rap", "UK drill", "Hip-hop"],
-    genreWeights: { Grime: 1.2, "UK rap": 1.25, "UK drill": 1.25 },
   },
   {
     id: "britishhiphop",
@@ -263,29 +222,61 @@ export const SCRAPER_PRESETS: ScraperDefinition[] = [
     items: "",
     fields: { combined: "title.rendered", url: "link", year: "date" },
     scene: "UK hip-hop reviews and releases",
-    notes: "Untested: assumes the site's WordPress search.",
-    verified: false,
+    notes: "The site's WordPress search; posts are titled \"Artist - Title [Video]\". Checked October 2026.",
+    verified: true,
     genres: ["UK rap", "Hip-hop"],
     genreWeights: { "UK rap": 1.25, "Hip-hop": 1.1 },
-  },
-  {
+  },  {
     id: "soundclash-hub",
     name: "SoundClash Hub",
     enabled: false,
     weight: 0.3,
     kind: "json",
-    searchUrl: "https://soundclashhub.com/wp-json/wp/v2/posts?search={query}&per_page=10&_fields=title,link,date",
-    items: "",
-    fields: { combined: "title.rendered", url: "link", year: "date" },
-    scene: "Sound clash and juggling events",
-    notes: "Untested. An events calendar rather than a track archive, so it's supporting evidence only: it can back a clash up, never confirm one alone.",
-    verified: false,
-    supportingOnly: true,
+    // Its search wants one name: "Killamanjaro" finds the events, "Killamanjaro Stone Love" none.
+    searchUrl: "https://soundclashhub.com/api/events?q={artist1}&tab=past",
+    items: "events",
+    fields: { title: "title", artist: "soundsInvolved", year: "startAt", url: "/events/{slug}" },
+    scene: "Sound clash and hardcore juggling events, with the sounds that played",
+    notes: "Past events from the clash calendar: the event is the recording, so a clash tape matches its listing by the sounds and the year. Its listings start around 2025. Checked October 2026.",
+    verified: true,
     genres: ["Sound clashes"],
-    genreWeights: { "Sound clashes": 1.1 },
+    genreWeights: { "Sound clashes": 1.3 },
   },
 ]
 
+/**
+ * The fingerprint of every recipe each preset has shipped with: a saved copy
+ * that still matches one was never edited, so it's brought up to date (or
+ * switched off when its site stopped working) without losing anyone's changes.
+ */
+const SHIPPED_RECIPES: Record<string, string[]> = {
+  juno: ["399b51bdc0"],
+  "regime-radio": ["baf415bd3b"],
+  "wordpress-template": ["25a48be63a"],
+  traxsource: ["97b47bda29"],
+  genius: ["9aeb25979f"],
+  audius: ["9ef3954bde"],
+  hypem: ["f2baf035f1"],
+  allmusic: ["64a1bbece9"],
+  reggaerecord: ["5aec77695a"],
+  "grime-archive": ["12f3cb96f6"],
+  "grm-daily": ["f07973d152"],
+  britishhiphop: ["10973f33e4"],
+  "soundclash-hub": ["51609b272f"],
+}
+
+/** Presets taken out because their site can't be searched from a server, and why. */
+const RETIRED_PRESETS: Record<string, string> = {
+  allmusic: "AllMusic turns away searches that don't come from a web browser (it answers 403), so Dubplate can't use it.",
+  reggaerecord: "ReggaeRecord's search turns away requests that don't come from a web browser (403), so Dubplate can't use it.",
+  "grm-daily": "GRM Daily's site is in maintenance mode and its search returns nothing. Switch it back on if the site returns.",
+}
+
+/** Presets that shipped as supporting only; an update may change that unless the owner did. */
+const SHIPPED_SUPPORTING_ONLY = new Set(["soundclash-hub"])
+
+/** Bumped whenever presets are fixed or retired, so saved copies are brought up to date once. */
+export const SCRAPER_REVISION = 2
 
 /** The presets every install already had before newer ones were added. */
 const ORIGINAL_PRESET_IDS = ["juno", "regime-radio", "wordpress-template"]
@@ -390,17 +381,45 @@ export function cleanGenres(genres: unknown): string[] {
   return out.slice(0, 40)
 }
 
+/** A preset's recipe and description, copied onto a saved copy of it. */
+function presetRecipe(p: ScraperDefinition): Partial<ScraperDefinition> {
+  return { kind: p.kind, searchUrl: p.searchUrl, items: p.items, fields: structuredClone(p.fields), embedded: p.embedded, scene: p.scene, notes: p.notes, verified: p.verified }
+}
+
+/**
+ * A saved copy of a preset brought up to date: a fixed search address or
+ * selectors, or switched off with the reason when its site stopped working.
+ * Only copies nobody edited are touched; everything else of theirs is kept.
+ */
+function upgradeScraper(s: ScraperDefinition): ScraperDefinition {
+  if (!SHIPPED_RECIPES[s.id]?.includes(recipeKey(s))) return s
+  const retired = RETIRED_PRESETS[s.id]
+  if (retired) return { ...s, enabled: false, disabledReason: retired }
+  const preset = SCRAPER_PRESETS.find((p) => p.id === s.id)
+  if (!preset || recipeKey(preset) === recipeKey(s)) return s
+  const next: ScraperDefinition = { ...s, ...presetRecipe(preset) }
+  if (!next.embedded) delete next.embedded
+  if (!!s.supportingOnly === SHIPPED_SUPPORTING_ONLY.has(s.id)) {
+    if (preset.supportingOnly) next.supportingOnly = true
+    else delete next.supportingOnly
+  }
+  // Switched off for failing under the old recipe: the reason no longer holds.
+  if (!s.enabled && s.disabledReason) next.disabledReason = "Its search was fixed in an update - switch it back on to use it."
+  return next
+}
+
 /**
  * Saved scrapers, plus any preset added since this install last saw the list (switched
  * off, like every preset). Presets you deleted stay deleted; presets you kept learn
- * which genres they suit.
+ * which genres they suit, and once per revision the fixes to their recipes.
  */
-function mergeScrapers(stored: ScraperDefinition[] | undefined, seen: string[] | undefined): ScraperDefinition[] {
+function mergeScrapers(stored: ScraperDefinition[] | undefined, seen: string[] | undefined, revision = 0): ScraperDefinition[] {
   if (!stored) return structuredClone(SCRAPER_PRESETS)
   const offered = new Set(seen ?? ORIGINAL_PRESET_IDS)
   const out = stored.map((s) => {
     const preset = SCRAPER_PRESETS.find((p) => p.id === s.id)
-    return preset && !s.genres ? { ...s, genres: preset.genres } : s
+    const kept = preset && !s.genres ? { ...s, genres: preset.genres } : s
+    return revision < SCRAPER_REVISION ? upgradeScraper(kept) : kept
   })
   for (const p of SCRAPER_PRESETS) if (!offered.has(p.id) && !out.some((s) => s.id === p.id)) out.push(structuredClone(p))
   return out
@@ -422,8 +441,9 @@ export function loadSettings(): Settings {
   // Clone the defaults: callers (effectiveSettings) mutate the result.
   const s = deepMerge(structuredClone(DEFAULT_SETTINGS), stored)
   s.llm.providers = mergeProviders(stored.llm?.providers)
-  s.scrapers = mergeScrapers(stored.scrapers, stored.scraperPresetsSeen)
+  s.scrapers = mergeScrapers(stored.scrapers, stored.scraperPresetsSeen, stored.scraperRevision)
   s.scraperPresetsSeen = SCRAPER_PRESETS.map((p) => p.id)
+  s.scraperRevision = SCRAPER_REVISION
   s.sources = deepMerge(structuredClone(DEFAULT_SOURCES), stored.sources ?? {})
   // Installs saved before genres existed still carry the old sound-system note; keep that
   // behaviour, but as picked genres the owner can now see and change.
@@ -557,6 +577,13 @@ function cleanPathMap(map: PathMapping[] | undefined): PathMapping[] {
     .slice(0, 10)
 }
 
+let saves = 0
+
+/** Goes up on every save, so a running job can tell when the settings changed under it. */
+export function settingsSaves(): number {
+  return saves
+}
+
 export function saveSettings(patch: Partial<Settings>): Settings {
   const current = loadSettings()
   const next = deepMerge(current, patch)
@@ -630,5 +657,6 @@ export function saveSettings(patch: Partial<Settings>): Settings {
   getDb()
     .prepare("INSERT INTO settings (key, value_json) VALUES ('app', ?) ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json")
     .run(JSON.stringify(next))
+  saves++
   return next
 }

@@ -219,7 +219,7 @@ describe.skipIf(!findFfmpeg())("the converter", () => {
       ].sort()
     )
     expect(listVideos().every((v) => v.status === "found" && !v.asideFrom && path.dirname(v.path) === dir)).toBe(true)
-  })
+  }, 30_000) // three videos made and converted with ffmpeg: well past the 5 s default on a busy machine
 
   it("leaves a converted file alone on rewind once it's been changed", async () => {
     await video("Clip.avi", ["-c:a", "libmp3lame", "-b:a", "128k"])

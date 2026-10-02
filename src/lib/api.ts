@@ -352,7 +352,7 @@ export const api = {
   mixes: (id: number) => get<MixSuggestion[]>(`/api/tracks/${id}/mixes`),
   audioUrl: (id: number) => `/api/tracks/${id}/audio`,
 
-  process: (s: Selection | null, opts: { interpret?: boolean; scour?: boolean; force?: boolean }) => post<Job>("/api/process", { ...(s ? sel(s) : {}), ...opts }),
+  process: (s: Selection | null, opts: { interpret?: boolean; scour?: boolean; force?: boolean; rescour?: boolean }) => post<Job>("/api/process", { ...(s ? sel(s) : {}), ...opts }),
   rescore: (s?: Selection) => post<Job>("/api/rescore", s ? sel(s) : {}),
   plan: (s?: Selection) => post<PlanItem[]>("/api/plan", s ? sel(s) : {}),
   execute: (s: Selection, dryRun: boolean) => post<Job>("/api/execute", { ...sel(s), dryRun }),

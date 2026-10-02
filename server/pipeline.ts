@@ -18,6 +18,7 @@ import { proposedFilename } from "./executor"
 import type { JobContext } from "./jobs"
 import { mapLimit } from "./jobs"
 import { settingsForLibrary } from "./library-settings"
+import { settingsNow, settingsSaves } from "./settings"
 import { aliasMap, getTrack, identifiedTwin, knownArtists, listCorrections, statusCounts, updateTrack } from "./repo"
 import { acoustidLookup, findFpcalc, fingerprintFile } from "./sources/acoustid"
 import { folderContext } from "./scanner"
@@ -87,10 +88,34 @@ export interface ProcessOptions {
   interpret: boolean
   scour: boolean
   force: boolean
+  /** ask the sources again even where a track already has their answers (a scraper switched on since, say), without redoing the rest */
+  rescour?: boolean
 }
 
-export async function processTracks(ids: number[], settings: Settings, opts: ProcessOptions, ctx: JobContext) {
+/**
+ * The settings a run started with, with the sources as they are now: a source
+ * or scraper switched on, off or fixed mid-run counts from the next track.
+ */
+export function liveSources(start: Settings, changed: (names: string[]) => void): () => Settings {
+  let seen = settingsSaves()
+  let current = start
+  const on = (s: Settings) => new Set([...Object.entries(s.sources).filter(([, c]) => c.enabled).map(([id]) => id), ...s.scrapers.filter((x) => x.enabled).map((x) => `scraper:${x.id}`)])
+  return () => {
+    if (settingsSaves() === seen) return current
+    seen = settingsSaves()
+    const now = settingsNow()
+    const before = on(current)
+    const added = [...on(now)].filter((id) => !before.has(id))
+    current = { ...current, sources: now.sources, scrapers: now.scrapers }
+    if (added.length) changed(added.map((id) => now.scrapers.find((x) => `scraper:${x.id}` === id)?.name ?? id))
+    return current
+  }
+}
+
+export async function processTracks(ids: number[], startSettings: Settings, opts: ProcessOptions, ctx: JobContext) {
   ctx.setTotal(ids.length)
+  const sourcesNow = liveSources(startSettings, (names) => ctx.log("info", `Switched on mid-run, asked from the next track: ${names.join(", ")}`))
+  let settings = startSettings
   const corrections = listCorrections()
   const aliases = aliasMap()
   const known = knownArtists()
@@ -110,6 +135,7 @@ export async function processTracks(ids: number[], settings: Settings, opts: Pro
       ctx.tick(false)
       return
     }
+    settings = sourcesNow()
     try {
       // Rule-based pass is cheap; refresh it so new aliases/corrections apply.
       const heuristic = parseFilename(track.filename, { folders: folderContext(track.relDir), tagArtist: track.tags.artist, knownArtists: known })
@@ -124,7 +150,8 @@ export async function processTracks(ids: number[], settings: Settings, opts: Pro
 
       // The same audio (another copy of the file) is identified once: reuse what it found.
       let reused = false
-      if (!opts.force && !track.candidates) {
+      const scourAgain = opts.force || !!opts.rescour
+      if (!scourAgain && !track.candidates) {
         const twin = identifiedTwin(track)
         if (twin) {
           const shared = { ai: twin.ai, candidates: twin.candidates, fingerprint: twin.fingerprint ?? track.fingerprint, escalation: twin.escalation }
@@ -139,7 +166,7 @@ export async function processTracks(ids: number[], settings: Settings, opts: Pro
       const pre: Partial<Record<string, Candidate[]>> = {}
       let fpStrong: Candidate | undefined
       const acoustidKey = settings.sources.acoustid?.apiKey
-      if (!reused && opts.scour && (opts.force || !track.candidates) && settings.sources.acoustid?.enabled && acoustidKey && findFpcalc()) {
+      if (!reused && opts.scour && (scourAgain || !track.candidates) && settings.sources.acoustid?.enabled && acoustidKey && findFpcalc()) {
         try {
           const fp = track.fingerprint ?? { ...(await fingerprintFile(track.path, ctx.signal)), at: new Date().toISOString() }
           if (!track.fingerprint) {
@@ -181,7 +208,7 @@ export async function processTracks(ids: number[], settings: Settings, opts: Pro
         }
       }
 
-      if (!reused && opts.scour && (opts.force || !track.candidates)) {
+      if (!reused && opts.scour && (scourAgain || !track.candidates)) {
         // A strong fingerprint match names the recording; the other sources check that reading.
         const reading = fpStrong
           ? { artists: fpStrong.artists ?? [fpStrong.artist], featuring: [], title: fpStrong.title, version: track.heuristic?.version }
