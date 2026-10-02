@@ -614,8 +614,9 @@ function ScraperDialog({ value, onClose, onSave }: { value: ScraperDefinition | 
         <DialogHeader>
           <DialogTitle>{value?.id ? "Edit scraper" : "New scraper"}</DialogTitle>
           <DialogDescription>
-            Point Dubplate at any specialist site's search. Use <code>{"{query}"}</code>, <code>{"{artist}"}</code> or <code>{"{title}"}</code> in the URL. For HTML,
-            fields are CSS selectors inside each result (<code>selector@attr</code> reads an attribute); for JSON they're dot paths.
+            Point Dubplate at any specialist site's search. Use <code>{"{query}"}</code>, <code>{"{artist}"}</code>, <code>{"{title}"}</code> or <code>{"{artist1}"}</code>{" "}
+            (the first artist alone, for sites that search one name at a time) in the URL. For HTML, fields are CSS selectors inside each result (<code>selector@attr</code>{" "}
+            reads an attribute); for JSON they're dot paths, or text with paths in braces like <code>{"/events/{slug}"}</code>. An artist path holding a list counts each name.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 sm:grid-cols-2">

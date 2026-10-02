@@ -175,7 +175,7 @@ export const SCRAPER_PRESETS: ScraperDefinition[] = [
     kind: "json",
     searchUrl: "https://discoveryprovider.audius.co/v1/tracks/search?query={query}&app_name=dubplate",
     items: "data",
-    fields: { title: "title", artist: "user.name", year: "release_date", artwork: "artwork.480x480" },
+    fields: { title: "title", artist: "user.name", year: "release_date", url: "https://audius.co{permalink}", artwork: "artwork.480x480" },
     scene: "Independent electronic and hip-hop uploads",
     notes: "Open music platform with a public search API. Uploads are self-published, so it's weighted low. Checked October 2026.",
     verified: true,
@@ -226,6 +226,21 @@ export const SCRAPER_PRESETS: ScraperDefinition[] = [
     verified: true,
     genres: ["UK rap", "Hip-hop"],
     genreWeights: { "UK rap": 1.25, "Hip-hop": 1.1 },
+  },  {
+    id: "soundclash-hub",
+    name: "SoundClash Hub",
+    enabled: false,
+    weight: 0.3,
+    kind: "json",
+    // Its search wants one name: "Killamanjaro" finds the events, "Killamanjaro Stone Love" none.
+    searchUrl: "https://soundclashhub.com/api/events?q={artist1}&tab=past",
+    items: "events",
+    fields: { title: "title", artist: "soundsInvolved", year: "startAt", url: "/events/{slug}" },
+    scene: "Sound clash and hardcore juggling events, with the sounds that played",
+    notes: "Past events from the clash calendar: the event is the recording, so a clash tape matches its listing by the sounds and the year. Its listings start around 2025. Checked October 2026.",
+    verified: true,
+    genres: ["Sound clashes"],
+    genreWeights: { "Sound clashes": 1.3 },
   },
 ]
 
@@ -255,11 +270,13 @@ const RETIRED_PRESETS: Record<string, string> = {
   allmusic: "AllMusic turns away searches that don't come from a web browser (it answers 403), so Dubplate can't use it.",
   reggaerecord: "ReggaeRecord's search turns away requests that don't come from a web browser (403), so Dubplate can't use it.",
   "grm-daily": "GRM Daily's site is in maintenance mode and its search returns nothing. Switch it back on if the site returns.",
-  "soundclash-hub": "SoundClash Hub only lists upcoming events and has no search to ask, so it can't back up a recording.",
 }
 
+/** Presets that shipped as supporting only; an update may change that unless the owner did. */
+const SHIPPED_SUPPORTING_ONLY = new Set(["soundclash-hub"])
+
 /** Bumped whenever presets are fixed or retired, so saved copies are brought up to date once. */
-export const SCRAPER_REVISION = 1
+export const SCRAPER_REVISION = 2
 
 /** The presets every install already had before newer ones were added. */
 const ORIGINAL_PRESET_IDS = ["juno", "regime-radio", "wordpress-template"]
@@ -382,6 +399,10 @@ function upgradeScraper(s: ScraperDefinition): ScraperDefinition {
   if (!preset || recipeKey(preset) === recipeKey(s)) return s
   const next: ScraperDefinition = { ...s, ...presetRecipe(preset) }
   if (!next.embedded) delete next.embedded
+  if (!!s.supportingOnly === SHIPPED_SUPPORTING_ONLY.has(s.id)) {
+    if (preset.supportingOnly) next.supportingOnly = true
+    else delete next.supportingOnly
+  }
   // Switched off for failing under the old recipe: the reason no longer holds.
   if (!s.enabled && s.disabledReason) next.disabledReason = "Its search was fixed in an update - switch it back on to use it."
   return next

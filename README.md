@@ -204,12 +204,14 @@ on low-risk tracks**; everything else waits for a person.
 archives, clash databases and label shops all work, and so do pages that carry
 their results as JSON inside them (a `<script>` tag). The built-in **Test**
 button shows exactly what gets extracted. Presets ship switched off: Regime
-Radio Sound Tapes, Traxsource, Genius, Audius, Hype Machine, Grime Archive and
-BritishHipHop.co.uk answered with real results when checked in October 2026;
-Juno Download is untested. Site markup drifts, so test one before trusting it.
+Radio Sound Tapes, Traxsource, Genius, Audius, Hype Machine, Grime Archive,
+BritishHipHop.co.uk and SoundClash Hub answered with real results when checked
+in October 2026; Juno Download is untested. SoundClash Hub's past events are
+the recordings: a clash or juggling tape matches its event listing by the
+sounds that played and the year (its listings start around 2025). Site markup drifts, so test one before trusting it.
 
-- **Searching**: a scraper asks for the artist and title, and when that finds nothing, for the names alone - site searches want every word to match, so a long clash title often finds nothing where "Killamanjaro Stone Love" finds the tape.
-- **Kept up to date**: when a preset's site changes, an update fixes saved copies nobody edited (and switches off ones whose site can no longer be searched - AllMusic, ReggaeRecord, GRM Daily and SoundClash Hub - with the reason shown). Copies you edited are left alone.
+- **Searching**: a scraper asks for the artist and title, and when that finds nothing, for the names alone - site searches want every word to match, so a long clash title often finds nothing where "Killamanjaro Stone Love" finds the tape. Sites that search one name at a time use `{artist1}` in their address.
+- **Kept up to date**: when a preset's site changes, an update fixes saved copies nobody edited (and switches off ones whose site can no longer be searched - AllMusic, ReggaeRecord and GRM Daily - with the reason shown). Copies you edited are left alone.
 - **Changes count straight away**: a source or scraper switched on during a run is asked from the next track, and re-running up to 10 tracks runs alongside a long run instead of waiting behind it.
 - **Genre weights**: a scraper (or any source) can count more for particular genres in your crates, e.g. Regime Radio ×1.3 for sound clashes.
 - **Supporting only**: a source like an events listing or a forum can back up a match the others found but never confirms one on its own.

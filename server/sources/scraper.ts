@@ -12,8 +12,15 @@ import type { SourceAdapter, SourceQuery } from "./types"
 import { enc, yearOf } from "./types"
 import { readCombined } from "./underground"
 
-export function fillTemplate(tpl: string, q: Pick<SourceQuery, "query" | "artist" | "title">) {
-  return tpl.replace(/\{query\}/g, enc(q.query)).replace(/\{artist\}/g, enc(q.artist)).replace(/\{title\}/g, enc(q.title))
+type ScraperQuery = Pick<SourceQuery, "query" | "artist" | "title"> & { artists?: string[] }
+
+/** {query}, {artist}, {title}, and {artist1}: the first artist alone, for sites that search one name at a time. */
+export function fillTemplate(tpl: string, q: ScraperQuery) {
+  return tpl
+    .replace(/\{query\}/g, enc(q.query))
+    .replace(/\{artist\}/g, enc(q.artist))
+    .replace(/\{artist1\}/g, enc(q.artists?.[0] ?? q.artist))
+    .replace(/\{title\}/g, enc(q.title))
 }
 
 export function getPath(obj: unknown, path: string): unknown {
@@ -30,7 +37,7 @@ function decodeHtml(s: string) {
   return collapseSpaces(cheerio.load(`<p>${s}</p>`)("p").text())
 }
 
-type RawHit = { artist?: string; title?: string; combined?: string; url?: string; year?: string; label?: string; album?: string; artwork?: string }
+type RawHit = { artist?: string; artists?: string[]; title?: string; combined?: string; url?: string; year?: string; label?: string; album?: string; artwork?: string }
 
 function absolute(url: string | undefined, baseUrl: string) {
   if (!url) return undefined
@@ -42,9 +49,10 @@ function absolute(url: string | undefined, baseUrl: string) {
 }
 
 function toCandidate(def: ScraperDefinition, raw: RawHit, baseUrl: string): Candidate | null {
-  let artist = raw.artist ? decodeHtml(raw.artist) : ""
+  let artists = raw.artists?.map(decodeHtml).filter(Boolean)
+  if (!artists?.length) artists = undefined
+  let artist = artists ? artists.join(", ") : raw.artist ? decodeHtml(raw.artist) : ""
   let title = raw.title ? decodeHtml(raw.title) : ""
-  let artists: string[] | undefined
   if ((!artist || !title) && raw.combined) {
     const read = readCombined(decodeHtml(raw.combined))
     artist ||= read.artist
@@ -81,7 +89,33 @@ async function embeddedJson(url: string, selector: string, signal?: AbortSignal)
   }
 }
 
-export async function runScraper(def: ScraperDefinition, q: Pick<SourceQuery, "query" | "artist" | "title">, signal?: AbortSignal): Promise<{ candidates: Candidate[]; itemCount: number }> {
+/**
+ * A JSON field: a dot path ("title.rendered"), or text with paths in braces
+ * ("/events/{slug}") - null when a path in it is missing.
+ */
+export function jsonField(item: unknown, field: string | undefined): string | undefined {
+  if (!field) return undefined
+  if (!field.includes("{")) {
+    const v = getPath(item, field)
+    return v === undefined || v === null || typeof v === "object" ? undefined : String(v)
+  }
+  let missing = false
+  const out = field.replace(/\{([^{}]+)\}/g, (_, path: string) => {
+    const v = getPath(item, path.trim())
+    if (v === undefined || v === null || v === "" || typeof v === "object") missing = true
+    return missing ? "" : String(v)
+  })
+  return missing ? undefined : out
+}
+
+/** A JSON field holding a list of names (a lineup): the names, or null when it's a single value. */
+function jsonList(item: unknown, field: string | undefined): string[] | undefined {
+  if (!field || field.includes("{")) return undefined
+  const v = getPath(item, field)
+  return Array.isArray(v) ? v.filter((x) => typeof x === "string" || typeof x === "number").map(String) : undefined
+}
+
+export async function runScraper(def: ScraperDefinition, q: ScraperQuery, signal?: AbortSignal): Promise<{ candidates: Candidate[]; itemCount: number }> {
   const url = fillTemplate(def.searchUrl, q)
   const out: Candidate[] = []
   let itemCount = 0
@@ -91,14 +125,10 @@ export async function runScraper(def: ScraperDefinition, q: Pick<SourceQuery, "q
     const list = Array.isArray(items) ? items : []
     itemCount = list.length
     for (const item of list.slice(0, 10)) {
-      const pick = (p?: string) => {
-        if (!p) return undefined
-        const v = getPath(item, p)
-        return v === undefined || v === null ? undefined : String(v)
-      }
+      const pick = (p?: string) => jsonField(item, p)
       const c = toCandidate(
         def,
-        { artist: pick(def.fields.artist), title: pick(def.fields.title), combined: pick(def.fields.combined), url: pick(def.fields.url), year: pick(def.fields.year), label: pick(def.fields.label), album: pick(def.fields.album), artwork: pick(def.fields.artwork) },
+        { artist: pick(def.fields.artist), artists: jsonList(item, def.fields.artist), title: pick(def.fields.title), combined: pick(def.fields.combined), url: pick(def.fields.url), year: pick(def.fields.year), label: pick(def.fields.label), album: pick(def.fields.album), artwork: pick(def.fields.artwork) },
         url
       )
       if (c) out.push(c)
@@ -150,7 +180,12 @@ export function scraperAdapter(def: ScraperDefinition): SourceAdapter {
     cacheKey: `scraper:${def.id}@${recipeKey(def)}`,
     unavailable: () => (def.searchUrl.includes("example.com") ? "template - set a real URL first" : null),
     async search(q, { signal }) {
+      const asked = new Set<string>()
       for (const query of scraperQueries(q)) {
+        // An address without {query} ({artist1}, say) is the same for every try: ask once.
+        const url = fillTemplate(def.searchUrl, { ...q, query })
+        if (asked.has(url)) continue
+        asked.add(url)
         const { candidates } = await runScraper(def, { ...q, query }, signal)
         if (candidates.length) return candidates
       }

@@ -10,7 +10,7 @@ import { activeJobs, enqueueJob, resetJobStateForTests } from "../jobs"
 import { liveSources } from "../pipeline"
 import { loadSettings, SCRAPER_PRESETS, SCRAPER_REVISION, saveSettings } from "../settings"
 import { scourTrack } from "../sources"
-import { runScraper, scraperAdapter, scraperQueries } from "../sources/scraper"
+import { jsonField, runScraper, scraperAdapter, scraperQueries } from "../sources/scraper"
 import type { SourceQuery } from "../sources/types"
 import type { Track } from "../../shared/types"
 
@@ -68,6 +68,20 @@ describe("the presets read their sites' real answers", () => {
     expect(r.candidates).toHaveLength(2)
   })
 
+  it("SoundClash Hub: past events, searched one sound at a time, with their lineups", async () => {
+    const urls = mockFetch(() => asset("soundclash-hub.json"))
+    const r = await runScraper(preset("soundclash-hub"), { query: "Killamanjaro Stone Love 1992", artist: "Killamanjaro Stone Love", artists: ["Killamanjaro", "Stone Love"], title: "" })
+    expect(urls[0]).toBe("https://soundclashhub.com/api/events?q=Killamanjaro&tab=past")
+    expect(r.candidates[1]).toMatchObject({
+      title: "Blast Star 30th Anniversary - 3 Sound System Session",
+      artists: ["Blast Star", "Killamanjaro", "Chaps Hitech", "Six Pac Sound"],
+      artist: "Blast Star, Killamanjaro, Chaps Hitech, Six Pac Sound",
+      year: 2026,
+      url: "https://soundclashhub.com/events/blast-star-30th-anniversary-3-sound-system-session",
+    })
+    expect(preset("soundclash-hub").supportingOnly).toBeUndefined()
+  })
+
   it("Regime Radio and BritishHipHop: WordPress post titles", async () => {
     mockFetch(() => [
       { date: "2026-09-04T09:47:11", link: "https://regimeradio.com/2026/09/04/stone-love-champion-sound-vol-2/", title: { rendered: "STONE LOVE CHAMPION SOUND &#8211; VOL.2" } },
@@ -85,13 +99,19 @@ describe("the presets read their sites' real answers", () => {
       response: { sections: [{ type: "song", hits: [{ type: "song", result: { title: "Murderer", url: "https://genius.com/Buju-banton-murderer-lyrics", release_date_components: { year: 1995, month: 7, day: 18 }, primary_artist: { name: "Buju Banton" }, song_art_image_url: "https://images.genius.com/x.png" } }] }] },
     }))
     expect((await runScraper(preset("genius"), query("buju banton murderer"))).candidates[0]).toMatchObject({ artist: "Buju Banton", title: "Murderer", year: 1995, url: "https://genius.com/Buju-banton-murderer-lyrics" })
-    mockFetch(() => ({ data: [{ title: "Love Dem Bad", release_date: "2022-06-09T16:46:55Z", user: { name: "Dj Zent" }, artwork: { "480x480": "https://audius.example/480x480.jpg" } }] }))
-    expect((await runScraper(preset("audius"), query("buju banton"))).candidates[0]).toMatchObject({ artist: "Dj Zent", title: "Love Dem Bad", year: 2022, artwork: "https://audius.example/480x480.jpg" })
+    mockFetch(() => ({ data: [{ title: "Love Dem Bad", release_date: "2022-06-09T16:46:55Z", permalink: "/djzent/dj-zent-buju-banton-love-dem-bad-bootleg-final", user: { name: "Dj Zent" }, artwork: { "480x480": "https://audius.example/480x480.jpg" } }] }))
+    expect((await runScraper(preset("audius"), query("buju banton"))).candidates[0]).toMatchObject({
+      artist: "Dj Zent",
+      title: "Love Dem Bad",
+      year: 2022,
+      url: "https://audius.co/djzent/dj-zent-buju-banton-love-dem-bad-bootleg-final",
+      artwork: "https://audius.example/480x480.jpg",
+    })
   })
 
   it("only ships presets that answered when checked, plus the untested Juno and the template", () => {
     const ids = SCRAPER_PRESETS.map((p) => p.id)
-    for (const gone of ["allmusic", "reggaerecord", "grm-daily", "soundclash-hub"]) expect(ids).not.toContain(gone)
+    for (const gone of ["allmusic", "reggaerecord", "grm-daily"]) expect(ids).not.toContain(gone)
     expect(SCRAPER_PRESETS.filter((p) => !p.verified).map((p) => p.id)).toEqual(["juno", "wordpress-template"])
   })
 })
@@ -118,6 +138,20 @@ describe("searching", () => {
     const hits = await scraperAdapter(preset("regime-radio")).search(q, { cfg: { enabled: true, weight: 0.45 }, settings: loadSettings() })
     expect(urls).toHaveLength(2)
     expect(hits[0]).toMatchObject({ title: expect.stringContaining("Prison Oval"), source: "scraper:regime-radio" })
+  })
+
+  it("asks a one-name address once, however many queries there are", async () => {
+    const urls = mockFetch(() => ({ events: [] }))
+    await scraperAdapter(preset("soundclash-hub")).search(q, { cfg: { enabled: true, weight: 0.3 }, settings: loadSettings() })
+    expect(urls).toEqual(["https://soundclashhub.com/api/events?q=Killamanjaro&tab=past"])
+  })
+
+  it("reads JSON fields as paths, or text with paths in it", () => {
+    const item = { slug: "war-overloaded", sounds: ["Shock Wave", "X-TA-C"], n: 0 }
+    expect(jsonField(item, "/events/{slug}")).toBe("/events/war-overloaded")
+    expect(jsonField(item, "/events/{missing}")).toBeUndefined()
+    expect(jsonField(item, "n")).toBe("0")
+    expect(jsonField(item, "sounds")).toBeUndefined()
   })
 
   it("keeps lookups per recipe, so a fixed scraper asks again", async () => {
@@ -156,6 +190,20 @@ const OLD_GRIME_ARCHIVE: ScraperDefinition = {
   verified: false,
   genres: ["Grime", "Radio rips"],
 }
+const OLD_SOUNDCLASH_HUB: ScraperDefinition = {
+  id: "soundclash-hub",
+  name: "SoundClash Hub",
+  enabled: true,
+  weight: 0.3,
+  kind: "json",
+  searchUrl: "https://soundclashhub.com/wp-json/wp/v2/posts?search={query}&per_page=10&_fields=title,link,date",
+  items: "",
+  fields: { combined: "title.rendered", url: "link", year: "date" },
+  scene: "Sound clash and juggling events",
+  verified: false,
+  supportingOnly: true,
+  genres: ["Sound clashes"],
+}
 const OLD_ALLMUSIC: ScraperDefinition = {
   id: "allmusic",
   name: "AllMusic",
@@ -179,6 +227,7 @@ describe("saved presets", () => {
       // Edited by hand: theirs to keep.
       { ...OLD_GRIME_ARCHIVE, id: "my-grime", name: "My grime", searchUrl: "https://grime.example/?s={query}", enabled: true },
       { ...preset("genius"), enabled: true },
+      { ...OLD_SOUNDCLASH_HUB },
     ])
     const s = loadSettings()
     const grime = s.scrapers.find((x) => x.id === "grime-archive")!
@@ -187,6 +236,10 @@ describe("saved presets", () => {
     expect(s.scrapers.find((x) => x.id === "allmusic")).toMatchObject({ enabled: false, disabledReason: expect.stringContaining("403") })
     expect(s.scrapers.find((x) => x.id === "my-grime")).toMatchObject({ searchUrl: "https://grime.example/?s={query}", enabled: true })
     expect(s.scrapers.find((x) => x.id === "genius")).toMatchObject({ enabled: true, verified: true })
+    // Its events are the recordings: the real search, and no longer only backing others up.
+    const hub = s.scrapers.find((x) => x.id === "soundclash-hub")!
+    expect(hub).toMatchObject({ enabled: true, searchUrl: "https://soundclashhub.com/api/events?q={artist1}&tab=past", items: "events" })
+    expect(hub.supportingOnly).toBeUndefined()
     expect(s.scraperRevision).toBe(SCRAPER_REVISION)
   })
 
@@ -196,6 +249,13 @@ describe("saved presets", () => {
     saveSettings({ scrapers: s.scrapers.map((x) => (x.id === "allmusic" ? { ...x, enabled: true } : x)) })
     expect(loadSettings().scrapers.find((x) => x.id === "allmusic")).toMatchObject({ enabled: true })
     expect(loadSettings().scrapers.find((x) => x.id === "allmusic")?.disabledReason).toBeUndefined()
+  })
+
+  it("keeps an owner's own supporting-only choice", () => {
+    store([{ ...OLD_SOUNDCLASH_HUB, supportingOnly: undefined }, { ...preset("audius"), fields: { title: "title", artist: "user.name", year: "release_date", artwork: "artwork.480x480" }, supportingOnly: true }])
+    const s = loadSettings()
+    expect(s.scrapers.find((x) => x.id === "audius")).toMatchObject({ supportingOnly: true, fields: { url: "https://audius.co{permalink}" } })
+    expect(s.scrapers.find((x) => x.id === "soundclash-hub")?.supportingOnly).toBeUndefined()
   })
 
   it("a new install doesn't get the retired ones at all", () => {
