@@ -207,8 +207,8 @@ describe("sources and settings", () => {
     const stored = { scrapers: [{ ...DEFAULT_SETTINGS.scrapers[0], genres: undefined }] }
     getDb().prepare("INSERT INTO settings (key, value_json) VALUES ('app', ?)").run(JSON.stringify(stored))
     const ids = loadSettings().scrapers.map((s) => s.id)
-    // The old presets the owner deleted stay deleted; the new ones arrive switched off.
-    expect(ids).toEqual(["juno", "traxsource", "genius", "audius", "hypem", "allmusic", "reggaerecord", "grime-archive", "grm-daily", "britishhiphop", "soundclash-hub"])
+    // The old presets the owner deleted stay deleted; the new ones arrive switched off (not the ones since retired).
+    expect(ids).toEqual(["juno", "traxsource", "genius", "audius", "hypem", "grime-archive", "britishhiphop"])
     expect(loadSettings().scrapers[0].genres).toContain("Grime")
     expect(loadSettings().scrapers.every((s) => !s.enabled)).toBe(true)
     // Once saved, deleting a new preset sticks.

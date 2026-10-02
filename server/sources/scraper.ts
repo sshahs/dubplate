@@ -1,11 +1,13 @@
 // User-defined scrapers for specialist sites. Two flavours:
 //  - html: CSS selectors over a search results page
-//  - json: dot-paths over a JSON search API (e.g. WordPress /wp-json)
+//  - json: dot-paths over a JSON search API (e.g. WordPress /wp-json), or over
+//    JSON a page carries inside it (a script tag, as Hype Machine does)
 
 import * as cheerio from "cheerio"
 import type { Candidate, ScraperDefinition } from "../../shared/types"
 import { collapseSpaces } from "../core/normalize"
-import { httpJson, httpText } from "./http"
+import { HttpError, httpJson, httpText } from "./http"
+import { recipeKey } from "./recipe"
 import type { SourceAdapter, SourceQuery } from "./types"
 import { enc, yearOf } from "./types"
 import { readCombined } from "./underground"
@@ -66,12 +68,25 @@ function toCandidate(def: ScraperDefinition, raw: RawHit, baseUrl: string): Cand
   }
 }
 
+/** JSON a web page carries inside one of its elements. */
+async function embeddedJson(url: string, selector: string, signal?: AbortSignal): Promise<unknown> {
+  const { status, body } = await httpText(url, { signal })
+  if (status === 404) return null
+  const el = cheerio.load(body)(selector).first()
+  if (!el.length) throw new HttpError(status, `${new URL(url).host}: nothing on the page matches "${selector}"`)
+  try {
+    return JSON.parse(el.html() ?? "")
+  } catch {
+    throw new HttpError(status, `${new URL(url).host}: "${selector}" doesn't hold JSON`)
+  }
+}
+
 export async function runScraper(def: ScraperDefinition, q: Pick<SourceQuery, "query" | "artist" | "title">, signal?: AbortSignal): Promise<{ candidates: Candidate[]; itemCount: number }> {
   const url = fillTemplate(def.searchUrl, q)
   const out: Candidate[] = []
   let itemCount = 0
   if (def.kind === "json") {
-    const j = await httpJson(url, { signal })
+    const j = def.embedded?.trim() ? await embeddedJson(url, def.embedded.trim(), signal) : await httpJson(url, { signal })
     const items = getPath(j, def.items)
     const list = Array.isArray(items) ? items : []
     itemCount = list.length
@@ -115,15 +130,31 @@ export async function runScraper(def: ScraperDefinition, q: Pick<SourceQuery, "q
   return { candidates: out, itemCount }
 }
 
+/**
+ * What a scraper searches for, in order: the usual query, then just the
+ * artists. Site searches mostly want every word to match, so a long title
+ * ("Prison Oval Spanish Town (Both Sounds) 21-3-1992") finds nothing where the
+ * names alone find the recording.
+ */
+export function scraperQueries(q: Pick<SourceQuery, "query" | "artist" | "artists" | "descriptiveTitle">): string[] {
+  const first = q.descriptiveTitle ? q.artist : q.query
+  const names = collapseSpaces(q.artists.join(" "))
+  return [...new Set([first, names].map((s) => collapseSpaces(s ?? "")).filter(Boolean))]
+}
+
 export function scraperAdapter(def: ScraperDefinition): SourceAdapter {
   return {
     id: `scraper:${def.id}`,
     label: def.name,
+    // Lookups are kept per recipe: a fixed search address or selector asks again.
+    cacheKey: `scraper:${def.id}@${recipeKey(def)}`,
     unavailable: () => (def.searchUrl.includes("example.com") ? "template - set a real URL first" : null),
     async search(q, { signal }) {
-      const query = q.descriptiveTitle ? q.artist : q.query
-      if (!query) return []
-      return (await runScraper(def, { ...q, query }, signal)).candidates
+      for (const query of scraperQueries(q)) {
+        const { candidates } = await runScraper(def, { ...q, query }, signal)
+        if (candidates.length) return candidates
+      }
+      return []
     },
   }
 }

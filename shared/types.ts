@@ -826,6 +826,8 @@ export interface ScraperDefinition {
   /** CSS selector for each result (html) or dot path to the results array (json) */
   items: string
   fields: ScraperField
+  /** json only: the JSON sits inside a web page, in the element this CSS selector finds (e.g. a script tag) */
+  embedded?: string
   scene: string
   notes?: string
   verified?: boolean
@@ -866,6 +868,8 @@ export interface Settings {
   scrapers: ScraperDefinition[]
   /** built-in scraper presets already offered, so ones added in later versions appear once */
   scraperPresetsSeen?: string[]
+  /** the preset fixes already applied to saved scrapers */
+  scraperRevision?: number
   confidence: {
     autoThreshold: number
     reviewThreshold: number

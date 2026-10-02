@@ -201,15 +201,18 @@ on low-risk tracks**; everything else waits for a person.
 
 **🔧 Custom scrapers**: point Dubplate at any specialist site's search page
 (CSS selectors) or JSON API (dot-paths, e.g. WordPress `/wp-json`). Grime
-archives, clash databases and label shops all work. The built-in **Test**
-button shows exactly what gets extracted. Presets for Juno Download,
-Traxsource, Genius, Audius, Hype Machine, AllMusic, Regime Radio Sound Tapes,
-ReggaeRecord, Grime Archive, GRM Daily, BritishHipHop.co.uk and SoundClash Hub
-ship switched off until you've verified them (site markup drifts, so test one
-before trusting it).
+archives, clash databases and label shops all work, and so do pages that carry
+their results as JSON inside them (a `<script>` tag). The built-in **Test**
+button shows exactly what gets extracted. Presets ship switched off: Regime
+Radio Sound Tapes, Traxsource, Genius, Audius, Hype Machine, Grime Archive and
+BritishHipHop.co.uk answered with real results when checked in October 2026;
+Juno Download is untested. Site markup drifts, so test one before trusting it.
 
-- **Genre weights**: a scraper (or any source) can count more for particular genres in your crates, e.g. ReggaeRecord ×1.3 for reggae and dancehall.
-- **Supporting only**: a source like an events listing can back up a match the others found but never confirms one on its own (SoundClash Hub ships this way).
+- **Searching**: a scraper asks for the artist and title, and when that finds nothing, for the names alone - site searches want every word to match, so a long clash title often finds nothing where "Killamanjaro Stone Love" finds the tape.
+- **Kept up to date**: when a preset's site changes, an update fixes saved copies nobody edited (and switches off ones whose site can no longer be searched - AllMusic, ReggaeRecord, GRM Daily and SoundClash Hub - with the reason shown). Copies you edited are left alone.
+- **Changes count straight away**: a source or scraper switched on during a run is asked from the next track, and re-running up to 10 tracks runs alongside a long run instead of waiting behind it.
+- **Genre weights**: a scraper (or any source) can count more for particular genres in your crates, e.g. Regime Radio ×1.3 for sound clashes.
+- **Supporting only**: a source like an events listing or a forum can back up a match the others found but never confirms one on its own.
 - **Health check**: a site that redesigns or puts search behind a login starts answering with "Login" or its home page. After five junk or failed answers in a row the scraper is switched off, with the reason on the Sources and Health pages; switch it back on once its Test works.
 
 **🎯 Tuned to your crates**: each source knows which genres it's strong for

@@ -473,7 +473,7 @@ function ScraperRow({
           )}
           {!sc.enabled && sc.disabledReason ? (
             <Badge variant="outline" className="text-rasta-red font-normal">
-              switched off by the health check
+              {sc.disabledReason.startsWith("Switched off by the health check") ? "switched off by the health check" : sc.disabledReason.startsWith("Its search was fixed") ? "fixed - switch it back on" : "doesn't work"}
             </Badge>
           ) : unavailable ? (
             <Badge variant="outline" className="text-rasta-gold font-normal">
@@ -491,7 +491,7 @@ function ScraperRow({
             )
           )}
         </div>
-        <p className="text-muted-foreground truncate text-xs">
+        <p className="text-muted-foreground truncate text-xs" title={!sc.enabled ? sc.disabledReason : undefined}>
           {!sc.enabled && sc.disabledReason ? (
             <span className="text-rasta-red">{sc.disabledReason}</span>
           ) : (
@@ -642,6 +642,13 @@ function ScraperDialog({ value, onClose, onSave }: { value: ScraperDefinition | 
             <FieldLabel>Search URL</FieldLabel>
             <Input value={d.searchUrl} onChange={(e) => setD({ ...d, searchUrl: e.target.value })} className="font-mono text-xs" />
           </Field>
+          {d.kind === "json" && (
+            <Field className="sm:col-span-2">
+              <FieldLabel>JSON inside the page</FieldLabel>
+              <Input value={d.embedded ?? ""} onChange={(e) => setD({ ...d, embedded: e.target.value || undefined })} className="font-mono text-xs" placeholder="(empty = the address answers with JSON)" />
+              <FieldDescription>When the search page is a web page carrying its results as JSON, the CSS selector of the element holding it, e.g. <code>script#__NEXT_DATA__</code>.</FieldDescription>
+            </Field>
+          )}
           <Field className="sm:col-span-2">
             <FieldLabel>{d.kind === "html" ? "Result selector" : "Results array path"}</FieldLabel>
             <Input value={d.items} onChange={(e) => setD({ ...d, items: e.target.value })} className="font-mono text-xs" placeholder={d.kind === "json" ? "(empty = root array)" : ".search-result"} />
@@ -812,7 +819,7 @@ export default function SourcesPage() {
                 <CardTitle>{group.title}</CardTitle>
                 <CardDescription>
                   {group.description}
-                  {section === "scrapers" && " Presets ship switched off and unverified - test one before trusting it."}
+                  {section === "scrapers" && " Presets ship switched off; ones not marked unverified answered when last checked. Test one before trusting it."}
                 </CardDescription>
                 <CardAction>
                   {section === "scrapers" ? (

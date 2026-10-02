@@ -18,6 +18,7 @@ import { proposedFilename } from "./executor"
 import type { JobContext } from "./jobs"
 import { mapLimit } from "./jobs"
 import { settingsForLibrary } from "./library-settings"
+import { settingsNow, settingsSaves } from "./settings"
 import { aliasMap, getTrack, identifiedTwin, knownArtists, listCorrections, statusCounts, updateTrack } from "./repo"
 import { acoustidLookup, findFpcalc, fingerprintFile } from "./sources/acoustid"
 import { folderContext } from "./scanner"
@@ -89,8 +90,30 @@ export interface ProcessOptions {
   force: boolean
 }
 
-export async function processTracks(ids: number[], settings: Settings, opts: ProcessOptions, ctx: JobContext) {
+/**
+ * The settings a run started with, with the sources as they are now: a source
+ * or scraper switched on, off or fixed mid-run counts from the next track.
+ */
+export function liveSources(start: Settings, changed: (names: string[]) => void): () => Settings {
+  let seen = settingsSaves()
+  let current = start
+  const on = (s: Settings) => new Set([...Object.entries(s.sources).filter(([, c]) => c.enabled).map(([id]) => id), ...s.scrapers.filter((x) => x.enabled).map((x) => `scraper:${x.id}`)])
+  return () => {
+    if (settingsSaves() === seen) return current
+    seen = settingsSaves()
+    const now = settingsNow()
+    const before = on(current)
+    const added = [...on(now)].filter((id) => !before.has(id))
+    current = { ...current, sources: now.sources, scrapers: now.scrapers }
+    if (added.length) changed(added.map((id) => now.scrapers.find((x) => `scraper:${x.id}` === id)?.name ?? id))
+    return current
+  }
+}
+
+export async function processTracks(ids: number[], startSettings: Settings, opts: ProcessOptions, ctx: JobContext) {
   ctx.setTotal(ids.length)
+  const sourcesNow = liveSources(startSettings, (names) => ctx.log("info", `Switched on mid-run, asked from the next track: ${names.join(", ")}`))
+  let settings = startSettings
   const corrections = listCorrections()
   const aliases = aliasMap()
   const known = knownArtists()
@@ -110,6 +133,7 @@ export async function processTracks(ids: number[], settings: Settings, opts: Pro
       ctx.tick(false)
       return
     }
+    settings = sourcesNow()
     try {
       // Rule-based pass is cheap; refresh it so new aliases/corrections apply.
       const heuristic = parseFilename(track.filename, { folders: folderContext(track.relDir), tagArtist: track.tags.artist, knownArtists: known })

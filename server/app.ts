@@ -70,6 +70,10 @@ const AUDIO_MIME: Record<string, string> = {
 
 type Selection = { ids?: number[]; filter?: repo.TrackQuery }
 
+/** Jobs for this few tracks run in the quick lane: a re-run of one track doesn't wait behind a whole library. */
+const QUICK_TRACKS = 10
+const quickFor = (ids: number[]) => ({ quick: ids.length <= QUICK_TRACKS })
+
 function resolveIds(sel: Selection, fallback?: repo.TrackQuery): number[] {
   if (sel.ids?.length) return sel.ids.map(Number).filter(Number.isFinite)
   if (sel.filter) return repo.queryTrackIds(sel.filter)
@@ -579,7 +583,7 @@ export function createApp() {
     const body = await c.req.json<Selection & { force?: boolean }>()
     const ids = resolveIds(body, { status: ["matched", "review", "conflict", "approved"] })
     if (!ids.length) return c.json({ error: "Nothing to look up" }, 400)
-    return c.json(enqueueJob("artwork", `Find artwork for ${ids.length} track${ids.length === 1 ? "" : "s"}`, (ctx) => artworkTracks(ids, settingsNow(), { force: !!body.force }, ctx)))
+    return c.json(enqueueJob("artwork", `Find artwork for ${ids.length} track${ids.length === 1 ? "" : "s"}`, (ctx) => artworkTracks(ids, settingsNow(), { force: !!body.force }, ctx), quickFor(ids)))
   })
 
   // ---- API tokens (a browser session only: tokens can't make tokens) ----
@@ -756,7 +760,7 @@ export function createApp() {
     const body = await c.req.json<Selection & { force?: boolean }>()
     const ids = resolveIds(body, { status: ["matched", "review", "conflict", "approved", "done"] })
     if (!ids.length) return c.json({ error: "Nothing to look up" }, 400)
-    return c.json(enqueueJob("lyrics", `Find lyrics for ${ids.length} track${ids.length === 1 ? "" : "s"}`, (ctx) => lyricsTracks(ids, { force: !!body.force }, ctx)))
+    return c.json(enqueueJob("lyrics", `Find lyrics for ${ids.length} track${ids.length === 1 ? "" : "s"}`, (ctx) => lyricsTracks(ids, { force: !!body.force }, ctx), quickFor(ids)))
   })
 
   /** Look again now (and wait for it), or turn down the words found. */
@@ -784,7 +788,7 @@ export function createApp() {
     const body = await c.req.json<Selection & { force?: boolean }>()
     const ids = resolveIds(body)
     if (!ids.length) return c.json({ error: "Nothing to analyse" }, 400)
-    return c.json(enqueueJob("analyze", `Analyse BPM & key of ${ids.length} track${ids.length === 1 ? "" : "s"}`, (ctx) => analyzeTracks(ids, settingsNow(), { force: !!body.force }, ctx)))
+    return c.json(enqueueJob("analyze", `Analyse BPM & key of ${ids.length} track${ids.length === 1 ? "" : "s"}`, (ctx) => analyzeTracks(ids, settingsNow(), { force: !!body.force }, ctx), quickFor(ids)))
   })
 
   // ---- pipeline ----
@@ -794,13 +798,13 @@ export function createApp() {
     if (!ids.length) return c.json({ error: "Nothing to process" }, 400)
     const opts = { interpret: body.interpret !== false, scour: body.scour !== false, force: !!body.force }
     const what = [opts.interpret && "interpret", opts.scour && "scour", "score"].filter(Boolean).join(" → ")
-    return c.json(enqueueJob("process", `${what} ${ids.length} track${ids.length === 1 ? "" : "s"}`, (ctx) => processTracks(ids, settingsNow(), opts, ctx)))
+    return c.json(enqueueJob("process", `${what} ${ids.length} track${ids.length === 1 ? "" : "s"}`, (ctx) => processTracks(ids, settingsNow(), opts, ctx), quickFor(ids)))
   })
 
   app.post("/api/rescore", async (c) => {
     const body = await c.req.json<Selection>().catch(() => ({}) as Selection)
     const ids = resolveIds(body, { status: ["scoured", "matched", "review", "conflict", "unmatched", "interpreted"] })
-    return c.json(enqueueJob("score", `Re-score ${ids.length} tracks`, (ctx) => rescoreTracks(ids, settingsNow(), ctx)))
+    return c.json(enqueueJob("score", `Re-score ${ids.length} tracks`, (ctx) => rescoreTracks(ids, settingsNow(), ctx), quickFor(ids)))
   })
 
   app.post("/api/plan", async (c) => {
