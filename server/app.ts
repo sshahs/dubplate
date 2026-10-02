@@ -793,10 +793,10 @@ export function createApp() {
 
   // ---- pipeline ----
   app.post("/api/process", async (c) => {
-    const body = await c.req.json<Selection & { interpret?: boolean; scour?: boolean; force?: boolean }>()
+    const body = await c.req.json<Selection & { interpret?: boolean; scour?: boolean; force?: boolean; rescour?: boolean }>()
     const ids = resolveIds(body, { status: ["new", "interpreted", "scoured"] })
     if (!ids.length) return c.json({ error: "Nothing to process" }, 400)
-    const opts = { interpret: body.interpret !== false, scour: body.scour !== false, force: !!body.force }
+    const opts = { interpret: body.interpret !== false, scour: body.scour !== false, force: !!body.force, rescour: !!body.rescour }
     const what = [opts.interpret && "interpret", opts.scour && "scour", "score"].filter(Boolean).join(" → ")
     return c.json(enqueueJob("process", `${what} ${ids.length} track${ids.length === 1 ? "" : "s"}`, (ctx) => processTracks(ids, settingsNow(), opts, ctx), quickFor(ids)))
   })

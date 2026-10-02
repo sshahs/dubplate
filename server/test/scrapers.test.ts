@@ -2,17 +2,21 @@
 // live pages and API replies, October 2026), saved presets brought up to date,
 // and scrapers switched on mid-run counting from the next track.
 import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ScraperDefinition } from "../../shared/types"
 import { openDb, setDb } from "../db"
-import { activeJobs, enqueueJob, resetJobStateForTests } from "../jobs"
-import { liveSources } from "../pipeline"
+import { activeJobs, enqueueJob, type JobContext, resetJobStateForTests } from "../jobs"
+import { liveSources, processTracks } from "../pipeline"
+import * as repo from "../repo"
+import { scanLibrary } from "../scanner"
 import { loadSettings, SCRAPER_PRESETS, SCRAPER_REVISION, saveSettings } from "../settings"
 import { scourTrack } from "../sources"
 import { jsonField, runScraper, scraperAdapter, scraperQueries } from "../sources/scraper"
 import type { SourceQuery } from "../sources/types"
 import type { Track } from "../../shared/types"
+import { writeMp3 } from "./fixtures"
 
 const asset = (name: string) => fs.readFileSync(path.join(import.meta.dirname, "assets", "scrapers", name), "utf8")
 const preset = (id: string) => structuredClone(SCRAPER_PRESETS.find((p) => p.id === id)!)
@@ -260,6 +264,42 @@ describe("saved presets", () => {
 
   it("a new install doesn't get the retired ones at all", () => {
     expect(loadSettings().scrapers.map((s) => s.id)).not.toContain("allmusic")
+  })
+})
+
+describe("re-running chosen tracks", () => {
+  function ctx(): JobContext {
+    const job = { id: "t", kind: "process", status: "running", label: "t", total: 0, done: 0, failed: 0, message: null, createdAt: "", startedAt: null, finishedAt: null } as JobContext["job"]
+    const noop = () => {}
+    return { job, signal: new AbortController().signal, setTotal: noop, tick: noop, message: noop, log: noop, tracksChanged: noop, filesChanged: noop, report: noop }
+  }
+
+  it("asks the sources again for tracks that already have their answers, without the AI", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dubplate-rescour-"))
+    try {
+      writeMp3(path.join(dir, "Killamanjaro vs Blast Star - Linstead 2026.mp3"))
+      const lib = repo.addLibrary(dir, "Clashes")
+      const scan = ctx()
+      await scanLibrary(lib, loadSettings(), scan)
+      const [id] = repo.queryTrackIds({})
+      // Identified before SoundClash Hub was switched on: one Mixcloud hit.
+      repo.updateTrack(id, { candidates: [{ source: "mixcloud", sourceLabel: "Mixcloud", artist: "Killamanjaro", title: "Linstead juggling" }], status: "review" })
+      const s = loadSettings()
+      for (const k of Object.keys(s.sources)) s.sources[k].enabled = false
+      s.scrapers = [{ ...preset("soundclash-hub"), enabled: true }]
+      mockFetch(() => asset("soundclash-hub.json"))
+
+      // A plain run leaves a track that already has answers alone.
+      await processTracks([id], s, { interpret: false, scour: true, force: false }, ctx())
+      expect(repo.getTrack(id)!.candidates!.map((c) => c.sourceLabel)).toEqual(["Mixcloud"])
+
+      await processTracks([id], s, { interpret: false, scour: true, force: false, rescour: true }, ctx())
+      const t = repo.getTrack(id)!
+      expect(t.candidates!.map((c) => c.sourceLabel)).toEqual(["SoundClash Hub", "SoundClash Hub"])
+      expect(t.ai).toBeFalsy()
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

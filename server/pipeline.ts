@@ -88,6 +88,8 @@ export interface ProcessOptions {
   interpret: boolean
   scour: boolean
   force: boolean
+  /** ask the sources again even where a track already has their answers (a scraper switched on since, say), without redoing the rest */
+  rescour?: boolean
 }
 
 /**
@@ -148,7 +150,8 @@ export async function processTracks(ids: number[], startSettings: Settings, opts
 
       // The same audio (another copy of the file) is identified once: reuse what it found.
       let reused = false
-      if (!opts.force && !track.candidates) {
+      const scourAgain = opts.force || !!opts.rescour
+      if (!scourAgain && !track.candidates) {
         const twin = identifiedTwin(track)
         if (twin) {
           const shared = { ai: twin.ai, candidates: twin.candidates, fingerprint: twin.fingerprint ?? track.fingerprint, escalation: twin.escalation }
@@ -163,7 +166,7 @@ export async function processTracks(ids: number[], startSettings: Settings, opts
       const pre: Partial<Record<string, Candidate[]>> = {}
       let fpStrong: Candidate | undefined
       const acoustidKey = settings.sources.acoustid?.apiKey
-      if (!reused && opts.scour && (opts.force || !track.candidates) && settings.sources.acoustid?.enabled && acoustidKey && findFpcalc()) {
+      if (!reused && opts.scour && (scourAgain || !track.candidates) && settings.sources.acoustid?.enabled && acoustidKey && findFpcalc()) {
         try {
           const fp = track.fingerprint ?? { ...(await fingerprintFile(track.path, ctx.signal)), at: new Date().toISOString() }
           if (!track.fingerprint) {
@@ -205,7 +208,7 @@ export async function processTracks(ids: number[], startSettings: Settings, opts
         }
       }
 
-      if (!reused && opts.scour && (opts.force || !track.candidates)) {
+      if (!reused && opts.scour && (scourAgain || !track.candidates)) {
         // A strong fingerprint match names the recording; the other sources check that reading.
         const reading = fpStrong
           ? { artists: fpStrong.artists ?? [fpStrong.artist], featuring: [], title: fpStrong.title, version: track.heuristic?.version }

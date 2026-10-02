@@ -293,7 +293,7 @@ export default function TracksPage() {
   }
 
   const process = useMutation({
-    mutationFn: (opts: { interpret?: boolean; scour?: boolean; force?: boolean }) => api.process(selection, opts),
+    mutationFn: (opts: { interpret?: boolean; scour?: boolean; force?: boolean; rescour?: boolean }) => api.process(selection, opts),
     onSuccess: (j) => {
       toast(j.label)
       clearSelection()
@@ -548,9 +548,9 @@ export default function TracksPage() {
                     <DropdownMenuLabel>Pipeline</DropdownMenuLabel>
                     <DropdownMenuItem onClick={() => process.mutate({ force: true })}>
                       <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} />
-                      Re-identify (ignore cache of results)
+                      Re-identify from scratch (AI and sources)
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => process.mutate({ interpret: false })}>Scour sources only (no AI)</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => process.mutate({ interpret: false, rescour: true })}>Ask the sources again (no AI)</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => process.mutate({ scour: false })}>AI interpret only</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => api.rescore(selection!).then((j) => toast(j.label))}>Re-score (offline)</DropdownMenuItem>
                   </DropdownMenuGroup>
