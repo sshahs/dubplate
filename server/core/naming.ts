@@ -59,6 +59,7 @@ export function renderTemplate(template: string, meta: FinalMeta, naming: Naming
     year: meta.year ? String(meta.year) : "",
     album: meta.album ?? "",
     label: meta.label ?? "",
+    riddim: meta.riddim ?? "",
     featuring: meta.featuring.join(" & "),
     genre: meta.genre ?? "",
   }
@@ -82,6 +83,7 @@ export function decisionToFinal(d: Decision): FinalMeta {
     year: d.year,
     album: d.album,
     label: d.label,
+    riddim: d.riddim,
     genre: d.genre,
   }
 }
@@ -111,8 +113,16 @@ export interface TagExtras {
 }
 
 /**
- * Tags to write. Artist and title are always set; album/year/genre/label only
- * fill gaps. BPM, key and cover come from `extras` when there's something to say.
+ * Fields only ever written into an empty tag. When cutting they're checked
+ * against the file itself: a track scanned before Dubplate read a field (the
+ * riddim, Grouping) doesn't know the file already has one.
+ */
+export const FILL_ONLY: ReadonlySet<keyof ExistingTags> = new Set(["album", "year", "label", "riddim", "grouping"])
+
+/**
+ * Tags to write. Artist and title are always set; album/year/genre/label and
+ * the riddim only fill gaps. BPM, key and cover come from `extras` when there's
+ * something to say.
  */
 export function tagsFor(meta: FinalMeta, current: ExistingTags, naming: Naming, extras: TagExtras = {}): ExistingTags {
   const out: ExistingTags = {
@@ -127,6 +137,9 @@ export function tagsFor(meta: FinalMeta, current: ExistingTags, naming: Naming, 
     if (g && !same && (extras.canonicalGenre.overwrite || !current.genre?.length)) out.genre = [g]
   } else if (!current.genre?.length && meta.genre) out.genre = [meta.genre]
   if (!current.label && meta.label) out.label = meta.label
+  if (!current.riddim && meta.riddim) out.riddim = meta.riddim
+  // Grouping is where DJ software shows it; only an empty one is used.
+  if (naming.riddimGrouping && meta.riddim && !current.grouping) out.grouping = meta.riddim
   // Where it sits on its record, only where the file doesn't say already.
   const place = extras.placement
   if (place?.track && !current.track) out.track = place.track

@@ -35,8 +35,8 @@ export function extFor(t: Pick<Track, "ext" | "fileCheck">, settings: Settings):
 }
 
 /**
- * The values a folder template can use. Album, year, genre and label follow the
- * file's own tags first, just as tagging leaves them.
+ * The values a folder template can use. Album, year, genre, label and riddim
+ * follow the file's own tags first, just as tagging leaves them.
  */
 export function folderValues(t: Track, meta: FinalMeta, settings: Settings): FolderValues {
   const artist = formatArtist(meta, settings.naming, false)
@@ -54,6 +54,7 @@ export function folderValues(t: Track, meta: FinalMeta, settings: Settings): Fol
     year: year ? String(year) : "",
     decade: decadeOf(year),
     label: t.tags.label || meta.label || "",
+    riddim: t.tags.riddim || meta.riddim || "",
     genre,
     region: canonical?.region ?? "",
     version: meta.version ?? "",

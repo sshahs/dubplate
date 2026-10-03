@@ -401,6 +401,7 @@ export const DEFAULT_SETTINGS: Settings = {
     renameFiles: true,
     writeTags: true,
     tagComment: false,
+    riddimGrouping: true,
     writeIds: true,
     fixExtensions: true,
   },

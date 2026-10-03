@@ -12,6 +12,7 @@ export interface MetaDraft {
   year: string
   album: string
   label: string
+  riddim: string
   genre: string
 }
 
@@ -25,6 +26,7 @@ export function toDraft(m: Partial<FinalMeta> | null | undefined): MetaDraft {
     year: m?.year ? String(m.year) : "",
     album: m?.album ?? "",
     label: m?.label ?? "",
+    riddim: m?.riddim ?? "",
     genre: m?.genre ?? "",
   }
 }
@@ -46,6 +48,7 @@ export function fromDraft(d: MetaDraft): FinalMeta {
     year: d.year ? Number(d.year) : undefined,
     album: d.album.trim() || undefined,
     label: d.label.trim() || undefined,
+    riddim: d.riddim.trim() || undefined,
     genre: d.genre.trim() || undefined,
   }
 }
@@ -87,7 +90,7 @@ export function MetaEditor({ value, onChange }: { value: MetaDraft; onChange: (d
         <FieldLabel htmlFor="md-title">Title</FieldLabel>
         <Input id="md-title" value={value.title} onChange={(e) => set("title", e.target.value)} placeholder="Murderer" />
       </Field>
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-3">
         <Field>
           <FieldLabel htmlFor="md-feat">Featuring</FieldLabel>
           <Input id="md-feat" value={value.featuring} onChange={(e) => set("featuring", e.target.value)} placeholder="optional" />
@@ -95,6 +98,10 @@ export function MetaEditor({ value, onChange }: { value: MetaDraft; onChange: (d
         <Field>
           <FieldLabel htmlFor="md-version">Version</FieldLabel>
           <Input id="md-version" value={value.version} onChange={(e) => set("version", e.target.value)} placeholder="Dubplate, Special, VIP…" />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="md-riddim">Riddim</FieldLabel>
+          <Input id="md-riddim" value={value.riddim} onChange={(e) => set("riddim", e.target.value)} placeholder="Stalag, Sleng Teng…" />
         </Field>
       </div>
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">

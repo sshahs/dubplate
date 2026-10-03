@@ -15,7 +15,7 @@ import { getDb } from "./db"
 import type { JobContext } from "./jobs"
 import { mapLimit } from "./jobs"
 import { getTrack, knownArtists, touchLibraryScan, updateTrack } from "./repo"
-import { asfDamage } from "./tagger"
+import { asfDamage, RIDDIM } from "./tagger"
 import { recordVideos } from "./videos"
 import type { Track } from "../shared/types"
 
@@ -85,6 +85,15 @@ function firstString(v: unknown): string | undefined {
   return undefined
 }
 
+/** A custom text field ("RIDDIM") from whichever kind of tag the file has: TXXX, Vorbis, iTunes, APE or WMA. */
+function customText(meta: IAudioMetadata, name: string): string | undefined {
+  const ids = new Set([name, `TXXX:${name}`, `----:com.apple.iTunes:${name}`].map((s) => s.toUpperCase()))
+  for (const tags of Object.values(meta.native)) {
+    for (const t of tags) if (ids.has(t.id.toUpperCase())) return firstString(t.value)
+  }
+  return undefined
+}
+
 /** A file's lyrics tag, as one text (timed lyrics as LRC lines). */
 function lyricsText(c: IAudioMetadata["common"]): string | undefined {
   for (const l of c.lyrics ?? []) {
@@ -124,6 +133,8 @@ export async function readAudio(file: string) {
       disc: c.disk?.no ?? undefined,
       discTotal: c.disk?.of ?? undefined,
       label: firstString(c.label),
+      riddim: customText(meta, RIDDIM),
+      grouping: c.grouping?.trim() || undefined,
       comment: firstString(c.comment),
       bpm: c.bpm && c.bpm > 0 ? Math.round(c.bpm * 10) / 10 : undefined,
       // music-metadata doesn't map a WMA's key; it's under its native name.

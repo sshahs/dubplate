@@ -215,8 +215,8 @@ on low-risk tracks**; everything else waits for a person.
 | junglist.co.uk | – | Rare jungle and drum & bass tracks, dubplates and whitelabels as the community names them. |
 
 A tune a riddim database knows gets its riddim: the track page shows "On the
-Stalag riddim" under the new name, and each source hit lists the riddim it
-gave. Not added, because there's nothing a program can read: My Soundtapes
+Stalag riddim" under the new name, each source hit lists the riddim it gave,
+and cutting writes it to the file (see Naming & tagging). Not added, because there's nothing a program can read: My Soundtapes
 (a paid app behind a login), Original Kool Archives (a 24/7 stream with no
 list of shows), Jah Troopers' audio archive (one release, on YouTube) and
 RollDaBeats (the discography has closed; only the forum is left).
@@ -420,7 +420,7 @@ secrets, and keys entered in the UI take precedence.
 
 The default template is `{artist} - {title}`. The available tokens are
 `{artist}`, `{title}`, `{song}` (the title without the version),
-`{version}`, `{year}`, `{album}`, `{label}`, `{featuring}`, `{genre}`,
+`{version}`, `{year}`, `{album}`, `{label}`, `{riddim}`, `{featuring}`, `{genre}`,
 `{position}` (a vinyl position like `B2`, or the track number as `05`),
 `{track}` and `{disc}` (only on releases with more than one disc). A token
 with no value leaves no gap, so `{position} - {artist} - {title}` is just
@@ -433,11 +433,20 @@ with no value leaves no gap, so `{position} - {artist} - {title}` is just
 Tags are written with
 [node-taglib-sharp](https://github.com/benrr101/node-taglib-sharp), so MP3,
 FLAC, M4A, OGG/Opus, WAV, AIFF, WMA and APE are all supported. Artist and
-title are always written. Album, year, genre and label only fill fields that
-are empty. BPM and key are written too (key as `Am` or Camelot `8A`, your
+title are always written. Album, year, genre, label and riddim only fill
+fields that are empty. BPM and key are written too (key as `Am` or Camelot `8A`, your
 choice), and a found cover becomes the front cover - other pictures in the
 file are left alone, and a file's existing cover is only replaced if you
 allow it.
+
+No tag standard has a riddim, so it goes in a field of its own called
+`RIDDIM` (a `TXXX` frame in MP3, a Vorbis comment in FLAC and Ogg, an iTunes
+item in M4A), which Mp3tag, foobar2000 and MusicBee show and search. It also
+goes in **Grouping** where the file's Grouping is empty, because that's the
+column Serato and Apple Music show; switch that off under **Settings → Naming
+& tags**. The riddim comes from the riddim databases (Riddimguide, Riddim-ID,
+Reggae Fever, Riddims World) or from the AI when the file name says it, and
+you can set it on the track page or for many tracks at once with bulk edit.
 
 WMA files are tagged too, with their label and key under the names WMA
 players use (`WM/Publisher`, `WM/InitialKey`). The library Dubplate tags with
@@ -474,10 +483,11 @@ A folder template decides where a track lives inside its library.
 | `[{region}]/{genre}` | `UK/UK Grime/`, `House Genres/` (with canonical genres) |
 | `[{region}]/{genre}/{artist}` | `UK/UK Grime/Wiley/` |
 | `{label}/{year}` | `Soul Circle/2014/` |
+| `{genre}/[{riddim}]` | `Dancehall/Stalag/` (a tune on no known riddim stays in `Dancehall/`) |
 | `[{bpmrange} BPM]/[{camelot}]` | `70-79 BPM/8A/` |
 
 Tokens: `{artist}` (main artists), `{firstartist}`, `{albumartist}`,
-`{album}`, `{disc}` (only on releases with more than one disc), `{year}`, `{decade}` (`1990s`), `{label}`, `{genre}` (with canonical genres, its folder name), `{region}` (the folder above it), `{version}`,
+`{album}`, `{disc}` (only on releases with more than one disc), `{year}`, `{decade}` (`1990s`), `{label}`, `{riddim}`, `{genre}` (with canonical genres, its folder name), `{region}` (the folder above it), `{version}`,
 `{initial}` (A-Z, `0-9` or `#`, ignoring a leading "The"), `{bpm}`,
 `{bpmrange}` (`140-149`), `{key}`, `{camelot}` and `{format}` (`FLAC`).
 

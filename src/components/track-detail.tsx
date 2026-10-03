@@ -43,6 +43,7 @@ function candidateToMeta(c: Candidate, base: MetaDraft): MetaDraft {
     album: c.album ?? base.album,
     year: c.year ? String(c.year) : base.year,
     label: c.label ?? base.label,
+    riddim: c.riddim ?? base.riddim,
   }
 }
 

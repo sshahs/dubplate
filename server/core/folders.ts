@@ -15,6 +15,7 @@ export const FOLDER_TOKENS = {
   year: "Year",
   decade: "Decade, e.g. 1990s",
   label: "Label",
+  riddim: "Riddim, e.g. Stalag",
   genre: "Genre",
   region: "Region folder of the genre, e.g. UK (canonical genres)",
   version: "Version, e.g. Dubplate",
@@ -40,6 +41,7 @@ export const FOLDER_PRESETS: { id: string; label: string; template: string; abou
   { id: "region-genre-flat", label: "Region / Genre", template: "[{region}]/{genre}", about: "UK/UK Grime, Reggae… one folder per canonical genre." },
   { id: "region-genre", label: "Region / Genre / Artist", template: "[{region}]/{genre}/{artist}", about: "UK/UK Grime/Wiley, Reggae/Chronixx… from your canonical genres." },
   { id: "label", label: "Label / Year", template: "{label}/{year}", about: "For 7-inch and 12-inch collectors." },
+  { id: "genre-riddim", label: "Genre / Riddim", template: "{genre}/[{riddim}]", about: "Dancehall/Stalag, Dancehall/Sleng Teng… a tune on no known riddim stays in the genre's folder." },
   { id: "decade", label: "Decade / Genre", template: "{decade}/{genre}", about: "Selecting by era." },
   { id: "dj", label: "BPM / Key", template: "[{bpmrange} BPM]/[{camelot}]", about: "Mixing crates by tempo and key." },
 ]
@@ -54,6 +56,7 @@ const UNKNOWN: Record<FolderToken, string> = {
   year: "Unknown Year",
   decade: "Unknown Decade",
   label: "Unknown Label",
+  riddim: "Unknown Riddim",
   genre: "Unknown Genre",
   region: "Other",
   version: "Originals",
