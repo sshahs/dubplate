@@ -10,13 +10,14 @@ import { httpJson, httpText } from "./http"
 import { enc, yearOf, type SourceAdapter } from "./types"
 
 /** Split a free-form "Artist - Title (Official Video)" string with the filename parser. */
-export function readCombined(text: string): { artist: string; artists: string[]; title: string; year?: number } {
+export function readCombined(text: string): { artist: string; artists: string[]; title: string; year?: number; riddim?: string } {
   // A dummy extension stops the parser from treating e.g. "Vol.2" as one.
   const p = parseFilename(`${text}.txt`)
   const artist = p.artists.join(p.relation === "vs" ? " vs " : " & ")
   // "Killamanjaro vs Stone Love 1994": a clash, named by its sounds and the year.
   const title = p.title || (p.relation === "vs" ? "Clash" : "")
-  return { artist, artists: p.artists, title: title + (p.version && !/^(live|dubplate|special)$/i.test(p.version) ? ` (${p.version})` : ""), year: p.year }
+  // "Seasons Riddim - Gyptian - Is There A Place": the riddim comes off the name, and stays known.
+  return { artist, artists: p.artists, title: title + (p.version && !/^(live|dubplate|special)$/i.test(p.version) ? ` (${p.version})` : ""), year: p.year, ...(p.riddim ? { riddim: p.riddim } : {}) }
 }
 
 // ---------- Bandcamp ----------
@@ -146,6 +147,7 @@ export const mixcloud: SourceAdapter = {
         artist: read.artist,
         artists: read.artists,
         title: read.title,
+        riddim: read.riddim,
         duration: c.audio_length,
         year: yearOf(c.created_time),
         url: c.url,
@@ -174,13 +176,14 @@ export const youtube: SourceAdapter = {
         const title = cheerio.load(i.snippet.title).text()
         // Auto-generated "Artist - Topic" channels carry clean catalogue data.
         const topic = i.snippet.channelTitle.match(/^(.+?) - Topic$/)
-        const read = topic ? { artist: topic[1], artists: [topic[1]], title } : readCombined(title)
+        const read: { artist: string; artists: string[]; title: string; riddim?: string } = topic ? { artist: topic[1], artists: [topic[1]], title } : readCombined(title)
         return {
           source: "youtube" as const,
           sourceLabel: "YouTube",
           artist: read.artist,
           artists: read.artists,
           title: read.title,
+          riddim: read.riddim,
           year: yearOf(i.snippet.publishedAt),
           url: `https://www.youtube.com/watch?v=${i.id.videoId}`,
           externalId: i.id.videoId,

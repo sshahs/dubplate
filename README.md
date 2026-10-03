@@ -92,9 +92,10 @@ flowchart TB
 | Stage | What happens |
 | --- | --- |
 | **📂 Scanner** | Walks your folders and reads existing tags (including BPM, key and cover art), duration and a content fingerprint into a SQLite staging database. **It never opens a music file for writing.** It follows files you've moved and flags exact duplicates, and keeps each file's name, place and tags as first found, never changed afterwards. Watched folders are picked up as files land. |
-| **⚡ Rule-based parser** | A fast first pass. It strips rip-site names, bitrates, *(Official Video)*, and track and vinyl-side numbers. It splits `Artist - Title`, `Title by Artist` and `A vs B` clashes, and spots hints like *dubplate*, *special*, *live '93*, *riddim* and *VIP*. |
+| **⚡ Rule-based parser** | A fast first pass. It strips rip-site names, bitrates, *(Official Video)*, and track and vinyl-side numbers. It splits `Artist - Title`, `Title by Artist` and `A vs B` clashes, and spots hints like *dubplate*, *special*, *live '93* and *VIP*. A riddim is never the artist: `Seasons Riddim - Gyptian - Is There A Place`, `Title (Seasons Riddim)`, a `Seasons Riddim (2009)` or `Riddims/Seasons` folder and a riddim album tag all give the riddim. |
 | **🧠 AI interpreter** | Reads the filename, folder, tags and first-pass result, and returns structured JSON: artists, `&` or `vs`, title, version, year, riddim, event, alternatives and search queries. Your approvals are shown to it as examples, so it learns your style, and a written rulebook keeps it from inventing what the sources didn't say. An optional bigger model gives a **second opinion** on the uncertain ones. |
 | **🔎 Metadata scourer** | With AcoustID set up, the audio fingerprint goes first: a sure fingerprint match skips the AI altogether. Then it asks every enabled source at once, with polite per-host rate limits, a 7-day response cache and a two-week cache of lookups by artist, title, version and length (so a renamed copy doesn't ask again). |
+| **🧹 Field checks** | Every reading, AI answer, source hit, decision and edit goes through the same checks, so each field holds only its own thing (see **Field checks** below). What's plainly in the wrong place is put right; what isn't keeps the track out of auto-approve and hands-off. |
 | **📊 Confidence engine** | Groups the hits by recording, then weighs consensus across independent sources, agreement between readings, duration, fingerprint matches and conflicts. The result is an explainable 0–100 score, plus which **release** the track belongs to (the artist's own album, EP or single before a compilation or DJ mix) and a separate **risk** rating for letting automation change the file. |
 | **🎨 Artwork, tempo & key** | Fetches a cover from the sources that confirmed the track (Cover Art Archive, Discogs, Bandcamp, Apple Music, Deezer…), and listens to the audio for BPM and musical key. |
 | **✂️ Verify & execute** | Bulk-approve the matches, review the rest, then rename and tag in place, writing MusicBrainz and Discogs IDs where the sources found them. Every operation is logged so any batch can be put back. |
@@ -414,6 +415,39 @@ secrets, and keys entered in the UI take precedence.
 | `FFMPEG_PATH`, `FFPROBE_PATH` | `ffmpeg`, `ffprobe` on `PATH` | For the video converter and previews; `ffprobe` is also looked for next to `FFMPEG_PATH` |
 | `TZ` | `UTC` | The clock the nightly scan runs by, e.g. `Europe/London` |
 | `DUBPLATE_LOG_LEVEL` | `info` | How much of the log the server also prints (what `docker logs` shows): `detail`, `info`, `warn`, `error` or `off`. The Console keeps everything either way. |
+
+</details>
+
+<details>
+<summary><b>Field checks</b></summary>
+
+Whoever fills a field in (the filename parser, the AI, a source, the decision or
+you in the editor), it's checked before it's used, and checked again on the way
+into the file:
+
+| Found | Put right |
+| --- | --- |
+| `Seasons Riddim` as the artist, in the title, version or in brackets | Moved to **Riddim** (the album `Seasons Riddim` gives the riddim too) |
+| The title inside the artist: `Bounty Killer & Baby Cham - Another level` | Artist `Bounty Killer & Baby Cham`; with no title, the rest becomes the title |
+| The artist inside the title: `Tenor Saw - Ring The Alarm` as the title | Title `Ring The Alarm` |
+| `feat. Max Romeo` inside the artist or title, or a guest named twice | One guest, in **Featuring**: never `feat. Max Romeo feat. Max Romeo` |
+| A genre or placeholder as the album or label: `reggae`, `Reggae / Dancehall`, `Unknown Album`, `1999`, a website | Left empty, so the real one fills it; in a file, it's replaced or cleared when cutting |
+| `Other`, `(17)` as the genre | Left empty |
+| `(Official Video)`, `[HD]`, `320kbps`, `.mp3`, a site name or a track number in a title or artist | Taken out |
+| `Unknown Artist`, `Various Artists`, `VA` as an artist | Taken out |
+| A year before 1900 or in the future | Left empty |
+
+What can't be put right (no artist, `Track 01` as the title, an artist that
+looks like an artist and a title together, the same text as artist and title)
+is shown on the track. It keeps the track out of auto-approve and hands-off, and
+a missing or mixed-up artist or title stops it being cut. The editor runs the
+same checks as you type: **Put right now** applies them before you save.
+
+After upgrading, every track is checked once in the background. Tracks
+whose artist or title changes are asked about again (no AI), approved ones
+have their details corrected, and files already cut with details in the
+wrong place go back to **Cut & Tag** to be renamed and tagged again. The
+Console lists them all.
 
 </details>
 
@@ -1018,6 +1052,7 @@ crates whose names aren't taken.
 - 💿 **Discogs collection**: the records you own count extra when identifying.
 - 💸 **AI usage & cost**: tokens and estimated spend per day, provider and job, with a monthly budget.
 - 🩺 **Health page**: every dependency checked, with a fix for each problem.
+- 🧹 **Field checks**: a riddim is never the artist, a title never sits in the artist, a genre is never the album, a guest is named once. Checked everywhere, live in the editor, and once over your whole library after upgrading.
 - 🖥️ **Console**: every line Dubplate logs, kept 14 days, live, filtered by level, part, job, track or words, with each request, source answer, AI call, decision and file change in detail. It also opens in its own window and downloads as text.
 - 📲 **Install it on a phone**: add Dubplate to the home screen from the browser (needs HTTPS, or localhost) and it opens like an app.
 - 📤 **Upload from your phone**: send files into a library from the browser, or share them to the installed app from other apps.

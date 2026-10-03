@@ -16,6 +16,7 @@ import type {
   TrackReading,
   VersionCheck,
 } from "../../shared/types"
+import { checkFields, needsALook } from "../../shared/fields"
 import { artistSimilarity, collapseSpaces, normArtist, similarity, splitArtists, titleSimilarity } from "./normalize"
 import { KIND_LABEL, pickRelease, releasesOf } from "./releases"
 import { withoutDiscFolders } from "./discs"
@@ -98,7 +99,9 @@ function hypotheses(input: ScoreInput): Hypothesis[] {
   }
   if (tags.title && tags.artist && !GENERIC_TAG_TITLE.test(tags.title)) {
     const split = tags.artists?.length ? tags.artists : splitArtists(tags.artist).artists
-    out.push({ artists: split, title: tags.title, from: "tags", descriptive: false })
+    // Tags written as "Artist - Title" in the artist, a riddim as the artist…: read as they should have been.
+    const { fields } = checkFields({ artists: split, title: tags.title }, { names: false })
+    out.push({ artists: fields.artists, title: fields.title, from: "tags", descriptive: false })
   }
   return out
 }
@@ -320,10 +323,16 @@ export function scoreTrack(input: ScoreInput): Decision {
   }
   const versionCheck = checkVersion(reading, release, best, clusters, input.heuristic?.position?.whole ? null : input.duration)
 
+  // Every field in its place before it's proposed; what can't be put right waits for a person.
+  const checked = checkFields(reading, { names: false })
+  reading = checked.fields
+  const unsure = needsALook(checked.notes)
+  for (const n of unsure) warnings.push(n.message)
+
   const confidence = Math.round(Math.max(0, Math.min(1, final)) * 100)
   let status: Decision["status"]
   if (conflict) status = "conflict"
-  else if (confidence >= input.thresholds.autoThreshold && reading.artists.length && reading.title) status = "matched"
+  else if (confidence >= input.thresholds.autoThreshold && reading.artists.length && reading.title && !unsure.length) status = "matched"
   else if (confidence >= input.thresholds.reviewThreshold) status = "review"
   else status = "unmatched"
 
@@ -349,6 +358,7 @@ export function scoreTrack(input: ScoreInput): Decision {
     versionCheck,
     provenance,
     sourceGenres: sourceGenresOf(best?.candidates ?? []),
+    ...(checked.notes.length ? { checks: checked.notes } : {}),
   }
 }
 

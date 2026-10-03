@@ -14,6 +14,7 @@ import { useMemo, useState } from "react"
 import { toast } from "sonner"
 import { describePosition, placeValues } from "@core/discs"
 import { renderTemplate } from "@core/naming"
+import { checkFields } from "@shared/fields"
 import { RISK_LABEL, riskOf } from "@shared/risk"
 import type { Candidate, FinalMeta, Track } from "@shared/types"
 import { AudioPlayer } from "@/components/audio-player"
@@ -75,7 +76,8 @@ export function TrackDetail({
 
   const preview = useMemo(() => {
     if (!draft || !settings || !track) return null
-    const meta = fromDraft(draft)
+    // What will really be written: the same field checks the server runs.
+    const meta = checkFields(fromDraft(draft), { names: false }).fields
     if (!meta.title || !meta.artists.length) return null
     // A library can have its own naming template.
     const template = libraries?.find((l) => l.id === track.libraryId)?.settings.template ?? settings.naming.template
@@ -196,6 +198,23 @@ export function TrackDetail({
             </div>
           ))}
         </div>
+      )}
+      {!!d?.checks?.some((n) => n.fixed) && (
+        <details className="text-muted-foreground rounded-2xl border px-3 py-2 text-xs">
+          <summary className="cursor-pointer select-none">
+            Put right automatically: {d.checks.filter((n) => n.fixed).length} field{d.checks.filter((n) => n.fixed).length === 1 ? "" : "s"}
+          </summary>
+          <ul className="mt-2 space-y-1">
+            {d.checks
+              .filter((n) => n.fixed)
+              .map((n, i) => (
+                <li key={i} className="flex gap-2">
+                  <HugeiconsIcon icon={Tick02Icon} strokeWidth={2} className="text-rasta-green mt-px size-3.5 shrink-0" aria-hidden />
+                  {n.message}
+                </li>
+              ))}
+          </ul>
+        </details>
       )}
       {track.note && <div className="text-rasta-red text-sm">{track.note}</div>}
 

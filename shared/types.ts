@@ -427,6 +427,13 @@ export interface CandidateCluster {
   candidates: Candidate[]
 }
 
+/** What the field check found in one field: put right automatically, or needing a person. */
+export interface FieldNote {
+  field: "artists" | "featuring" | "title" | "version" | "year" | "album" | "label" | "riddim" | "genre"
+  fixed: boolean
+  message: string
+}
+
 export interface Decision {
   artists: string[]
   featuring: string[]
@@ -457,6 +464,8 @@ export interface Decision {
   sourceGenres?: string[]
   /** the one genre from the canonical list (when canonical genres are on) */
   canonicalGenre?: CanonicalGenre | null
+  /** what the field check put right, and what it couldn't */
+  checks?: FieldNote[]
 }
 
 export type ProvenanceField = "artists" | "title" | "version" | "year" | "album" | "label" | "genre" | "release"

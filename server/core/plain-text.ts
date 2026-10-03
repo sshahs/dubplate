@@ -2,6 +2,7 @@
 // for "&". Every field a source, the AI or a person fills in goes through
 // here, so none of it reaches the editor, a tag or a filename.
 
+import { checkFields } from "../../shared/fields"
 import type { Candidate, FinalMeta } from "../../shared/types"
 import { collapseSpaces } from "./normalize"
 
@@ -139,4 +140,18 @@ export function cleanFinal(f: FinalMeta): FinalMeta {
     riddim: t(f.riddim),
     genre: t(f.genre),
   }
+}
+
+/**
+ * A hit with every field in its place, or null when there's no artist left to it
+ * ("Seasons Riddim" as the artist of "Before There Was Time": a riddim, not a credit).
+ */
+export function checkCandidate(c: Candidate): Candidate | null {
+  const asOne = !c.artists?.length
+  const { fields, notes } = checkFields({ artists: asOne ? [c.artist] : c.artists!, title: c.title, year: c.year, album: c.album, label: c.label, riddim: c.riddim, genre: c.genre }, { names: false, feat: false })
+  if (!notes.some((n) => n.fixed)) return c
+  if (!fields.artists.length || !fields.title) return null
+  const out: Candidate = { ...c, artist: fields.artists.join(" & "), title: fields.title, year: fields.year, album: fields.album, label: fields.label, riddim: fields.riddim, genre: fields.genre }
+  if (!asOne) out.artists = fields.artists
+  return out
 }

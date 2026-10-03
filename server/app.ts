@@ -30,6 +30,7 @@ import { healthReport } from "./health"
 import { parseFilename } from "./core/filename-parser"
 import { normArtist } from "./core/normalize"
 import { plainText } from "./core/plain-text"
+import { checkFields } from "../shared/fields"
 import { buildPlan, executePlan, metaFor, proposedFilename, rewind } from "./executor"
 import { activeJobs, cancelJob, emit, enqueueJob, listJobs, log, recentLogEvents, subscribe } from "./jobs"
 import { clearLogs, errorDetail, logOptions, logSummary, logText, queryLogs, type LogFilter } from "./logs"
@@ -131,6 +132,10 @@ function sanitizeBpm(v: unknown): number | null {
 }
 
 function sanitizeFinal(input: Partial<FinalMeta>): FinalMeta {
+  return checkFields(cleanFinalInput(input)).fields
+}
+
+function cleanFinalInput(input: Partial<FinalMeta>): FinalMeta {
   // Whatever was typed or picked, never web page markup (a source's link round a name, "&amp;").
   const clean = (s?: string) => plainText(s ?? "").replace(/\s+/g, " ").trim()
   const list = (xs?: string[]) => (xs ?? []).map(clean).filter(Boolean)

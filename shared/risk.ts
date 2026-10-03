@@ -3,6 +3,7 @@
 // short, is a confident guess but a risky write. Auto-approve and hands-off
 // only act on low-risk tracks; everything else waits for a person.
 
+import { needsALook } from "./fields"
 import { fileProblems } from "./problems"
 import type { Decision, RiskAssessment, SourceId, Track } from "./types"
 
@@ -31,6 +32,7 @@ export function riskOf(t: RiskInput): RiskAssessment {
   if (d.escalated) high.push("A second model had to look at it, so a person decides")
   if (d.status === "conflict") high.push("Sources disagree about what it is")
   if (d.basis !== "sources") high.push("No source confirms the reading")
+  for (const n of needsALook(d.checks)) high.push(n.message)
   if (d.versionCheck?.fingerprintMatch === false) high.push("The audio fingerprint points at a different recording")
   for (const p of fileProblems(t)) if (p.severity === "error") high.push(`The file is ${p.label.toLowerCase()}`)
   if (d.basis === "sources" && independentSources(d.clusters[0]?.sources ?? []) < 2 && d.versionCheck?.fingerprintMatch !== true) medium.push("Only one source confirms it")

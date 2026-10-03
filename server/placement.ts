@@ -1,6 +1,7 @@
 // Where an approved track ends up: its filename (naming template) and its folder
 // inside the library (folder template), with each library's own settings applied.
 
+import { checkFields } from "../shared/fields"
 import { formatKey } from "../shared/keys"
 import type { FinalMeta, Settings, Track } from "../shared/types"
 import { bpmRange, decadeOf, initialOf, renderFolderTemplate, type FolderValues } from "./core/folders"
@@ -10,9 +11,9 @@ import { canonicalGenre } from "./genres"
 import { placementLibraryId, settingsForLibrary } from "./library-settings"
 
 export function metaFor(t: Track): FinalMeta | null {
-  if (t.final) return t.final
-  if (t.decision && t.decision.title && t.decision.artists.length) return decisionToFinal(t.decision)
-  return null
+  const meta = t.final ?? (t.decision && t.decision.title && t.decision.artists.length ? decisionToFinal(t.decision) : null)
+  // Checked again on the way out, so nothing approved before the checks existed is written wrong.
+  return meta ? checkFields(meta, { names: false }).fields : null
 }
 
 /** The name the track would be cut to, under its library's naming template (an inbox: the library it feeds). */
