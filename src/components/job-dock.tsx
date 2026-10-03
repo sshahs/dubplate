@@ -1,5 +1,7 @@
 import { HugeiconsIcon } from "@hugeicons/react"
-import { Cancel01Icon, ComputerTerminal01Icon } from "@hugeicons/core-free-icons"
+import { ArrowRight02Icon, Cancel01Icon, ComputerTerminal01Icon, TextAlignLeftIcon } from "@hugeicons/core-free-icons"
+import { useState } from "react"
+import { Link } from "react-router"
 import { VuMeter } from "@/components/brand"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -10,6 +12,7 @@ import { useActiveJobs, useLive } from "@/lib/events"
 import { cn } from "@/lib/utils"
 
 const LEVEL_CLASS = {
+  debug: "text-muted-foreground/70",
   info: "text-muted-foreground",
   success: "text-rasta-green",
   warn: "text-rasta-gold",
@@ -21,9 +24,11 @@ export function JobDock() {
   const { logs } = useLive()
   const running = active.find((j) => j.status === "running")
   const pct = running && running.total ? Math.round(((running.done + running.failed) / running.total) * 100) : null
+  const [open, setOpen] = useState(false)
+  const close = () => setOpen(false)
 
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
           // Fixed width on desktop so the header doesn't shuffle as jobs start, tick and finish.
@@ -50,6 +55,9 @@ export function JobDock() {
                     <span className="text-muted-foreground font-mono">
                       {j.done + j.failed}/{j.total || "?"}
                     </span>
+                    <Button variant="ghost" size="icon-xs" nativeButton={false} render={<Link to={`/console?job=${j.id}`} onClick={close} />} aria-label={`Log of ${j.label}`} title="Its log">
+                      <HugeiconsIcon icon={TextAlignLeftIcon} strokeWidth={2} />
+                    </Button>
                     <Button variant="ghost" size="icon-xs" onClick={() => api.cancelJob(j.id)} aria-label="Cancel job">
                       <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
                     </Button>
@@ -61,12 +69,18 @@ export function JobDock() {
             })}
           </div>
         </div>
-        <div className="p-3 pb-1 text-sm font-semibold">Console</div>
+        <div className="flex items-center justify-between p-3 pb-1">
+          <span className="text-sm font-semibold">Console</span>
+          <Button variant="ghost" size="xs" nativeButton={false} render={<Link to="/console" onClick={close} />}>
+            Open full console
+            <HugeiconsIcon icon={ArrowRight02Icon} strokeWidth={2} data-icon="inline-end" />
+          </Button>
+        </div>
         <ScrollArea className="h-56 px-3 pb-3">
           <div className="space-y-1 font-mono text-[11px] leading-relaxed">
             {logs.length === 0 && <div className="text-muted-foreground">No messages yet.</div>}
             {[...logs].reverse().map((l, i) => (
-              <div key={i} className={LEVEL_CLASS[l.level]}>
+              <div key={l.id > 0 ? l.id : `n${i}`} className={LEVEL_CLASS[l.level]}>
                 <span className="text-muted-foreground/60">{new Date(l.at).toLocaleTimeString()} </span>
                 {l.message}
               </div>

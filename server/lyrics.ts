@@ -8,7 +8,7 @@ export { lyricsKey } from "../shared/lyrics"
 import { lyricsKey, plainFromTimed } from "../shared/lyrics"
 import { artistSimilarity, titleSimilarity } from "./core/normalize"
 import type { JobContext } from "./jobs"
-import { mapLimit } from "./jobs"
+import { forTrack, mapLimit } from "./jobs"
 import { metaFor } from "./placement"
 import { getTrack, updateTrack } from "./repo"
 import { httpJson } from "./sources/http"
@@ -120,22 +120,24 @@ export async function lyricsTracks(ids: number[], opts: { force: boolean }, ctx:
   ctx.setTotal(ids.length)
   const changed: number[] = []
   let found = 0
-  await mapLimit(ids, 3, ctx.signal, async (id) => {
-    const t = getTrack(id)
-    if (!t || t.missing) return ctx.tick(false)
-    if (!opts.force && !needsLyrics(t)) return ctx.tick(true)
-    try {
-      const l = await lyricsForTrack(t, ctx.signal, opts.force)
-      if (!l) return ctx.tick(true, `${t.filename} → not identified yet`)
-      changed.push(id)
-      if (l.found) found++
-      ctx.tick(true, `${t.filename} → ${l.found ? (l.synced ? "timed lyrics" : "lyrics") : l.instrumental ? "instrumental" : "none found"}`)
-    } catch (err) {
-      if (ctx.signal.aborted) return
-      ctx.log("warn", `Lyrics for ${t.filename}: ${err instanceof Error ? err.message : err}`)
-      ctx.tick(false)
-    }
-  })
+  await mapLimit(ids, 3, ctx.signal, (id) =>
+    forTrack(id, async () => {
+      const t = getTrack(id)
+      if (!t || t.missing) return ctx.tick(false)
+      if (!opts.force && !needsLyrics(t)) return ctx.tick(true)
+      try {
+        const l = await lyricsForTrack(t, ctx.signal, opts.force)
+        if (!l) return ctx.tick(true, `${t.filename} → not identified yet`)
+        changed.push(id)
+        if (l.found) found++
+        ctx.tick(true, `${t.filename} → ${l.found ? (l.synced ? "timed lyrics" : "lyrics") : l.instrumental ? "instrumental" : "none found"}`)
+      } catch (err) {
+        if (ctx.signal.aborted) return
+        ctx.log("warn", `Lyrics for ${t.filename}: ${err instanceof Error ? err.message : err}`)
+        ctx.tick(false)
+      }
+    })
+  )
   ctx.tracksChanged(changed)
   ctx.log("success", `Found lyrics for ${found} of ${ids.length} track${ids.length === 1 ? "" : "s"}`)
 }
@@ -148,12 +150,14 @@ export async function topUpLyrics(tracks: Track[], settings: Settings, ctx: Pick
   if (!settings.lyrics.fetch || (!settings.lyrics.embed && !settings.lyrics.lrcFile)) return 0
   const stale = tracks.filter((t) => needsLyrics(t))
   let n = 0
-  await mapLimit(stale, 3, ctx.signal, async (t) => {
-    try {
-      if (await lyricsForTrack(t, ctx.signal)) n++
-    } catch (err) {
-      if (!ctx.signal.aborted) ctx.log("warn", `Lyrics for ${t.filename}: ${err instanceof Error ? err.message : err}`)
-    }
-  })
+  await mapLimit(stale, 3, ctx.signal, (t) =>
+    forTrack(t.id, async () => {
+      try {
+        if (await lyricsForTrack(t, ctx.signal)) n++
+      } catch (err) {
+        if (!ctx.signal.aborted) ctx.log("warn", `Lyrics for ${t.filename}: ${err instanceof Error ? err.message : err}`)
+      }
+    })
+  )
   return n
 }

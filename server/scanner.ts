@@ -14,6 +14,7 @@ import { parseFilename } from "./core/filename-parser"
 import { getDb } from "./db"
 import type { JobContext } from "./jobs"
 import { mapLimit } from "./jobs"
+import { errorDetail } from "./logs"
 import { getTrack, knownArtists, touchLibraryScan, updateTrack } from "./repo"
 import { asfDamage, RIDDIM } from "./tagger"
 import { recordVideos } from "./videos"
@@ -165,6 +166,24 @@ export async function readAudio(file: string) {
   }
 }
 
+/** What a scan read from a file, for the log line's detail. */
+function audioDetail(file: string, a: Awaited<ReturnType<typeof readAudio>>): string {
+  const t = a.tags
+  const tagLine = (Object.entries(t) as [string, unknown][])
+    .filter(([k, v]) => v !== undefined && v !== "" && k !== "lyrics" && k !== "artists")
+    .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : k === "cover" ? "yes" : String(v)}`)
+  const sound = [a.codec, a.duration ? `${Math.floor(a.duration / 60)}:${String(Math.round(a.duration % 60)).padStart(2, "0")}` : null, a.bitrate ? `${Math.round(a.bitrate / 1000)} kbps` : null, a.sampleRate ? `${a.sampleRate} Hz` : null]
+  return [
+    file,
+    sound.filter(Boolean).join(", "),
+    tagLine.length ? `Tags: ${tagLine.join(" · ")}` : "No tags",
+    a.error ? `Couldn't read the tags: ${a.error}` : "",
+    a.fileCheck ? `Check: ${JSON.stringify(a.fileCheck)}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n")
+}
+
 /**
  * Tempo/key from a re-read file's tags. Tags win over an earlier analysis, but
  * values you typed in (neither from the old tags nor the analyser) are kept.
@@ -249,7 +268,10 @@ export async function scanLibrary(lib: Library, settings: Settings, ctx: JobCont
   const markMissing = db.prepare("UPDATE tracks SET missing = 1 WHERE id = ? AND missing = 0")
   let missing = 0
   for (const [p, { id }] of existing) {
-    if (!onDisk.has(p)) missing += Number(markMissing.run(id).changes)
+    if (onDisk.has(p)) continue
+    const gone = Number(markMissing.run(id).changes)
+    missing += gone
+    if (gone) ctx.log("debug", `Not there any more: ${path.relative(lib.path, p)}`, { trackId: id, detail: p })
   }
 
   const known = knownArtists()
@@ -304,6 +326,8 @@ export async function scanLibrary(lib: Library, settings: Settings, ctx: JobCont
         markRead.run(prev.id)
         seen.add(prev.id)
         changed.push(prev.id)
+        const why = prev.size !== st.size || Math.round(prev.mtime) !== Math.round(st.mtimeMs) ? "changed on disk" : "to pick up what newer scans read"
+        ctx.log("debug", `Read again (${why}): ${path.relative(lib.path, file)}`, { trackId: prev.id, detail: audioDetail(file, audio) })
       } else {
         // A file that disappeared from its old path and reappeared here was moved.
         const movedRow = hash ? (findMissingByHash.get(hash) as { id: number } | undefined) : undefined
@@ -317,6 +341,7 @@ export async function scanLibrary(lib: Library, settings: Settings, ctx: JobCont
           seen.add(t.id)
           changed.push(t.id)
           moved++
+          ctx.log("debug", `Moved outside Dubplate: ${path.relative(lib.path, t.path)} → ${path.relative(lib.path, file)}`, { trackId: t.id, detail: `From: ${t.path}\nTo:   ${file}` })
         } else {
           const r = insert.get(
             lib.id,
@@ -343,12 +368,13 @@ export async function scanLibrary(lib: Library, settings: Settings, ctx: JobCont
           seen.add(r.id)
           changed.push(r.id)
           addedIds.push(r.id)
+          ctx.log("debug", `New: ${path.relative(lib.path, file)}`, { trackId: r.id, detail: audioDetail(file, audio) })
         }
       }
       ctx.tick(true)
     } catch (err) {
       ctx.tick(false)
-      ctx.log("warn", `Could not read ${file}: ${err instanceof Error ? err.message : err}`)
+      ctx.log("warn", `Could not read ${file}: ${err instanceof Error ? err.message : err}`, { detail: errorDetail(err) })
     }
   })
 

@@ -2,8 +2,9 @@
 // matches a schema - natively where supported, by instruction otherwise.
 
 import type { LlmProviderConfig } from "../../shared/types"
+import { errorDetail, errorText, log } from "../logs"
 import { networkMessage } from "../net"
-import { recordUsage } from "./usage"
+import { callTokens, recordUsage } from "./usage"
 
 export interface JsonRequest {
   system: string
@@ -215,11 +216,7 @@ async function anthropicJson(p: LlmProviderConfig, req: JsonRequest) {
   return extractJson(textBlock?.text ?? "")
 }
 
-export async function completeJson(p: LlmProviderConfig, req: JsonRequest): Promise<unknown> {
-  if (!p.model) throw new LlmError(`No model selected for ${p.label}`)
-  if ((p.kind === "openai" || p.kind === "anthropic" || p.kind === "ollama-cloud" || p.kind === "commandcode") && !p.apiKey) {
-    throw new LlmError(`${p.label} needs an API key`)
-  }
+function ask(p: LlmProviderConfig, req: JsonRequest): Promise<unknown> {
   switch (p.kind) {
     case "ollama":
     case "ollama-cloud":
@@ -228,6 +225,29 @@ export async function completeJson(p: LlmProviderConfig, req: JsonRequest): Prom
       return anthropicJson(p, req)
     default:
       return openAiJson(p, req)
+  }
+}
+
+const ASKED: Record<string, string> = { identify_track: "a track", check_cover: "a cover", ping: "a connection test" }
+
+export async function completeJson(p: LlmProviderConfig, req: JsonRequest): Promise<unknown> {
+  if (!p.model) throw new LlmError(`No model selected for ${p.label}`)
+  if ((p.kind === "openai" || p.kind === "anthropic" || p.kind === "ollama-cloud" || p.kind === "commandcode") && !p.apiKey) {
+    throw new LlmError(`${p.label} needs an API key`)
+  }
+  const started = Date.now()
+  const call: { tokens?: { input: number; output: number } } = {}
+  const who = `${p.label}, ${p.model},`
+  const what = ASKED[req.schemaName] ?? req.schemaName
+  const secs = () => `${((Date.now() - started) / 1000).toFixed(1)} s`
+  try {
+    const answer = await callTokens.run(call, () => ask(p, req))
+    const tokens = call.tokens ? ` - ${call.tokens.input.toLocaleString("en")} tokens in, ${call.tokens.output.toLocaleString("en")} out` : ""
+    log("debug", `${who} read ${what} in ${secs()}${tokens}`, { area: "ai", detail: `Answer:\n${JSON.stringify(answer, null, 2)}` })
+    return answer
+  } catch (err) {
+    if (!req.signal?.aborted) log("debug", `${who} couldn't read ${what} (after ${secs()}): ${errorText(err)}`, { area: "ai", detail: errorDetail(err) })
+    throw err
   }
 }
 

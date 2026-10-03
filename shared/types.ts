@@ -711,9 +711,41 @@ export interface Job {
   finishedAt: string | null
 }
 
+/** "debug" is the step-by-step detail: every web request, source answer, reading and file change. */
+export type LogLevel = "debug" | "info" | "success" | "warn" | "error"
+export const LOG_LEVELS: LogLevel[] = ["debug", "info", "success", "warn", "error"]
+
+/** Which part of Dubplate wrote a log line. */
+export type LogArea = "jobs" | "scan" | "identify" | "sources" | "http" | "ai" | "files" | "analysis" | "automation" | "integrations" | "server"
+export const LOG_AREAS: LogArea[] = ["jobs", "scan", "identify", "sources", "http", "ai", "files", "analysis", "automation", "integrations", "server"]
+
+export interface LogEntry {
+  /** rises with every line; 0 or below when the line couldn't be stored */
+  id: number
+  at: string
+  level: LogLevel
+  area: LogArea
+  message: string
+  jobId?: string
+  jobLabel?: string
+  trackId?: number
+  /** the longer story: a stack trace, a full request, what was read and decided */
+  detail?: string
+}
+
+/** Line counts for the Console's filters. */
+export interface LogSummary {
+  total: number
+  byLevel: Record<LogLevel, number>
+  byArea: Partial<Record<LogArea, number>>
+  oldest: string | null
+  /** recent jobs that wrote something */
+  jobs: { id: string; label: string; kind: JobKind; status: JobStatus; createdAt: string }[]
+}
+
 export type ServerEvent =
   | { type: "job"; job: Job }
-  | { type: "log"; level: "info" | "warn" | "error" | "success"; message: string; jobId?: string; at: string }
+  | ({ type: "log" } & LogEntry)
   | { type: "tracks"; ids: number[] }
   | { type: "stats" }
 
@@ -1038,6 +1070,11 @@ export interface Settings {
     rules: GenreRule[]
   }
   contact: string
+  logs: {
+    /** keep the step-by-step lines (every request, reading and file change) as well */
+    detail: boolean
+    keepDays: number
+  }
 }
 
 /** A key for scripts and download tools to call Dubplate with. Only its hash is stored. */

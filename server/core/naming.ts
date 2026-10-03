@@ -3,6 +3,7 @@
 import type { Decision, ExistingTags, ExternalIds, FinalMeta, LoudnessMeasure, Settings } from "../../shared/types"
 import { lyricsSummary } from "../../shared/lyrics"
 import { collapseSpaces } from "./normalize"
+import { hasMarkup } from "./plain-text"
 
 type Naming = Settings["naming"]
 
@@ -129,6 +130,8 @@ export function tagsFor(meta: FinalMeta, current: ExistingTags, naming: Naming, 
     artist: formatArtist(meta, naming),
     title: formatTitle(meta, naming),
   }
+  // A field holding web page markup (written before sources were cleaned) counts as empty, so it's put right.
+  current = Object.fromEntries(Object.entries(current).filter(([, v]) => !(typeof v === "string" && hasMarkup(v)))) as ExistingTags
   if (!current.album && meta.album) out.album = meta.album
   if (!current.year && meta.year) out.year = meta.year
   if (extras.canonicalGenre) {

@@ -2,6 +2,7 @@
 // it, priced with what you enter per provider. A monthly budget switches the AI
 // off (the rule-based parser carries on) once estimated spend reaches it.
 
+import { AsyncLocalStorage } from "node:async_hooks"
 import type { AiUsageReport, LlmProviderConfig, Settings, UsageTotals } from "../../shared/types"
 import { getDb } from "../db"
 import { currentJobId } from "../jobs"
@@ -11,7 +12,12 @@ export interface TokenCounts {
   output: number
 }
 
+/** The call being made, so its token counts can go in the log line about it. */
+export const callTokens = new AsyncLocalStorage<{ tokens?: TokenCounts }>()
+
 export function recordUsage(p: LlmProviderConfig, t: TokenCounts) {
+  const call = callTokens.getStore()
+  if (call) call.tokens = t
   if (!t.input && !t.output) return
   getDb()
     .prepare("INSERT INTO ai_usage (provider_id, model, input_tokens, output_tokens, job_id) VALUES (?, ?, ?, ?, ?)")

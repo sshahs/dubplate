@@ -6,13 +6,18 @@ import { jobFinished } from "@/lib/notify"
 
 type LogEvent = Extract<ServerEvent, { type: "log" }>
 
+type LogListener = (e: LogEvent) => void
+
 interface LiveState {
   jobs: Job[]
+  /** the latest lines, without the step-by-step detail */
   logs: LogEvent[]
   connected: boolean
+  /** every line as it arrives, detail included (the Console page listens) */
+  onLog: (l: LogListener) => () => void
 }
 
-const LiveContext = createContext<LiveState>({ jobs: [], logs: [], connected: false })
+const LiveContext = createContext<LiveState>({ jobs: [], logs: [], connected: false, onLog: () => () => {} })
 
 /** Streams job progress + logs from the server and keeps query caches fresh. */
 export function LiveProvider({ children }: { children: ReactNode }) {
@@ -21,6 +26,14 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [logs, setLogs] = useState<LogEvent[]>([])
   const [connected, setConnected] = useState(false)
   const pending = useRef({ tracks: false, stats: false })
+  const logListeners = useRef(new Set<LogListener>())
+  const onLog = useMemo(
+    () => (l: LogListener) => {
+      logListeners.current.add(l)
+      return () => void logListeners.current.delete(l)
+    },
+    []
+  )
 
   useEffect(() => {
     let es: EventSource | null = null
@@ -71,7 +84,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
             jobFinished(e.job)
           }
         } else if (e.type === "log") {
-          setLogs((prev) => [...prev.slice(-199), e])
+          for (const l of logListeners.current) l(e)
+          // Step-by-step detail can come in fast: only the Console page shows it.
+          if (e.level !== "debug") setLogs((prev) => (prev.some((p) => p.id === e.id && e.id > 0) ? prev : [...prev.slice(-199), e]))
         } else if (e.type === "tracks") {
           pending.current.tracks = true
           pending.current.stats = true
@@ -90,8 +105,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(() => {
     const list = [...jobs.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    return { jobs: list, logs, connected }
-  }, [jobs, logs, connected])
+    return { jobs: list, logs, connected, onLog }
+  }, [jobs, logs, connected, onLog])
 
   return <LiveContext.Provider value={value}>{children}</LiveContext.Provider>
 }

@@ -8,7 +8,10 @@ import { config, VERSION } from "./config"
 import { getDb } from "./db"
 import { startIntegrations } from "./integrations"
 import { markInterruptedJobs } from "./jobs"
+import { log, startLogging } from "./logs"
+import { repairMarkupOnce } from "./pipeline"
 import { upsertAlias } from "./repo"
+import { settingsNow } from "./settings"
 import { pruneHttpCache } from "./sources/http"
 import { startAutomation } from "./watcher"
 
@@ -42,6 +45,9 @@ function firstRunSeed() {
 }
 
 getDb()
+// Settings first: they say how long the log is kept and whether it has the step-by-step detail.
+settingsNow()
+startLogging()
 markInterruptedJobs()
 firstRunSeed()
 pruneHttpCache()
@@ -74,8 +80,11 @@ serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => 
   console.log(`\n  ◉ Dubplate ${VERSION} - selector ready`)
   console.log(`  ➜ http://${host}:${info.port}`)
   console.log(`  ➜ data: ${config.dataDir}\n`)
+  log("info", `Dubplate ${VERSION} started on http://${host}:${info.port} (Node ${process.versions.node})`, { area: "server", detail: `Data: ${config.dataDir}` }, false)
   // Watched folders, periodic re-checks and the nightly scan.
   startAutomation()
   // Media server rescans and chat messages after jobs.
   startIntegrations()
+  // Tracks a site's links reached before every answer was cleaned.
+  repairMarkupOnce()
 })

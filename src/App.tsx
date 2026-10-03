@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 
 const PAGES = {
+  console: () => import("@/pages/console"),
   crates: () => import("@/pages/crates"),
   dashboard: () => import("@/pages/dashboard"),
   duplicates: () => import("@/pages/duplicates"),
@@ -24,6 +25,7 @@ const PAGES = {
   videos: () => import("@/pages/videos"),
 }
 
+const ConsolePage = lazy(PAGES.console)
 const CratesPage = lazy(PAGES.crates)
 const DashboardPage = lazy(PAGES.dashboard)
 const DuplicatesPage = lazy(PAGES.duplicates)
@@ -97,6 +99,17 @@ export default function App() {
     return () => clearTimeout(id)
   }, [])
 
+  // The console in a window of its own: the whole window, no sidebar or header.
+  if (location.pathname === "/console/window") {
+    return (
+      <PageErrorBoundary resetKey={location.pathname}>
+        <Suspense fallback={<PageFallback />}>
+          <ConsolePage standalone />
+        </Suspense>
+      </PageErrorBoundary>
+    )
+  }
+
   return (
     <AppShell>
       <PageErrorBoundary resetKey={location.pathname}>
@@ -116,6 +129,7 @@ export default function App() {
                 <Route path="/sources" element={<SourcesPage />} />
                 <Route path="/duplicates" element={<DuplicatesPage />} />
                 <Route path="/health" element={<HealthPage />} />
+                <Route path="/console" element={<ConsolePage />} />
                 <Route path="/videos" element={<VideosPage />} />
                 <Route path="/upload" element={<UploadPage />} />
                 <Route path="/settings" element={<SettingsPage />} />

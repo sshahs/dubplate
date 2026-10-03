@@ -3,7 +3,7 @@
 
 import type { Settings, Track, TrackAnalysis } from "../../shared/types"
 import type { JobContext } from "../jobs"
-import { mapLimit } from "../jobs"
+import { forTrack, mapLimit } from "../jobs"
 import { getTrack, updateTrack } from "../repo"
 import { POOL_SIZE, runTask } from "../worker-pool"
 import type { AnalyseRequest } from "./analyse"
@@ -65,23 +65,25 @@ export async function analyseTrack(t: Track, settings: Settings): Promise<Partia
 export async function analyzeTracks(ids: number[], settings: Settings, opts: { force: boolean }, ctx: JobContext) {
   ctx.setTotal(ids.length)
   const changed: number[] = []
-  await mapLimit(ids, POOL_SIZE, ctx.signal, async (id) => {
-    const t = getTrack(id)
-    if (!t || t.missing) return ctx.tick(false)
-    if (!opts.force && !needsAnalysis(t, settings)) return ctx.tick(true)
-    try {
-      const patch = await analyseTrack(t, settings)
-      changed.push(id)
-      const a = patch.analysis!
-      const said = [a.bpm && `${a.bpm} BPM`, a.key, a.quality?.verdict === "suspect" && "sounds re-encoded", typeof a.integrity?.damagedAt === "number" && "damaged", a.integrity?.truncated && "cut short"].filter(Boolean).join(" · ")
-      ctx.tick(true, `${t.filename} → ${said || "no clear pulse or key"}`)
-    } catch (err) {
-      if (ctx.signal.aborted) return
-      changed.push(id)
-      ctx.log("warn", `Could not analyse ${t.filename}: ${err instanceof Error ? err.message : err}`)
-      ctx.tick(false)
-    }
-    if (changed.length % 10 === 0) ctx.tracksChanged(changed.slice(-10))
-  })
+  await mapLimit(ids, POOL_SIZE, ctx.signal, (id) =>
+    forTrack(id, async () => {
+      const t = getTrack(id)
+      if (!t || t.missing) return ctx.tick(false)
+      if (!opts.force && !needsAnalysis(t, settings)) return ctx.tick(true)
+      try {
+        const patch = await analyseTrack(t, settings)
+        changed.push(id)
+        const a = patch.analysis!
+        const said = [a.bpm && `${a.bpm} BPM`, a.key, a.quality?.verdict === "suspect" && "sounds re-encoded", typeof a.integrity?.damagedAt === "number" && "damaged", a.integrity?.truncated && "cut short"].filter(Boolean).join(" · ")
+        ctx.tick(true, `${t.filename} → ${said || "no clear pulse or key"}`)
+      } catch (err) {
+        if (ctx.signal.aborted) return
+        changed.push(id)
+        ctx.log("warn", `Could not analyse ${t.filename}: ${err instanceof Error ? err.message : err}`)
+        ctx.tick(false)
+      }
+      if (changed.length % 10 === 0) ctx.tracksChanged(changed.slice(-10))
+    })
+  )
   ctx.tracksChanged(changed)
 }

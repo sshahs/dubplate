@@ -1,44 +1,16 @@
-// In-process job queue + event bus. Jobs run one at a time so rate limits
-// and file operations never race each other; progress streams over SSE. A
-// second, quick lane takes small jobs that only read and identify (re-running
-// one track, say), so they don't wait hours behind a whole library.
+// In-process job queue. Jobs run one at a time so rate limits and file
+// operations never race each other; progress streams over SSE. A second,
+// quick lane takes small jobs that only read and identify (re-running one
+// track, say), so they don't wait hours behind a whole library.
 
-import { AsyncLocalStorage } from "node:async_hooks"
 import { randomUUID } from "node:crypto"
-import type { Job, JobKind, ServerEvent } from "../shared/types"
+import type { Job, JobKind, LogLevel } from "../shared/types"
+import { emit, inScope, runScope } from "./bus"
 import { getDb } from "./db"
+import { areaOfJob, errorDetail, log, type LogMeta } from "./logs"
 
-type Listener = (e: ServerEvent) => void
-const listeners = new Set<Listener>()
-const recentLogs: ServerEvent[] = []
-
-export function emit(e: ServerEvent) {
-  if (e.type === "log") {
-    recentLogs.push(e)
-    if (recentLogs.length > 300) recentLogs.shift()
-  }
-  for (const l of listeners) {
-    try {
-      l(e)
-    } catch {
-      // a broken SSE client must not break the job
-    }
-  }
-}
-
-export function subscribe(l: Listener) {
-  listeners.add(l)
-  return () => listeners.delete(l)
-}
-
-export function recentLogEvents() {
-  return [...recentLogs]
-}
-
-export function log(level: "info" | "warn" | "error" | "success", message: string, jobId?: string) {
-  emit({ type: "log", level, message, jobId, at: new Date().toISOString() })
-  if (level === "error") console.error(`[dubplate] ${message}`)
-}
+export { emit, subscribe } from "./bus"
+export { log, recentLogEvents } from "./logs"
 
 export interface JobContext {
   job: Job
@@ -46,7 +18,8 @@ export interface JobContext {
   setTotal(n: number): void
   tick(ok?: boolean, message?: string): void
   message(msg: string): void
-  log(level: "info" | "warn" | "error" | "success", message: string): void
+  /** written against this job; inside a track's scope it's linked to the track too */
+  log(level: LogLevel, message: string, meta?: Omit<LogMeta, "jobId" | "jobLabel">): void
   tracksChanged(ids: number[]): void
   /** files on disk were renamed, moved or retagged (media servers get told to rescan) */
   filesChanged(): void
@@ -84,9 +57,20 @@ const quick: Lane = { queue: [], running: null }
 const lanes = [main, quick]
 
 /** Which job the current code is running for (AI usage is booked against it). */
-const jobScope = new AsyncLocalStorage<string>()
 export function currentJobId(): string | null {
-  return jobScope.getStore() ?? null
+  return runScope().job?.id ?? null
+}
+
+/** Run one track's work so everything logged inside it (web requests, sources, AI) is linked to the track. */
+export function forTrack<T>(trackId: number, fn: () => T): T {
+  return inScope({ trackId }, fn)
+}
+
+function took(ms: number): string {
+  const s = Math.round(ms / 1000)
+  if (s < 60) return `${s} s`
+  if (s < 3600) return `${Math.floor(s / 60)} min ${s % 60} s`
+  return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`
 }
 
 function rowToJob(r: Record<string, unknown>): Job {
@@ -177,8 +161,8 @@ async function pump(lane: Lane) {
       job.message = msg
       publish(job)
     },
-    log(level, message) {
-      log(level, message, job.id)
+    log(level, message, meta) {
+      log(level, message, { area: areaOfJob(job.kind), ...meta, jobId: job.id, jobLabel: job.label })
     },
     tracksChanged(ids) {
       if (ids.length) emit({ type: "tracks", ids })
@@ -190,15 +174,21 @@ async function pump(lane: Lane) {
       outcome.report = { ...outcome.report, ...counts }
     },
   }
+  const said: LogMeta = { area: "jobs", jobId: job.id, jobLabel: job.label, trackId: null }
+  log("info", `Started: ${job.label}`, said)
   try {
-    await jobScope.run(job.id, () => fn(ctx))
+    await inScope({ job: { id: job.id, kind: job.kind, label: job.label } }, () => fn(ctx))
     job.status = controller.signal.aborted ? "cancelled" : "done"
   } catch (err) {
     job.status = controller.signal.aborted ? "cancelled" : "failed"
     job.message = err instanceof Error ? err.message : String(err)
-    log("error", `${job.label} failed: ${job.message}`, job.id)
+    if (job.status === "failed") log("error", `${job.label} failed: ${job.message}`, { ...said, detail: errorDetail(err) })
   } finally {
     job.finishedAt = new Date().toISOString()
+    const counts = job.total || job.done || job.failed ? ` - ${job.done} done${job.failed ? `, ${job.failed} failed` : ""}${job.total ? ` of ${job.total}` : ""}` : ""
+    const time = took(Date.parse(job.finishedAt) - Date.parse(job.startedAt!))
+    if (job.status === "cancelled") log("warn", `Cancelled: ${job.label} after ${time}${counts}`, said)
+    else if (job.status === "done") log(job.failed ? "warn" : "success", `Finished: ${job.label} in ${time}${counts}`, said)
     publish(job, true)
     lastEmit.delete(job.id)
     emit({ type: "stats" })
@@ -206,7 +196,7 @@ async function pump(lane: Lane) {
     for (const l of finishListeners) {
       Promise.resolve()
         .then(() => l({ ...job }, outcome))
-        .catch((err) => log("warn", `After "${job.label}": ${err instanceof Error ? err.message : err}`))
+        .catch((err) => log("warn", `After "${job.label}": ${err instanceof Error ? err.message : err}`, { ...said, detail: errorDetail(err) }))
     }
     void pump(lane)
   }
@@ -241,9 +231,10 @@ export function activeJobs(): Job[] {
 
 /** Jobs that were mid-flight when the server stopped can never finish. */
 export function markInterruptedJobs() {
-  getDb()
-    .prepare("UPDATE jobs SET status = 'failed', message = 'Interrupted by server restart', finished_at = datetime('now') WHERE status IN ('queued', 'running')")
-    .run()
+  const db = getDb()
+  const cut = db.prepare("SELECT id, label FROM jobs WHERE status IN ('queued', 'running')").all() as { id: string; label: string }[]
+  db.prepare("UPDATE jobs SET status = 'failed', message = 'Interrupted by server restart', finished_at = datetime('now') WHERE status IN ('queued', 'running')").run()
+  for (const j of cut) log("warn", `Interrupted when the server stopped: ${j.label}`, { area: "jobs", jobId: j.id, jobLabel: j.label })
 }
 
 /** Run `fn` over items with bounded concurrency, stopping early on abort. */
