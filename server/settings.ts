@@ -40,6 +40,12 @@ export const SOURCE_META: Record<
     about: "Each sound system's page of featured clash recordings (mostly soundtape.com uploads on SoundCloud): which sounds played and when. A clash tape whose sounds have a page is checked against them.",
     suits: ["Sound clashes", "Dubplates & specials", "Dancehall", "Reggae"],
   },
+  whocorkthedance: {
+    label: "Who Cork The Dance",
+    needs: [],
+    about: "The dancehall sound system tape archive (whocorkthedance.com): sessions from Killamanjaro, Volcano, Jammys, Stereophonic and dozens more, 1979 on. A tape downloaded from there is recognised by its file name; others by their sounds and year. The site is read once a month.",
+    suits: ["Sound clashes", "Dancehall", "Reggae", "Dubplates & specials", "Live sets"],
+  },
   acoustid: { label: "AcoustID fingerprint", needs: ["apiKey"], keyLabel: "Application API key", env: ["ACOUSTID_API_KEY"], about: "Identifies audio by fingerprint (needs fpcalc / Chromaprint installed). Strongest signal when it hits.", signup: "https://acoustid.org/new-application" },
   "discogs-collection": {
     label: "Your Discogs collection",
@@ -61,6 +67,7 @@ const DEFAULT_SOURCES: Record<string, SourceConfig> = {
   mixcloud: { enabled: true, weight: 0.45 },
   youtube: { enabled: true, weight: 0.4 },
   soundclashhub: { enabled: true, weight: 0.6 },
+  whocorkthedance: { enabled: true, weight: 0.7 },
   acoustid: { enabled: true, weight: 1.3 },
   "discogs-collection": { enabled: true, weight: 1.2 },
 }

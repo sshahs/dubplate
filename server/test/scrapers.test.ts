@@ -15,6 +15,7 @@ import { loadSettings, SCRAPER_PRESETS, SCRAPER_REVISION, saveSettings } from ".
 import { scourTrack } from "../sources"
 import { jsonField, runScraper, scraperAdapter, scraperQueries } from "../sources/scraper"
 import { clashTitle, featuredClashes, soundclashSounds, soundsFor } from "../sources/soundclash"
+import { fileKey, readHeading, readMenu, readPage, resetWctdIndex, whoCorkTheDance, wctdIndex } from "../sources/whocorkthedance"
 import { relevance } from "../core/confidence"
 import type { SourceQuery } from "../sources/types"
 import type { Track } from "../../shared/types"
@@ -330,6 +331,94 @@ describe("SoundClash Hub's sound pages", () => {
   it("is on for installs that saved their sources before it existed", () => {
     saveSettings({ sources: { mixcloud: { enabled: false, weight: 0.45 } } })
     expect(loadSettings().sources.soundclashhub).toMatchObject({ enabled: true })
+  })
+})
+
+describe("Who Cork The Dance", () => {
+  beforeEach(() => resetWctdIndex())
+  const site = (url: string) => {
+    const page = url.replace("https://whocorkthedance.com/", "")
+    const file = { "": "wctd-home.html", "killamanjarowctd2018.html": "wctd-killamanjaro.html", "volcano.html": "wctd-volcano.html", "USAspecial.html": "wctd-usa.html" }[page]
+    return file ? asset(file) : "<html><body>Nothing here</body></html>"
+  }
+  const ask = (filePath: string, artists: string[], title = "", year?: number) =>
+    whoCorkTheDance.search({ artists, artist: artists.join(" "), title, query: "", extraQueries: [], duration: 3600, year, descriptiveTitle: !title, filePath }, { cfg: { enabled: true, weight: 0.7 }, settings: loadSettings() })
+
+  it("reads the menu: the tape pages, and which are a sound's own", () => {
+    expect(readMenu(asset("wctd-home.html"))).toEqual([
+      { url: "https://whocorkthedance.com/USAspecial.html", sound: undefined },
+      { url: "https://whocorkthedance.com/killamanjarowctd2018.html", sound: "Killamanjaro" },
+      { url: "https://whocorkthedance.com/mixes.html", sound: undefined },
+      { url: "https://whocorkthedance.com/volcano.html", sound: "Volcano Hi Power" },
+    ])
+  })
+
+  it("reads each session's sounds, place and year, and the file it downloads as", () => {
+    const jaro = readPage(asset("wctd-killamanjaro.html"), "jaro", new Set(["silverhawk"]))
+    expect(jaro.map((s) => [s.artists, s.title, s.year, s.fileKey])).toEqual([
+      [["Killamanjaro"], "Skateland, Half Way Tree Road, Kingston 5, August", 1982, "killamanjaro skateland august 82"],
+      [["Killamanjaro", "Silverhawk"], "Skateland Part 2", 1988, "killamanjaro vs silverhawk skateland 88 part 2"],
+      [["Killamanjaro", "Stone Love"], "Skateland", 1989, "killamanjaro vs stone love 1989"],
+    ])
+    // A clash posted a side at a time: one heading, above the photos and each side's lineup.
+    const volcano = readPage(asset("wctd-volcano.html"), "volcano", new Set())
+    expect(volcano.map((s) => [s.artists, s.relation, s.title, s.year, s.part])).toEqual([
+      [["Volcano", "Killamanjaro"], "vs", "121 Maxfield Avenue, Kingston 10, July", 1984, "Volcano Side"],
+      [["Volcano", "Killamanjaro"], "vs", "121 Maxfield Avenue, Kingston 10, July", 1984, "Jaro side"],
+      [["Volcano", "Killamanjaro"], "vs", "121 Maxfield Avenue, Kingston 10, July", 1984, "Jaro Part 2"],
+    ])
+    // No "@" or dash: the sound's name ends at its Hi Fi.
+    expect(readPage(asset("wctd-usa.html"), "usa", new Set()).map((s) => [s.artists, s.title, s.year])).toEqual([
+      [["Admiral International"], "Alexander Hamilton Hotel, 55 Church Street, Paterson, New Jersey, U.S.A", 1981],
+      [["African Love Hi Fi"], "Brooklyn March", 1984],
+    ])
+  })
+
+  it("reads the other ways the archive writes a heading", () => {
+    const read = (h: string, pageSound?: string) => readHeading(h, new Set(["metromedia"]), undefined, pageSound)
+    // A sound's own page numbers its sessions; the page says whose they are.
+    expect(read("Session 5 – vs King Sturgav, Tivoli Gardens Centre, Tivoli Gardens, Kingston 14, 12th July 1979", "Stereophonic")).toMatchObject({
+      artists: ["Stereophonic", "King Sturgav"],
+      relation: "vs",
+      title: "Tivoli Gardens Centre, Tivoli Gardens, Kingston 14, 12th July",
+      year: 1979,
+    })
+    expect(read("King Sturgav Hi Fi vs Stereophonic, Tivoli Gardens Centre, Kingston 14, 12th July 1979")).toMatchObject({ artists: ["King Sturgav Hi Fi", "Stereophonic"], relation: "vs" })
+    expect(read("Graphic Superpower vs. Java 1989")).toMatchObject({ artists: ["Graphic Superpower", "Java"], relation: "vs", year: 1989 })
+    expect(read("Jah Revelation/Jah Love @ The Black Swan, Easton, Bristol, U.K. 19th March 1999")).toMatchObject({ artists: ["Jah Revelation", "Jah Love"], year: 1999 })
+    expect(read("King Jammys vs Metromedia Stand Pipe Lawn 24-10-1985")).toMatchObject({ artists: ["King Jammys", "Metromedia"], year: 1985 })
+    expect(read("King Jammys Superpower Ascot Drive In, Old Harbour, St Catherine JA")).toMatchObject({ artists: ["King Jammys Superpower"], title: "Ascot Drive In, Old Harbour, St Catherine JA" })
+  })
+
+  it("knows a downloaded tape by its file name, without the archive's numbering and credits", () => {
+    expect(fileKey("killamanjaro vs stone love 1989keithjaymandrew.mp3")).toBe("killamanjaro vs stone love 1989")
+    expect(fileKey("03b Arrows vs Jaro skateland December 1982jaymandrew.mp3")).toBe("arrows vs jaro skateland december 1982")
+    expect(fileKey("28 killamanjaro vs volcano Pt 2keimojaymandrew.mp3")).toBe("killamanjaro vs volcano pt 2")
+    expect(fileKey("Killamanjaro_vs_Stone_Love_1989.MP3")).toBe("killamanjaro vs stone love 1989")
+  })
+
+  it("reads the site once, and matches a track by its file or by its sounds and year", async () => {
+    let fetched = 0
+    vi.stubGlobal("fetch", async (url: string | URL | Request) => (fetched++, new Response(site(String(url)))))
+    // Kept as downloaded: recognised outright.
+    const kept = await ask("/music/Clashes/killamanjaro vs stone love 1989keithjaymandrew.mp3", ["Killamanjaro", "Stone Love"])
+    expect(kept[0]).toMatchObject({ source: "whocorkthedance", artists: ["Killamanjaro", "Stone Love"], title: "Skateland", year: 1989, sourceScore: 1, url: "https://whocorkthedance.com/killamanjarowctd2018.html" })
+    expect(fetched).toBe(5)
+    // Renamed: found by its sounds ("Jaro" is Killamanjaro) and year, without a second look at the site.
+    const renamed = await ask("/music/Jaro vs Stone Love - Skateland 89.mp3", ["Jaro", "Stone Love"], "Skateland", 1989)
+    expect(renamed[0]).toMatchObject({ artists: ["Killamanjaro", "Stone Love"], year: 1989 })
+    expect(renamed[0].sourceScore).toBeUndefined()
+    const h = { artists: ["Killamanjaro", "Stone Love"], title: "Skateland", from: "heuristic" as const, descriptive: false }
+    expect(relevance(h, renamed[0])).toBeGreaterThan(0.55)
+    expect(fetched).toBe(5)
+    expect((await wctdIndex()).length).toBe(8)
+    // Nothing of a track's sounds there: nothing offered.
+    expect(await ask("/music/Buju Banton - Murderer.mp3", ["Buju Banton"], "Murderer")).toEqual([])
+  })
+
+  it("is on for installs that saved their sources before it existed", () => {
+    saveSettings({ sources: { mixcloud: { enabled: false, weight: 0.45 } } })
+    expect(loadSettings().sources.whocorkthedance).toMatchObject({ enabled: true })
   })
 })
 

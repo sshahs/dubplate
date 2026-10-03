@@ -334,6 +334,7 @@ export type SourceId =
   | "acoustid"
   | "discogs-collection"
   | "soundclashhub"
+  | "whocorkthedance"
   | `scraper:${string}`
 
 /**

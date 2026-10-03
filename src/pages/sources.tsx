@@ -51,7 +51,7 @@ const GROUPS: { id: GroupId; label: string; icon: SectionItem["icon"]; title: st
     icon: Vynil01Icon,
     title: "Underground",
     description: "Where specials, clash tapes, radio sets and white labels actually turn up.",
-    ids: ["bandcamp", "archive", "mixcloud", "youtube", "soundclashhub"],
+    ids: ["bandcamp", "archive", "mixcloud", "youtube", "soundclashhub", "whocorkthedance"],
   },
   {
     id: "fingerprint",
