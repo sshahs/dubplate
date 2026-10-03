@@ -236,6 +236,7 @@ export interface BulkChanges {
   album?: string | null
   year?: number | null
   label?: string | null
+  riddim?: string | null
   genre?: string | null
   bpm?: number | null
   key?: string | null

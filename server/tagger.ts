@@ -45,6 +45,8 @@ const TAG_TYPE_BY_EXT: Record<string, TagTypes> = {
 
 /** The field name most taggers (Mp3tag, foobar2000, Picard plugins) use for a Discogs release. */
 const DISCOGS_RELEASE = "DISCOGS_RELEASE_ID"
+/** No tag standard has a riddim; this is the plain name Mp3tag, foobar2000 and MusicBee show for a custom field. */
+export const RIDDIM = "RIDDIM"
 /** WMA's own names for the label and the musical key. */
 export const ASF_LABEL = "WM/Publisher"
 export const ASF_KEY = "WM/InitialKey"
@@ -175,6 +177,8 @@ export function readManagedTags(file: string): ExistingTags {
       year: t.year || undefined,
       genre: t.genres?.length ? [...t.genres] : undefined,
       label: t.publisher || (asf ? readCustom(f, ext, ASF_LABEL) : undefined),
+      riddim: readCustom(f, ext, RIDDIM),
+      grouping: t.grouping || undefined,
       comment: t.comment || undefined,
       bpm: t.beatsPerMinute || undefined,
       track: t.track || undefined,
@@ -216,6 +220,8 @@ export function writeTags(file: string, changes: Partial<Record<keyof ExistingTa
     if ("year" in changes) t.year = Number(changes.year) || 0
     if ("genre" in changes) t.genres = Array.isArray(changes.genre) ? (changes.genre as string[]) : str(changes.genre) ? [String(changes.genre)] : []
     if ("label" in changes) t.publisher = str(changes.label)
+    if ("riddim" in changes) writeCustom(f, ext, RIDDIM, str(changes.riddim))
+    if ("grouping" in changes) t.grouping = str(changes.grouping)
     if ("comment" in changes) t.comment = str(changes.comment)
     if ("bpm" in changes) t.beatsPerMinute = Math.round(Number(changes.bpm)) || 0
     // 0 clears a number.

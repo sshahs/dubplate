@@ -111,11 +111,12 @@ type BulkChanges = {
   album?: string | null
   year?: number | null
   label?: string | null
+  riddim?: string | null
   genre?: string | null
   bpm?: number | null
   key?: string | null
 }
-const META_FIELDS = ["artists", "featuring", "version", "album", "year", "label", "genre"] as const
+const META_FIELDS = ["artists", "featuring", "version", "album", "year", "label", "riddim", "genre"] as const
 
 /** The metadata a track would be tagged with right now, however far it's got. */
 function currentMeta(t: Track): Partial<FinalMeta> | null {
@@ -141,6 +142,7 @@ function sanitizeFinal(input: Partial<FinalMeta>): FinalMeta {
     year: Number.isFinite(year) && year > 1900 && year < 2100 ? year : undefined,
     album: clean(input.album) || undefined,
     label: clean(input.label) || undefined,
+    riddim: clean(input.riddim).replace(/\s+riddim$/i, "") || undefined,
     genre: clean(input.genre) || undefined,
   }
 }

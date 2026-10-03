@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Candidate, Decision, Job, MediaServerConfig, Settings } from "../../shared/types"
 import { isBackup, makeBackup, restoreBackup } from "../backup"
 import { idsFor } from "../core/ids"
-import { tagsFor } from "../core/naming"
+import { FOLDER_PRESETS, renderFolderTemplate } from "../core/folders"
+import { renderTemplate, tagsFor } from "../core/naming"
 import { getDb, openDb, setDb } from "../db"
 import { messageForJob, sendChat } from "../integrations/chat"
 import { refreshMediaServer, subsonicUrl, testMediaServer } from "../integrations/media-servers"
@@ -14,6 +15,7 @@ import { weightsFrom } from "../pipeline"
 import * as repo from "../repo"
 import { readAudio } from "../scanner"
 import { DEFAULT_SETTINGS, loadSettings, publicSettings, saveSettings } from "../settings"
+import { findFfmpeg, runFfmpeg } from "../media/ffmpeg"
 import { readManagedTags, writeTags } from "../tagger"
 import { writeMp3 } from "./fixtures"
 
@@ -68,6 +70,56 @@ describe("catalogue IDs", () => {
     expect(readManagedTags(file).discogsReleaseId).toBeUndefined()
     expect(readManagedTags(file).mbRecordingId).toBeUndefined()
   })
+})
+
+describe("the riddim in tags", () => {
+  const meta = { artists: ["Tenor Saw"], featuring: [], title: "Ring The Alarm", riddim: "Stalag" }
+
+  it("goes in its own field, and in Grouping where that's empty", () => {
+    const naming = DEFAULT_SETTINGS.naming
+    expect(tagsFor(meta, {}, naming)).toMatchObject({ riddim: "Stalag", grouping: "Stalag" })
+    // A file that already says, or uses Grouping for something else, is left alone.
+    expect(tagsFor(meta, { riddim: "Stalag 17", grouping: "Selecta crate" }, naming)).not.toHaveProperty("riddim")
+    expect(tagsFor(meta, { grouping: "Selecta crate" }, naming)).not.toHaveProperty("grouping")
+    expect(tagsFor(meta, {}, { ...naming, riddimGrouping: false })).not.toHaveProperty("grouping")
+    expect(tagsFor({ ...meta, riddim: undefined }, {}, naming)).not.toHaveProperty("riddim")
+  })
+
+  it("names files and folders with {riddim}", () => {
+    expect(renderTemplate("{artist} - {title} [{riddim} riddim]", meta, DEFAULT_SETTINGS.naming)).toBe("Tenor Saw - Ring The Alarm [Stalag riddim]")
+    expect(renderTemplate("{artist} - {title} [{riddim}]", { ...meta, riddim: undefined }, DEFAULT_SETTINGS.naming)).toBe("Tenor Saw - Ring The Alarm")
+    const template = FOLDER_PRESETS.find((p) => p.id === "genre-riddim")!.template
+    expect(renderFolderTemplate(template, { genre: "Dancehall", riddim: "Stalag" })).toBe("Dancehall/Stalag")
+    expect(renderFolderTemplate(template, { genre: "Dancehall" })).toBe("Dancehall")
+  })
+
+  const roundTrip = async (file: string) => {
+    writeTags(file, { artist: "Tenor Saw", title: "Ring The Alarm", riddim: "Stalag", grouping: "Stalag" })
+    expect(readManagedTags(file)).toMatchObject({ riddim: "Stalag", grouping: "Stalag" })
+    // What the scanner (music-metadata, as other players read it) finds.
+    expect((await readAudio(file)).tags).toMatchObject({ riddim: "Stalag", grouping: "Stalag" })
+    writeTags(file, { riddim: null, grouping: null })
+    expect(readManagedTags(file).riddim).toBeUndefined()
+    expect(readManagedTags(file).grouping).toBeUndefined()
+  }
+
+  it("is written and read back in an MP3 (TXXX:RIDDIM, TIT1) and a WMA", async () => {
+    const mp3 = path.join(dir, "t.mp3")
+    writeMp3(mp3)
+    await roundTrip(mp3)
+    const wma = path.join(dir, "t.wma")
+    fs.copyFileSync(path.join(import.meta.dirname, "assets", "tone.wma"), wma)
+    await roundTrip(wma)
+  })
+
+  // ffmpeg's own encoders only, so it runs wherever ffmpeg does (FLAC covers Ogg's Vorbis comments too).
+  it.skipIf(!findFfmpeg())("is written and read back in FLAC (a Vorbis comment) and M4A (an iTunes item)", async () => {
+    for (const ext of ["flac", "m4a"]) {
+      const file = path.join(dir, `t.${ext}`)
+      await runFfmpeg(["-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "0.5", ...(ext === "m4a" ? ["-c:a", "aac"] : []), file])
+      await roundTrip(file)
+    }
+  }, 30_000)
 })
 
 describe("backup and restore", () => {

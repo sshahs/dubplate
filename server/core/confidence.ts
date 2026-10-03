@@ -337,6 +337,7 @@ export function scoreTrack(input: ScoreInput): Decision {
     year: reading.year,
     album: reading.album,
     label: reading.label,
+    riddim: reading.riddim,
     genre: reading.genre,
     confidence,
     status,
@@ -488,7 +489,7 @@ function mergeFromSources(reading: TrackReading, rep: Candidate, cluster: Candid
   const years = cluster.map((c) => c.year).filter((y): y is number => !!y)
   const isRecordingSpecific = /live|dubplate|special|clash/i.test(reading.version ?? "")
   const year = isRecordingSpecific ? (reading.year ?? (years.length ? Math.min(...years) : undefined)) : years.length ? Math.min(...years) : reading.year
-  const withMeta = (field: "album" | "label" | "genre") =>
+  const withMeta = (field: "album" | "label" | "riddim" | "genre") =>
     [...cluster].sort((a, b) => Number(b.source === "discogs" || b.source === "musicbrainz") - Number(a.source === "discogs" || a.source === "musicbrainz")).find((c) => c[field])?.[field]
   return {
     ...reading,
@@ -499,6 +500,7 @@ function mergeFromSources(reading: TrackReading, rep: Candidate, cluster: Candid
     year,
     album: reading.album ?? withMeta("album"),
     label: reading.label ?? withMeta("label"),
+    riddim: reading.riddim ?? withMeta("riddim"),
     genre: reading.genre ?? withMeta("genre"),
   }
 }

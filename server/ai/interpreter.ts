@@ -194,7 +194,8 @@ export function sanitizeAi(raw: unknown, provider: LlmProviderConfig, aliases: M
     title: str(r.title),
     version: strOrUndef(r.version),
     year: Number.isFinite(year) && year > 1900 && year < 2100 ? year : undefined,
-    riddim: strOrUndef(r.riddim),
+    // "Diwali Riddim" → "Diwali": the app adds the word where it says it.
+    riddim: strOrUndef(r.riddim)?.replace(/(?:^|\s+)riddim$/i, "") || undefined,
     event: strOrUndef(r.event),
     label: strOrUndef(r.label),
     genre: strOrUndef(r.genre),

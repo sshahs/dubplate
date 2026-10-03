@@ -52,6 +52,19 @@ describe("scoreTrack", () => {
     expect(d.clusters[0].sources).toEqual(expect.arrayContaining(["musicbrainz", "itunes", "deezer"]))
   })
 
+  it("takes the riddim a riddim database gives, unless the reading already names one", () => {
+    const tune = (riddim?: string) =>
+      scoreTrack(
+        input({
+          ai: ai({ artists: ["Tenor Saw"], title: "Ring The Alarm", riddim }),
+          weights: { ...weights, riddimguide: 0.75, reggaefever: 0.8 },
+          candidates: [cand("musicbrainz", "Tenor Saw", "Ring The Alarm"), cand("riddimguide", "Tenor Saw", "Ring The Alarm", { riddim: "Stalag", label: "Techniques", year: 1985 })],
+        })
+      )
+    expect(tune()).toMatchObject({ riddim: "Stalag", label: "Techniques", year: 1985 })
+    expect(tune("Stalag 17").riddim).toBe("Stalag 17")
+  })
+
   it("uses the source spelling but keeps the file's version", () => {
     const d = scoreTrack(
       input({

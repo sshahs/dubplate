@@ -6,6 +6,8 @@ import { junkResults, recordScraperAnswer, sourceHealth } from "../source-health
 import { acoustid } from "./acoustid"
 import { mainstreamSources } from "./catalog"
 import { discogsCollection } from "./discogs-collection"
+import { raveSources } from "./rave"
+import { riddimSources } from "./riddims"
 import { scraperAdapter } from "./scraper"
 import { soundclashSounds } from "./soundclash"
 import { whoCorkTheDance } from "./whocorkthedance"
@@ -13,7 +15,7 @@ import type { SourceAdapter, SourceQuery } from "./types"
 import { undergroundSources } from "./underground"
 
 export function allAdapters(settings: Settings): { adapter: SourceAdapter; cfg: SourceConfig }[] {
-  const builtIn = [...mainstreamSources(), discogsCollection, ...undergroundSources(), soundclashSounds, whoCorkTheDance, acoustid].map((adapter) => ({
+  const builtIn = [...mainstreamSources(), discogsCollection, ...undergroundSources(), soundclashSounds, whoCorkTheDance, ...riddimSources(), ...raveSources(), acoustid].map((adapter) => ({
     adapter,
     cfg: settings.sources[adapter.id] ?? { enabled: false, weight: 0.5 },
   }))
@@ -87,6 +89,7 @@ export function buildQuery(track: Track, reading: TrackReading, extraQueries: st
     year: reading.year,
     descriptiveTitle,
     version: reading.version,
+    riddim: reading.riddim,
     filePath: track.path,
   }
 }
@@ -100,7 +103,10 @@ const DAY = 86_400_000
  */
 export function lookupKey(sourceId: string, q: SourceQuery): string {
   const bucket = q.duration ? Math.round(q.duration / 5) : "-"
-  return [sourceId, q.artists.map(normArtist).join("|"), normTitle(q.title), normTitle(q.version ?? ""), bucket].join("::")
+  const key = [sourceId, q.artists.map(normArtist).join("|"), normTitle(q.title), normTitle(q.version ?? ""), bucket]
+  // A riddim decides what Riddims World finds, so a reading naming one is asked again.
+  if (q.riddim) key.push(`riddim:${normTitle(q.riddim)}`)
+  return key.join("::")
 }
 
 function cachedLookup(key: string): Candidate[] | null {

@@ -15,6 +15,7 @@ const FIELDS = [
   { key: "album", label: "Album", placeholder: "" },
   { key: "year", label: "Year", placeholder: "e.g. 1994" },
   { key: "label", label: "Label", placeholder: "e.g. Greensleeves" },
+  { key: "riddim", label: "Riddim", placeholder: "e.g. Stalag" },
   { key: "genre", label: "Genre", placeholder: "e.g. Dancehall" },
   { key: "bpm", label: "BPM", placeholder: "e.g. 140" },
   { key: "key", label: "Key", placeholder: "Am, F#, or Camelot 8A" },

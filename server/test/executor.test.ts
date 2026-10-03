@@ -9,6 +9,7 @@ import type { JobContext } from "../jobs"
 import * as repo from "../repo"
 import { readAudio, scanLibrary } from "../scanner"
 import { DEFAULT_SETTINGS } from "../settings"
+import { readManagedTags, writeTags } from "../tagger"
 import { writeMp3, writeWav } from "./fixtures"
 
 let dir: string
@@ -88,6 +89,32 @@ describe("scan → approve → execute → rewind", () => {
     expect(restored.tags.artist).toBeUndefined()
     expect(restored.tags.title).toBeUndefined()
     expect(repo.getTrack(clash.id)!.path).toBe(mp3)
+  })
+
+  it("writes the riddim, and never over a Grouping the file already has", async () => {
+    const plain = path.join(dir, "tenor saw - ring the alarm.mp3")
+    const crated = path.join(dir, "sister nancy - bam bam.mp3")
+    writeMp3(plain)
+    writeMp3(crated)
+    writeTags(crated, { grouping: "Selecta crate" })
+    const lib = repo.addLibrary(dir, "Test")
+    await scanLibrary(lib, settings, ctx())
+    const [a, b] = ["tenor saw", "sister nancy"].map((n) => repo.queryTracks({}).items.find((t) => t.filename.startsWith(n))!)
+    expect(b.tags.grouping).toBe("Selecta crate")
+    // As if scanned before Dubplate read Grouping: the plan can't know it's there, the cut has to look.
+    repo.updateTrack(b.id, { tags: { ...b.tags, grouping: undefined } })
+    repo.updateTrack(a.id, { final: { artists: ["Tenor Saw"], featuring: [], title: "Ring The Alarm", riddim: "Stalag" }, status: "approved" })
+    repo.updateTrack(b.id, { final: { artists: ["Sister Nancy"], featuring: [], title: "Bam Bam", riddim: "Stalag" }, status: "approved" })
+    const plan = buildPlan(repo.getTracks([a.id, b.id]), settings)
+    expect(plan.find((p) => p.trackId === b.id)!.tagChanges.map((c) => c.field)).toContain("grouping")
+    const batchId = await executePlan(plan, settings, { dryRun: false }, ctx())
+    const after = (id: number) => readManagedTags(repo.getTrack(id)!.path)
+    expect(after(a.id)).toMatchObject({ riddim: "Stalag", grouping: "Stalag" })
+    expect(after(b.id)).toMatchObject({ riddim: "Stalag", grouping: "Selecta crate" })
+    expect(repo.getTrack(b.id)!.tags.grouping).toBe("Selecta crate")
+    await rewind(null, batchId, ctx())
+    expect(readManagedTags(plain)).toMatchObject({ riddim: undefined, grouping: undefined })
+    expect(readManagedTags(crated)).toMatchObject({ riddim: undefined, grouping: "Selecta crate" })
   })
 
   it("blocks collisions instead of overwriting", async () => {

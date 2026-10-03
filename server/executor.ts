@@ -9,7 +9,7 @@ import { formatKey } from "../shared/keys"
 import type { ExistingTags, FileCheck, Library, Operation, PlanItem, Settings, Track } from "../shared/types"
 import { artToEmbed, describeArt, cachedArt } from "./art"
 import { idsFor } from "./core/ids"
-import { tagDiff, tagsFor, type TagExtras } from "./core/naming"
+import { FILL_ONLY, tagDiff, tagsFor, type TagExtras } from "./core/naming"
 import { mismatch, sniffFileSync } from "./sniff"
 import { ensureDir, followableSidecars, isInside, moveFile, removeCreatedDirs, removeEmptyDirs, sameFile } from "./fsops"
 import type { JobContext } from "./jobs"
@@ -235,25 +235,31 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
       continue
     }
     const kind: Operation["kind"] = item.rename && item.tagChanges.length ? "rename+tag" : item.rename ? "rename" : "tag"
-    const fields = item.tagChanges.map((c) => c.field)
     const base = { batchId, trackId: track.id, kind, fromPath: item.fromPath, toPath: item.toPath, tagsAfter: item.tags, statusBefore: track.status, batchLabel: label }
     if (opts.dryRun) {
-      insertOperation({ ...base, tagsBefore: pickBefore(track.tags, fields), status: "dry-run", error: null })
+      insertOperation({ ...base, tagsBefore: pickBefore(track.tags, item.tagChanges.map((c) => c.field)), status: "dry-run", error: null })
       ctx.tick(true, item.toName)
       continue
     }
     let tagsBefore: ExistingTags | null = null
     let createdDirs: string[] = []
+    // What the file ends up with: the planned tags, less any gap the file had already filled.
+    let tagsAfter = item.tags
     try {
       const st = await fs.promises.stat(track.path)
       if (st.size !== track.size || Math.round(st.mtimeMs) !== Math.round(track.mtimeMs)) {
         throw new Error("File changed on disk since it was scanned - rescan first")
       }
       if (item.tagChanges.length) {
-        tagsBefore = pickBefore(readManagedTags(track.path), fields)
+        const live = readManagedTags(track.path)
+        const filled = (f: keyof ExistingTags) => FILL_ONLY.has(f) && live[f] !== undefined && live[f] !== ""
+        const writes = item.tagChanges.filter((c) => !filled(c.field))
+        tagsAfter = { ...item.tags }
+        for (const c of item.tagChanges) if (filled(c.field)) (tagsAfter as Record<string, unknown>)[c.field] = live[c.field]
+        tagsBefore = pickBefore(live, writes.map((c) => c.field))
         const changes: Partial<Record<keyof ExistingTags, unknown>> = {}
-        for (const c of item.tagChanges) changes[c.field] = c.after
-        writeTags(track.path, changes)
+        for (const c of writes) changes[c.field] = c.after
+        if (writes.length) writeTags(track.path, changes)
       }
       if (item.rename) {
         createdDirs = await ensureDir(path.dirname(item.toPath))
@@ -274,13 +280,13 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
         ...(item.toLibraryId ? { libraryId: item.toLibraryId } : {}),
         size: after.size,
         mtimeMs: after.mtimeMs,
-        tags: { ...track.tags, ...item.tags },
+        tags: { ...track.tags, ...tagsAfter },
         status: "done",
         proposedName: path.basename(item.toPath),
         // The found cover is now the file's own.
         ...(embedded ? { art: track.artFound, artFound: null } : {}),
       })
-      insertOperation({ ...base, tagsBefore, status: "done", error: null, createdDirs })
+      insertOperation({ ...base, tagsAfter, tagsBefore, status: "done", error: null, createdDirs })
       changed.push(track.id)
       ctx.tick(true, item.toName)
     } catch (err) {

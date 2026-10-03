@@ -28,6 +28,12 @@ describe("AI reply handling", () => {
     expect(extractJson('Sure! Here you go: {"title":"Murderer","x":{"y":"}"}} hope that helps')).toEqual({ title: "Murderer", x: { y: "}" } })
   })
 
+  it("keeps the riddim's name without the word riddim", () => {
+    expect(sanitizeAi({ artists: ["Sister Nancy"], title: "Bam Bam", riddim: "Stalag Riddim" }, provider, new Map()).riddim).toBe("Stalag")
+    expect(sanitizeAi({ artists: ["Sister Nancy"], title: "Bam Bam", riddim: " riddim " }, provider, new Map()).riddim).toBeUndefined()
+    expect(sanitizeAi({ artists: ["Sister Nancy"], title: "Bam Bam", riddim: null }, provider, new Map()).riddim).toBeUndefined()
+  })
+
   it("coerces sloppy model output and applies aliases", () => {
     const ai = sanitizeAi(
       { artists: ["buju", " Beenie Man "], title: " Murderer ", confidence: 87, year: "1993", relation: "VS", alternatives: [{ artists: ["Buju Banton"], title: "" }, {}] },

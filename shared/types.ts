@@ -42,6 +42,10 @@ export interface ExistingTags {
   disc?: number
   discTotal?: number
   label?: string
+  /** the riddim, in its own RIDDIM field (TXXX on MP3, a Vorbis comment on FLAC/OGG, an iTunes item on M4A) */
+  riddim?: string
+  /** the Grouping field (TIT1 / ©grp), which Serato and Apple Music show as a column */
+  grouping?: string
   comment?: string
   bpm?: number
   /** musical key, e.g. "Am" or "F#" */
@@ -335,6 +339,14 @@ export type SourceId =
   | "discogs-collection"
   | "soundclashhub"
   | "whocorkthedance"
+  | "riddimguide"
+  | "riddimid"
+  | "reggaefever"
+  | "riddimsworld"
+  | "ravetapepacks"
+  | "ravearchive"
+  | "mixesdb"
+  | "junglist"
   | `scraper:${string}`
 
 /**
@@ -376,6 +388,8 @@ export interface Candidate {
   album?: string
   year?: number
   label?: string
+  /** the riddim a tune is voiced on, where the source names it */
+  riddim?: string
   genre?: string
   duration?: number // seconds
   url?: string
@@ -423,6 +437,7 @@ export interface Decision {
   year?: number
   album?: string
   label?: string
+  riddim?: string
   genre?: string
   confidence: number // 0..100
   status: Extract<TrackStatus, "matched" | "review" | "conflict" | "unmatched">
@@ -573,6 +588,7 @@ export interface FinalMeta {
   year?: number
   album?: string
   label?: string
+  riddim?: string
   genre?: string
 }
 
@@ -891,6 +907,8 @@ export interface Settings {
     renameFiles: boolean
     writeTags: boolean
     tagComment: boolean
+    /** put the riddim in Grouping too, where the file has nothing there */
+    riddimGrouping: boolean
     /** write MusicBrainz and Discogs IDs when the sources found them */
     writeIds: boolean
     /** give a file whose extension is wrong for its format the right one when cutting */

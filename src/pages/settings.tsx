@@ -471,7 +471,7 @@ const FEATURING = [
   { value: "title" as const, label: "Artist - Title (feat. Guest)" },
   { value: "drop" as const, label: "Leave featuring out" },
 ]
-const TOKENS = ["artist", "title", "song", "version", "year", "album", "label", "featuring", "genre", "position", "track", "disc"]
+const TOKENS = ["artist", "title", "song", "version", "year", "album", "label", "riddim", "featuring", "genre", "position", "track", "disc"]
 
 // ---------- page ----------
 
@@ -747,11 +747,17 @@ export default function SettingsPage() {
                 </CardHeader>
                 <CardContent>
                   <SettingRows>
-                    <SettingRow title="Write tags" description="Artist and title always; album, year, genre and label only where the file has none.">
+                    <SettingRow title="Write tags" description="Artist and title always; album, year, genre, label and riddim only where the file has none.">
                       <Switch checked={draft.naming.writeTags} onCheckedChange={(v) => set((d) => void (d.naming.writeTags = v))} aria-label="Write tags" />
                     </SettingRow>
                     <SettingRow title="Sign the comment" description="Adds “Identified by Dubplate” to the comment tag.">
                       <Switch checked={draft.naming.tagComment} onCheckedChange={(v) => set((d) => void (d.naming.tagComment = v))} aria-label="Sign the comment" />
+                    </SettingRow>
+                    <SettingRow
+                      title="Riddim in Grouping too"
+                      description="The riddim always goes in its own RIDDIM tag. This also puts it in Grouping, where the file has nothing there - Serato and Apple Music show Grouping as a column."
+                    >
+                      <Switch checked={draft.naming.riddimGrouping} onCheckedChange={(v) => set((d) => void (d.naming.riddimGrouping = v))} aria-label="Riddim in Grouping too" />
                     </SettingRow>
                     <SettingRow
                       title="Write MusicBrainz and Discogs IDs"
