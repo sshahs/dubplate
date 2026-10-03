@@ -14,6 +14,8 @@ import { scanLibrary } from "../scanner"
 import { loadSettings, SCRAPER_PRESETS, SCRAPER_REVISION, saveSettings } from "../settings"
 import { scourTrack } from "../sources"
 import { jsonField, runScraper, scraperAdapter, scraperQueries } from "../sources/scraper"
+import { clashTitle, featuredClashes, soundclashSounds, soundsFor } from "../sources/soundclash"
+import { relevance } from "../core/confidence"
 import type { SourceQuery } from "../sources/types"
 import type { Track } from "../../shared/types"
 import { writeMp3 } from "./fixtures"
@@ -264,6 +266,86 @@ describe("saved presets", () => {
 
   it("a new install doesn't get the retired ones at all", () => {
     expect(loadSettings().scrapers.map((s) => s.id)).not.toContain("allmusic")
+  })
+})
+
+describe("SoundClash Hub's sound pages", () => {
+  const directory = () => (JSON.parse(asset("soundclashhub-sounds.json")) as { sounds: { name: string; slug: string }[] }).sounds
+  const names = (artists: string[]) => soundsFor(artists, directory()).map((s) => s.name)
+
+  it("knows a sound by the names files use for it", () => {
+    expect(names(["Killamanjaro", "Stone Love"])).toEqual(["Killamanjaro", "Stone Love"])
+    expect(names(["Jaro", "Addies"])).toEqual(["Killamanjaro", "King Addies"])
+    expect(names(["Saxon", "King Jammys"])).toEqual(["Saxon Sound", "King Jammy's"])
+    expect(names(["Volcano"])).toEqual(["Volcano Hi-Power"])
+    expect(names(["Coxsone"])).toEqual(["Coxsone Sound"])
+    expect(names(["Buju Banton", "Bass"])).toEqual([])
+  })
+
+  it("reads a sound's featured clashes from its page, or from its players if the page data moves", () => {
+    const fromData = featuredClashes(asset("soundclashhub-killamanjaro.html"))
+    expect(fromData).toEqual([
+      { title: "Killamanjaro vs King Addies - NY (Classic)", year: 1993, embedId: "soundtapedotcom/jaro-addies93", platform: "soundcloud", opponents: ["King Addies"] },
+      { title: "Killamanjaro vs Bass Odyssey - Miami", year: 1996, embedId: "soundtapedotcom/killamanjaro-bass96", platform: "soundcloud", opponents: ["Bass Odyssey"] },
+      { title: "Killamanjaro vs Silver Hawk ft. Ninjaman", year: 1988, embedId: "soundtapedotcom/killamanjaro-silverhawk88", platform: "soundcloud", opponents: ["Silver Hawk"] },
+    ])
+    const fromCards = featuredClashes(asset("soundclashhub-killamanjaro-cards.html"))
+    expect(fromCards.map((c) => [c.title, c.year, c.opponents, c.url])).toEqual([
+      ["Killamanjaro vs King Addies - NY (Classic)", 1993, ["King Addies"], "https://soundcloud.com/soundtapedotcom/jaro-addies93"],
+      ["Killamanjaro vs Bass Odyssey - Miami", 1996, ["Bass Odyssey"], "https://soundcloud.com/soundtapedotcom/killamanjaro-bass96"],
+      ["Killamanjaro vs Silver Hawk ft. Ninjaman", 1988, ["Silver Hawk"], "https://soundcloud.com/soundtapedotcom/killamanjaro-silverhawk88"],
+    ])
+  })
+
+  it("titles a clash by what's left once its sounds are taken off", () => {
+    expect(clashTitle("Killamanjaro vs King Addies - NY (Classic)", ["Killamanjaro", "King Addies"])).toBe("NY (Classic)")
+    expect(clashTitle("King Addies vs Saxon - Bermuda", ["King Addies", "Saxon Sound"])).toBe("Bermuda")
+    expect(clashTitle("Stone Love vs Bodyguard (Classic Dubplates)", ["Stone Love", "Bodyguard"])).toBe("Classic Dubplates")
+    expect(clashTitle("Killamanjaro vs Silver Hawk ft. Ninjaman", ["Killamanjaro", "Silver Hawk"])).toBe("Clash")
+  })
+
+  it("offers the featured clashes of a track's sounds, linked to their recordings", async () => {
+    const urls = mockFetch((url) => (url.endsWith("/api/sounds") ? asset("soundclashhub-sounds.json") : url.endsWith("/sounds/killamanjaro") ? asset("soundclashhub-killamanjaro.html") : "<html>not found</html>"))
+    const q: SourceQuery = { artists: ["Killamanjaro", "King Addies"], artist: "Killamanjaro King Addies", title: "NY", query: "Killamanjaro NY", extraQueries: [], duration: 3600, year: 1993, descriptiveTitle: false, filePath: "" }
+    const hits = await soundclashSounds.search(q, { cfg: { enabled: true, weight: 0.6 }, settings: loadSettings() })
+    expect(urls).toEqual(["https://soundclashhub.com/api/sounds", "https://soundclashhub.com/sounds/killamanjaro", "https://soundclashhub.com/sounds/king-addies"])
+    expect(hits[0]).toMatchObject({
+      source: "soundclashhub",
+      artists: ["Killamanjaro", "King Addies"],
+      title: "NY (Classic)",
+      year: 1993,
+      url: "https://soundcloud.com/soundtapedotcom/jaro-addies93",
+    })
+    // The matching clash counts; another of the same sound's doesn't.
+    const h = { artists: ["Killamanjaro", "King Addies"], title: "NY", from: "heuristic" as const, descriptive: false }
+    expect(relevance(h, hits[0])).toBeGreaterThan(0.55)
+    expect(relevance(h, hits[1])).toBeLessThan(0.55)
+    // A track with no sound on the site asks nothing more than the (cached) list.
+    vi.unstubAllGlobals()
+    const again = mockFetch(() => asset("soundclashhub-sounds.json"))
+    expect(await soundclashSounds.search({ ...q, artists: ["Buju Banton"] }, { cfg: { enabled: true, weight: 0.6 }, settings: loadSettings() })).toEqual([])
+    expect(again).toEqual([])
+  })
+
+  it("is on for installs that saved their sources before it existed", () => {
+    saveSettings({ sources: { mixcloud: { enabled: false, weight: 0.45 } } })
+    expect(loadSettings().sources.soundclashhub).toMatchObject({ enabled: true })
+  })
+})
+
+describe("SoundCloud", () => {
+  it("reads the results SoundCloud serves without JavaScript, soundtape.com's clash tapes among them", async () => {
+    const urls = mockFetch(() => asset("soundcloud-search.html"))
+    const r = await runScraper(preset("soundcloud"), query("killamanjaro stone love"))
+    expect(urls[0]).toBe("https://soundcloud.com/search/sounds?q=killamanjaro%20stone%20love")
+    expect(r.itemCount).toBe(10)
+    expect(r.candidates.find((c) => c.url?.includes("soundtapedotcom"))).toMatchObject({
+      artists: ["Killamanjaro", "Stone Love"],
+      title: "Clash",
+      year: 1994,
+      url: "https://soundcloud.com/soundtapedotcom/killamanjaro-vs-stone-love-1994-feat-josie-wales-hugh-brown-ricky-trooper",
+    })
+    expect(r.candidates.find((c) => c.url?.includes("metro-media"))).toMatchObject({ artists: ["Killamanjaro", "Stone Love", "Metro Media"] })
   })
 })
 

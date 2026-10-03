@@ -53,8 +53,10 @@ function toCandidate(def: ScraperDefinition, raw: RawHit, baseUrl: string): Cand
   if (!artists?.length) artists = undefined
   let artist = artists ? artists.join(", ") : raw.artist ? decodeHtml(raw.artist) : ""
   let title = raw.title ? decodeHtml(raw.title) : ""
+  let year: number | undefined
   if ((!artist || !title) && raw.combined) {
     const read = readCombined(decodeHtml(raw.combined))
+    year = read.year
     artist ||= read.artist
     artists = read.artists
     title ||= read.title
@@ -70,7 +72,7 @@ function toCandidate(def: ScraperDefinition, raw: RawHit, baseUrl: string): Cand
     title,
     album: raw.album ? decodeHtml(raw.album) : undefined,
     label: raw.label ? decodeHtml(raw.label) : undefined,
-    year: yearOf(raw.year),
+    year: yearOf(raw.year) ?? year,
     url,
     artwork: absolute(raw.artwork, baseUrl),
   }
@@ -135,7 +137,8 @@ export async function runScraper(def: ScraperDefinition, q: ScraperQuery, signal
     }
   } else {
     const { body } = await httpText(url, { signal })
-    const $ = cheerio.load(body)
+    // Read as a browser without JavaScript would: what's in <noscript> (SoundCloud's results) is page, not text.
+    const $ = cheerio.load(body, { scriptingEnabled: false })
     const items = $(def.items)
     itemCount = items.length
     items.slice(0, 10).each((_, el) => {

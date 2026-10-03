@@ -7,11 +7,12 @@ import { acoustid } from "./acoustid"
 import { mainstreamSources } from "./catalog"
 import { discogsCollection } from "./discogs-collection"
 import { scraperAdapter } from "./scraper"
+import { soundclashSounds } from "./soundclash"
 import type { SourceAdapter, SourceQuery } from "./types"
 import { undergroundSources } from "./underground"
 
 export function allAdapters(settings: Settings): { adapter: SourceAdapter; cfg: SourceConfig }[] {
-  const builtIn = [...mainstreamSources(), discogsCollection, ...undergroundSources(), acoustid].map((adapter) => ({
+  const builtIn = [...mainstreamSources(), discogsCollection, ...undergroundSources(), soundclashSounds, acoustid].map((adapter) => ({
     adapter,
     cfg: settings.sources[adapter.id] ?? { enabled: false, weight: 0.5 },
   }))

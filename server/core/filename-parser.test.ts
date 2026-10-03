@@ -76,6 +76,22 @@ describe("parseFilename", () => {
     expect(p.title).toBe("Ring The Alarm")
   })
 
+  it("reads clash tapes named the way soundtape.com and SoundCloud uploads name them", () => {
+    // The year closing the clash isn't part of the second sound's name.
+    expect(parseFilename("KILLAMANJARO VS STONE LOVE 1994 - FEAT. JOSIE WALES, HUGH BROWN & RICKY TROOPER.mp3")).toMatchObject({
+      artists: ["Killamanjaro", "Stone Love"],
+      relation: "vs",
+      year: 1994,
+      featuring: ["Josie Wales", "Hugh Brown", "Ricky Trooper"],
+    })
+    // A bracket after the sounds describes the tape; it used to make "Bodyguard Classic" and a title of "Dubplates)".
+    expect(parseFilename("Stone Love vs Bodyguard (Classic Dubplates).mp3")).toMatchObject({ artists: ["Stone Love", "Bodyguard"], title: "", version: "Classic Dubplates" })
+    // Three sounds, and a date after them.
+    expect(parseFilename("Killamanjaro vs Stone Love vs Metro Media 9-94 (Portland).mp3")).toMatchObject({ artists: ["Killamanjaro", "Stone Love", "Metro Media"], relation: "vs" })
+    // A year in a name that isn't a clash stays put.
+    expect(parseFilename("Prince 1999 - Little Red Corvette.mp3").artists).toEqual(["Prince 1999"])
+  })
+
   it("uses the embedded tag artist when there is no separator", () => {
     const p = parseFilename("champion lover.mp3", { tagArtist: "Deborahe Glasgow" })
     expect(p.artists).toEqual(["Deborahe Glasgow"])
