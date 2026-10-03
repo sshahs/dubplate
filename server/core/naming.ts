@@ -2,8 +2,9 @@
 
 import type { Decision, ExistingTags, ExternalIds, FinalMeta, LoudnessMeasure, Settings } from "../../shared/types"
 import { lyricsSummary } from "../../shared/lyrics"
-import { collapseSpaces } from "./normalize"
+import { collapseSpaces, normKey } from "./normalize"
 import { hasMarkup } from "./plain-text"
+import { isPlaceholder } from "../../shared/fields"
 
 type Naming = Settings["naming"]
 
@@ -17,13 +18,21 @@ function joinList(names: string[], joiner: string) {
 export function formatArtist(meta: FinalMeta, naming: Naming, withFeaturing = true): string {
   const joiner = meta.relation === "vs" ? naming.clashJoiner : meta.relation === "x" ? " x " : naming.artistJoiner
   let a = joinList(meta.artists.filter(Boolean), joiner)
-  if (withFeaturing && naming.featuring === "artist" && meta.featuring.length) a += ` feat. ${joinList(meta.featuring, " & ")}`
+  const guests = newNames(meta.featuring, a)
+  if (withFeaturing && naming.featuring === "artist" && guests.length) a += ` feat. ${joinList(guests, " & ")}`
   return collapseSpaces(a)
+}
+
+/** Featured artists the text doesn't already name ("Jah Shaka feat. Max Romeo" never gets Max Romeo twice). */
+function newNames(names: string[], text: string): string[] {
+  const have = ` ${normKey(text)} `
+  return names.filter((n, i) => normKey(n) && !have.includes(` ${normKey(n)} `) && names.findIndex((m) => normKey(m) === normKey(n)) === i)
 }
 
 export function formatTitle(meta: FinalMeta, naming: Naming): string {
   let t = meta.title
-  if (naming.featuring === "title" && meta.featuring.length) t += ` (feat. ${joinList(meta.featuring, " & ")})`
+  const guests = newNames(meta.featuring, `${meta.title} ${meta.artists.join(" ")}`)
+  if (naming.featuring === "title" && guests.length) t += ` (feat. ${joinList(guests, " & ")})`
   if (naming.appendVersion && meta.version && !t.toLowerCase().includes(meta.version.toLowerCase())) t += ` (${meta.version})`
   return collapseSpaces(t)
 }
@@ -120,6 +129,13 @@ export interface TagExtras {
  */
 export const FILL_ONLY: ReadonlySet<keyof ExistingTags> = new Set(["album", "year", "label", "riddim", "grouping"])
 
+/** A tag that holds nothing worth keeping: web page markup, or a placeholder like "reggae" as the album or "(17)" as the genre. */
+export function emptyish(field: keyof ExistingTags, v: unknown): boolean {
+  if (typeof v === "string") return hasMarkup(v) || ((field === "album" || field === "label") && isPlaceholder(field, v))
+  if (field === "genre" && Array.isArray(v)) return v.length > 0 && v.every((g) => typeof g === "string" && isPlaceholder("genre", g))
+  return false
+}
+
 /**
  * Tags to write. Artist and title are always set; album/year/genre/label and
  * the riddim only fill gaps. BPM, key and cover come from `extras` when there's
@@ -130,9 +146,13 @@ export function tagsFor(meta: FinalMeta, current: ExistingTags, naming: Naming, 
     artist: formatArtist(meta, naming),
     title: formatTitle(meta, naming),
   }
-  // A field holding web page markup (written before sources were cleaned) counts as empty, so it's put right.
-  current = Object.fromEntries(Object.entries(current).filter(([, v]) => !(typeof v === "string" && hasMarkup(v)))) as ExistingTags
+  // A field holding web page markup, or only a placeholder ("reggae" as the album), counts as empty, so it's put right.
+  const was = current
+  current = Object.fromEntries(Object.entries(current).filter(([k, v]) => !emptyish(k as keyof ExistingTags, v))) as ExistingTags
   if (!current.album && meta.album) out.album = meta.album
+  // …and with nothing better to put there, the placeholder goes (Rewind puts it back).
+  for (const f of ["album", "label"] as const) if (was[f] && !current[f] && !out[f]) out[f] = ""
+  if (was.genre?.length && !current.genre?.length && !meta.genre && !extras.canonicalGenre) out.genre = []
   if (!current.year && meta.year) out.year = meta.year
   if (extras.canonicalGenre) {
     const g = extras.canonicalGenre.genre

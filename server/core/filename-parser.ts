@@ -6,12 +6,15 @@
 import type { DiscPosition, HeuristicParse } from "../../shared/types"
 import { discMarker, folderPosition, leadingPosition, trailingPart, withoutDiscFolders } from "./discs"
 import { collapseSpaces, normArtist, smartCase, splitArtists } from "./normalize"
+import { checkFields, riddimIn as riddimText } from "../../shared/fields"
 
 export interface ParseContext {
   /** parent folder names, closest first */
   folders?: string[]
   /** existing embedded tags */
   tagArtist?: string
+  /** the album tag: a riddim compilation's is often "Seasons Riddim" */
+  tagAlbum?: string
   /** normalised known artist names (aliases, corrections, library tags) */
   knownArtists?: Set<string>
 }
@@ -58,6 +61,29 @@ const VERSION_HINTS: [RegExp, string][] = [
   [/\bcover\b/i, "cover"],
   [/\bedit\b/i, "edit"],
 ]
+
+/** A riddim mix or medley: many tunes, so the name of what it is (the title), not one tune's riddim. */
+const RIDDIM_MIX = /\briddim\s+(?:mix|medley|megamix|mixtape|selection|juggling)\b/i
+
+/** The riddim a piece of a name is, when that's all it is ("Seasons Riddim" → "Seasons"), in a readable case. */
+export function riddimIn(s: string): { name: string; year?: number } | null {
+  const r = riddimText(s)
+  return r ? { ...r, name: smartCase(r.name) } : null
+}
+
+/** A folder that's a riddim's own: "Seasons Riddim", "VA - Seasons Riddim (2009) [Don Corleon]", or "Riddims/Seasons". */
+export function riddimFolder(folders: string[]): { name: string; year?: number } | null {
+  const [near, parent] = folders
+  if (!near) return null
+  const year = near.match(/\b((?:19[5-9]|20[0-4])\d)\b/)?.[1]
+  const bare = collapseSpaces(near.replace(/^(?:va|v\.a\.|various(?:\s+artists)?)\s*[-–]\s*/i, "").replace(/[([][^)\]]*[)\]]/g, " "))
+  const own = riddimIn(bare)
+  if (own) return { ...own, ...(year && !own.year ? { year: Number(year) } : {}) }
+  if (parent && /^riddims?(?:\s+(?:collection|selection|folder))?$/i.test(parent.trim()) && /\p{L}/u.test(bare) && !RIDDIM_MIX.test(bare)) {
+    return { name: smartCase(bare.replace(/\s+riddim$/i, "")), ...(year ? { year: Number(year) } : {}) }
+  }
+  return null
+}
 
 const SEPARATORS = [/\s+[-–—]+\s+/, /\s*--+\s*/, /\s+~\s+/, /\s*\|\s*/, /\s+:\s+/]
 
@@ -192,6 +218,8 @@ export function parseFilename(filename: string, context: ParseContext = {}): Heu
   const ctx: ParseContext = { ...context, folders: withoutDiscFolders(context.folders ?? []) }
   if (folderPos) notes.push(`folder "${folderPos.label}" is a disc or side, not the album`)
   const known = ctx.knownArtists ?? new Set<string>()
+  // The riddim a tune is voiced on: from the name, else its folder or its album tag. Never the artist.
+  let riddim: { name: string; year?: number } | null = null
   const base = filename.replace(/\.[a-z0-9]{2,5}$/i, "")
   const { text: decoded, hadUnderscores } = decode(base)
   if (hadUnderscores) notes.push("underscores treated as spaces")
@@ -203,6 +231,16 @@ export function parseFilename(filename: string, context: ParseContext = {}): Heu
   const { rest: afterTrack, track, position: filePos } = extractTrackNumber(s)
   if (track) notes.push(`leading track number "${track}" removed`)
   s = afterTrack
+
+  // "Is There A Place (Seasons Riddim)": the riddim, out of the title.
+  s = collapseSpaces(
+    s.replace(/[([]([^()[\]]{2,60})[)\]]/g, (m, inner: string) => {
+      const r = riddimIn(inner)
+      if (!r) return m
+      riddim ??= r
+      return " "
+    })
+  )
   let position = mergePosition(folderPos, filePos)
 
   // A file that's just "Side A", "CD2": the whole side or disc of what its folder names.
@@ -236,7 +274,8 @@ export function parseFilename(filename: string, context: ParseContext = {}): Heu
   }
 
   const { hints, version: bracketVersion } = detectVersion(s)
-  const { year, rest: afterYear } = extractYear(s)
+  const { year: nameYear, rest: afterYear } = extractYear(s)
+  let year = nameYear
   s = afterYear
 
   // --- split into artist / title ---
@@ -249,10 +288,21 @@ export function parseFilename(filename: string, context: ParseContext = {}): Heu
     const parts = s.split(sep).map((p) => p.trim()).filter(Boolean)
     if (parts.length < 2) continue
     separator = sep.source
+    // "Seasons Riddim - Gyptian - Is There A Place": the riddim leads, or sits among the parts.
+    // ("Steelie & Clevie - Sleng Teng Riddim" is the riddim's own cut: that stays the title.)
+    const at = parts.findIndex((p, i) => (parts.length > 2 || i === 0) && riddimIn(p))
+    if (at >= 0) {
+      riddim ??= riddimIn(parts[at])
+      parts.splice(at, 1)
+      notes.push(`"${riddim!.name} Riddim" is the riddim, not the ${at === 0 ? "artist" : "title"}`)
+      if (parts.length === 1) notes.push("only one other part: it may be the artist or the title")
+    }
     const meaningful = parts.filter(isPlausibleName)
     if (meaningful.length === 2) {
       ;[artistPart, titlePart] = meaningful
-      confidence = 0.85
+      // "Seasons Riddim Mix - DJ Smiley": the mix is the title, whoever made it the artist.
+      if (RIDDIM_MIX.test(artistPart) && !RIDDIM_MIX.test(titlePart)) [artistPart, titlePart] = [titlePart, artistPart]
+      confidence = at >= 0 ? 0.8 : 0.85
     } else if (meaningful.length > 2) {
       // Artist - Album - Title, or Artist - Title - Version
       artistPart = meaningful[0]
@@ -302,21 +352,30 @@ export function parseFilename(filename: string, context: ParseContext = {}): Heu
     }
   }
 
+  // A riddim's own folder or album, or an artist tag that's really the riddim.
+  const fromFolder = riddimFolder(ctx.folders ?? [])
+  const tagRiddim = (ctx.tagAlbum ? riddimIn(ctx.tagAlbum) : null) ?? (ctx.tagArtist ? riddimIn(ctx.tagArtist) : null)
+  if (!riddim && (fromFolder || tagRiddim)) {
+    riddim = fromFolder ?? tagRiddim
+    notes.push(fromFolder ? `riddim "${riddim!.name}" from the folder` : `riddim "${riddim!.name}" from the tags`)
+  }
+  const tagArtist = ctx.tagArtist && !riddimIn(ctx.tagArtist) ? ctx.tagArtist : undefined
+
   if (!separator && !artistPart) {
     const pool = [...known]
-    if (ctx.tagArtist) pool.push(normArtist(ctx.tagArtist))
-    for (const f of ctx.folders ?? []) pool.push(normArtist(f))
+    if (tagArtist) pool.push(normArtist(tagArtist))
+    for (const f of ctx.folders ?? []) if (!riddimIn(f)) pool.push(normArtist(f))
     const lead = findLeadingArtist(s, pool.filter(Boolean))
     if (lead) {
       artistPart = lead.artist
       titlePart = lead.rest
       confidence = 0.4
       notes.push("artist inferred from a known name at the start")
-    } else if (ctx.tagArtist) {
-      artistPart = ctx.tagArtist
+    } else if (tagArtist) {
+      artistPart = tagArtist
       confidence = 0.25
       notes.push("no separator — artist taken from embedded tag")
-    } else if (ctx.folders?.[0] && !/^(?:music|downloads?|mp3s?|new folder|misc|various|unsorted|tunes|singles)$/i.test(ctx.folders[0])) {
+    } else if (ctx.folders?.[0] && !fromFolder && !/^(?:music|downloads?|mp3s?|new folder|misc|various|unsorted|tunes|singles)$/i.test(ctx.folders[0])) {
       notes.push("no separator — the folder name may be the artist")
     }
   }
@@ -328,6 +387,16 @@ export function parseFilename(filename: string, context: ParseContext = {}): Heu
   let guard = 0
   while (trailing.test(title) && guard++ < 4) title = title.replace(trailing, "")
   title = collapseSpaces(title.replace(/^[-–—:~|]+|[-–—:~|]+$/g, ""))
+
+  // Whatever's left in the artist's place can still be a riddim ("Seasons Riddim Gyptian - …" aside).
+  const leftover = riddimIn(artistPart)
+  if (leftover) {
+    riddim ??= leftover
+    artistPart = ""
+    notes.push(`"${leftover.name} Riddim" is the riddim, not the artist`)
+  }
+  if (riddim && !year && riddim.year) year = riddim.year
+  if (riddim && !hints.includes("riddim")) hints.push("riddim")
 
   const { artists, featuring, relation } = splitArtists(artistPart, known)
   // Featuring credits sometimes live in the title: "Title (feat. X)"
@@ -357,13 +426,22 @@ export function parseFilename(filename: string, context: ParseContext = {}): Heu
   }
   if (part?.position.label) version = version ? `${version}, ${part.position.label}` : part.position.label
 
+  // The same checks every reading gets: a title left in an artist (from a tag), noise, placeholders…
+  const checked = checkFields(
+    { artists: artists.map(smartCase), featuring: featuring.map(smartCase), title: smartCase(title), version: version ? smartCase(version) : undefined, riddim: riddim?.name, year: year ?? clashYear },
+    { names: false }
+  )
+  for (const n of checked.notes) if (n.fixed) notes.push(n.message)
+  const f = checked.fields
+  if (!f.artists.length) confidence = Math.min(confidence, 0.25)
   return {
-    artists: artists.map(smartCase),
-    featuring: featuring.map(smartCase),
-    relation,
-    title: smartCase(title),
-    version: version ? smartCase(version) : undefined,
-    year: year ?? clashYear,
+    artists: f.artists,
+    featuring: f.featuring ?? [],
+    relation: f.artists.length > 1 ? relation : undefined,
+    title: f.title,
+    version: f.version,
+    ...(f.riddim ? { riddim: f.riddim } : {}),
+    year: f.year,
     cleaned: s,
     trackNumber: track,
     ...(position ? { position } : {}),

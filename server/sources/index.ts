@@ -2,7 +2,7 @@ import type { Candidate, Settings, SourceConfig, Track, TrackReading } from "../
 import { collapseSpaces, normArtist, normTitle } from "../core/normalize"
 import { getDb, parseJson } from "../db"
 import { log } from "../logs"
-import { cleanCandidate } from "../core/plain-text"
+import { checkCandidate, cleanCandidate } from "../core/plain-text"
 import { SOURCE_META } from "../settings"
 import { junkResults, recordScraperAnswer, sourceHealth } from "../source-health"
 import { acoustid } from "./acoustid"
@@ -221,7 +221,8 @@ export async function scourTrack(
       }
     })
   )
-  const candidates = results.flat()
+  // Every hit with each field in its place (and none credited to a riddim).
+  const candidates = results.flat().flatMap((c) => checkCandidate(c) ?? [])
   if (!signal?.aborted) {
     const answered = answers.filter((a) => /^[1-9]/.test(a.said)).length
     const failed = answers.filter((a) => /^(failed|ignored)/.test(a.said)).length

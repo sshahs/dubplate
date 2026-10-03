@@ -305,7 +305,7 @@ export async function scanLibrary(lib: Library, settings: Settings, ctx: JobCont
       const filename = path.basename(file)
       const ext = path.extname(filename).slice(1).toLowerCase()
       const [audio, hash] = await Promise.all([readAudio(file), settings.scanner.hashFiles ? partialHash(file, st.size) : Promise.resolve(null)])
-      const heuristic = parseFilename(filename, { folders: folderContext(relDir), tagArtist: audio.tags.artist, knownArtists: known })
+      const heuristic = parseFilename(filename, { folders: folderContext(relDir), tagArtist: audio.tags.artist, tagAlbum: audio.tags.album, knownArtists: known })
 
       if (prev) {
         updateTrack(prev.id, {

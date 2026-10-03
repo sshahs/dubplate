@@ -1,4 +1,9 @@
+import { HugeiconsIcon } from "@hugeicons/react"
+import { Alert02Icon, MagicWand01Icon } from "@hugeicons/core-free-icons"
+import { useMemo } from "react"
+import { checkFields } from "@shared/fields"
 import type { FinalMeta } from "@shared/types"
+import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -60,10 +65,45 @@ const RELATIONS = [
   { value: "x", label: "x" },
 ]
 
+/** The same checks the server runs, as you type: what will be put right when it's saved, and what needs you. */
+function FieldChecks({ value, onChange }: { value: MetaDraft; onChange: (d: MetaDraft) => void }) {
+  const { fields, notes } = useMemo(() => checkFields(fromDraft(value)), [value])
+  if (!notes.length) return null
+  const look = notes.filter((n) => !n.fixed)
+  const fixable = notes.filter((n) => n.fixed)
+  return (
+    <div role="status" className="space-y-2 rounded-2xl border p-3 text-sm">
+      {look.map((n, i) => (
+        <div key={`l${i}`} className="flex gap-2">
+          <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} className="text-rasta-gold mt-0.5 size-4 shrink-0" aria-hidden />
+          <span>{n.message}</span>
+        </div>
+      ))}
+      {fixable.length > 0 && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div className="text-muted-foreground space-y-1">
+            <div className="text-foreground text-xs font-medium">Put right when saved</div>
+            {fixable.map((n, i) => (
+              <div key={`f${i}`} className="text-xs">
+                {n.message}
+              </div>
+            ))}
+          </div>
+          <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => onChange(toDraft({ ...fields, relation: fields.artists.length > 1 ? fields.relation : undefined }))}>
+            <HugeiconsIcon icon={MagicWand01Icon} strokeWidth={2} data-icon="inline-start" />
+            Put right now
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function MetaEditor({ value, onChange }: { value: MetaDraft; onChange: (d: MetaDraft) => void }) {
   const set = <K extends keyof MetaDraft>(k: K, v: MetaDraft[K]) => onChange({ ...value, [k]: v })
   return (
     <FieldGroup className="gap-4">
+      <FieldChecks value={value} onChange={onChange} />
       <div className="grid gap-4 sm:grid-cols-[1fr_9rem]">
         <Field>
           <FieldLabel htmlFor="md-artists">Artists</FieldLabel>

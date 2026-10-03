@@ -13,9 +13,10 @@ import { canonicalGenre } from "./genres"
 import { lyricsForTrack, needsLyrics } from "./lyrics"
 import { scoreTrack } from "./core/confidence"
 import { parseFilename } from "./core/filename-parser"
-import { cleanCandidate, cleanFinal, hasMarkup } from "./core/plain-text"
+import { checkCandidate, cleanCandidate, cleanFinal, hasMarkup } from "./core/plain-text"
+import { checkFields } from "../shared/fields"
 import { getDb } from "./db"
-import { decisionToFinal } from "./core/naming"
+import { decisionToFinal, emptyish } from "./core/naming"
 import { proposedFilename } from "./executor"
 import type { JobContext } from "./jobs"
 import { enqueueJob, forTrack, mapLimit } from "./jobs"
@@ -189,7 +190,7 @@ export async function processTracks(ids: number[], startSettings: Settings, opts
       settings = sourcesNow()
       try {
         // Rule-based pass is cheap; refresh it so new aliases/corrections apply.
-        const heuristic = parseFilename(track.filename, { folders: folderContext(track.relDir), tagArtist: track.tags.artist, knownArtists: known })
+        const heuristic = parseFilename(track.filename, { folders: folderContext(track.relDir), tagArtist: track.tags.artist, tagAlbum: track.tags.album, knownArtists: known })
         track = { ...track, heuristic }
         updateTrack(id, { heuristic })
 
@@ -477,4 +478,96 @@ export function repairMarkupOnce(): void {
     return
   }
   enqueueJob("score", `Clean web page markup out of ${ids.length} track${ids.length === 1 ? "" : "s"}`, (ctx) => repairMarkup(ids, settingsNow(), ctx), { quick: true })
+}
+
+const FIELDS_CHECKED = "fieldsChecked"
+const FIELDS_CHECK_VERSION = 1
+
+/** The reading a track goes by: the AI's, else the filename's. */
+const readingOf = (ai: AiParse | null | undefined, heuristic: Track["heuristic"]) => (ai && (ai.title || ai.artists.length) ? ai : heuristic)
+const readingKey = (r: Pick<TrackReading, "artists" | "title"> | null | undefined) => (r ? `${r.artists.map((a) => a.toLowerCase()).join("|")}::${r.title.toLowerCase()}` : "")
+
+/**
+ * Every track read again with the field checks: a riddim taken for the artist,
+ * a title left in an artist, "reggae" as the album, a guest named twice. Tracks
+ * whose artist or title changes are searched again (no AI); the rest are decided
+ * again. Approved details are put right, and a cut file whose details change
+ * goes back to Cut & Tag to be renamed and tagged again.
+ */
+export async function recheckFields(ids: number[], settings: Settings, ctx: JobContext) {
+  ctx.setTotal(ids.length)
+  const known = knownArtists()
+  const searchAgain: number[] = []
+  const changed: number[] = []
+  const recut: string[] = []
+  let approved = 0
+  for (const id of ids) {
+    if (ctx.signal.aborted) return
+    const t = getTrack(id)
+    if (!t || t.missing) {
+      ctx.tick(true)
+      continue
+    }
+    forTrack(id, () => {
+      const heuristic = parseFilename(t.filename, { folders: folderContext(t.relDir), tagArtist: t.tags.artist, tagAlbum: t.tags.album, knownArtists: known })
+      const ai = t.ai ? ({ ...t.ai, ...checkFields(t.ai, { names: false }).fields } as AiParse) : t.ai
+      const candidates = t.candidates ? t.candidates.flatMap((c) => checkCandidate(cleanCandidate(c)) ?? []) : t.candidates
+      const final = t.final ? checkFields(t.final, { names: false }).fields : t.final
+      const finalChanged = JSON.stringify(final) !== JSON.stringify(t.final)
+      const readingChanged = readingKey(readingOf(ai, heuristic)) !== readingKey(readingOf(t.ai, t.heuristic))
+      const anyChange = finalChanged || readingChanged || JSON.stringify(candidates) !== JSON.stringify(t.candidates) || JSON.stringify(ai) !== JSON.stringify(t.ai)
+      // A decision made before the checks can hold "reggae" as its album from a source.
+      const decisionWrong = !!t.decision && checkFields(t.decision, { names: false }).notes.some((n) => n.fixed)
+      // A file cut with a placeholder left in its tags ("reggae" as the album, "Other" as the genre).
+      const tagsWrong = t.status === "done" && (["album", "label", "genre"] as const).some((f) => emptyish(f, t.tags[f]))
+      if (!anyChange && !decisionWrong && !tagsWrong && JSON.stringify(heuristic) === JSON.stringify(t.heuristic)) return
+      const next: Track = { ...t, heuristic, ai, candidates, final }
+      if (t.status === "rejected") return updateTrack(id, { heuristic, ai, candidates })
+      if (t.status === "approved" || t.status === "done") {
+        updateTrack(id, { heuristic, ai, candidates, final })
+        if (finalChanged && t.status === "approved") approved++
+        if ((finalChanged || tagsWrong) && t.status === "done") {
+          // Cut with a riddim for an artist, or a title in it: ready to cut again, under its right name.
+          updateTrack(id, { status: "approved", proposedName: proposedFilename({ ...next, status: "approved" }, settings) })
+          recut.push(t.filename)
+          ctx.log("info", `${t.filename} was cut with details in the wrong place - back in Cut & Tag to be renamed and tagged again`, { trackId: id })
+        }
+        changed.push(id)
+        return
+      }
+      updateTrack(id, { heuristic, ai, candidates })
+      // The sources were asked about the wrong artist or title: ask again. Otherwise decide again.
+      if (readingChanged && t.candidates) searchAgain.push(id)
+      else if (t.decision || candidates?.length) scoreAndSave(next, settings)
+      changed.push(id)
+      if (readingChanged) ctx.log("debug", `${t.filename}: now read as ${readingText(readingOf(ai, heuristic))} (was ${readingText(readingOf(t.ai, t.heuristic))})`, { trackId: id })
+    })
+    ctx.tick(true)
+  }
+  ctx.tracksChanged(changed)
+  const parts = [
+    changed.length && `${changed.length} track${changed.length === 1 ? "" : "s"} put right`,
+    searchAgain.length && `${searchAgain.length} to ask the sources about again`,
+    approved && `${approved} approved track${approved === 1 ? "'s" : "s'"} details corrected`,
+    recut.length && `${recut.length} cut file${recut.length === 1 ? "" : "s"} back in Cut & Tag`,
+  ].filter(Boolean)
+  ctx.log(changed.length ? "success" : "info", `Checked every track's fields: ${parts.length ? parts.join(", ") : "nothing needed changing"}`, recut.length ? { detail: recut.join("\n") } : {})
+  if (searchAgain.length) {
+    enqueueJob("process", `Ask the sources again for ${searchAgain.length} track${searchAgain.length === 1 ? "" : "s"} read wrong before`, (job) =>
+      processTracks(searchAgain, settingsNow(), { interpret: false, scour: true, force: false, rescour: true }, job)
+    )
+  }
+  getDb().prepare("INSERT INTO settings (key, value_json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json").run(FIELDS_CHECKED, String(FIELDS_CHECK_VERSION))
+}
+
+/** Once after an upgrade that makes the field checks smarter: every track read again with them. */
+export function recheckFieldsOnce(): void {
+  const row = getDb().prepare("SELECT value_json FROM settings WHERE key = ?").get(FIELDS_CHECKED) as { value_json: string } | undefined
+  if (Number(row?.value_json) >= FIELDS_CHECK_VERSION) return
+  const ids = (getDb().prepare("SELECT id FROM tracks WHERE missing = 0 ORDER BY id").all() as { id: number }[]).map((r) => r.id)
+  if (!ids.length) {
+    getDb().prepare("INSERT OR REPLACE INTO settings (key, value_json) VALUES (?, ?)").run(FIELDS_CHECKED, String(FIELDS_CHECK_VERSION))
+    return
+  }
+  enqueueJob("score", `Check the fields of ${ids.length} track${ids.length === 1 ? "" : "s"}`, (ctx) => recheckFields(ids, settingsNow(), ctx))
 }

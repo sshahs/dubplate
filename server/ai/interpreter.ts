@@ -6,6 +6,7 @@ import { collapseSpaces, normArtist, normKey } from "../core/normalize"
 import { settingsForLibrary } from "../library-settings"
 import { completeJson } from "./providers"
 import { plainText } from "../core/plain-text"
+import { checkFields } from "../../shared/fields"
 
 const nullable = (type: string) => ({ type: [type, "null"] })
 
@@ -91,7 +92,8 @@ Rules:
 - relation: "vs" for clashes / versus, "&" for collaborations, "x" when the name uses " x ", null for a single artist.
 - title: the song name only - no version, year, bitrate or featuring text. If there is no song name (a live clash, DJ set, radio show or session), write a short descriptive title such as "Live Clash" or "Live at Sting".
 - version: e.g. "Dubplate", "Special", "Live", "Remix", "Skepta Remix", "Extended Mix", "Radio Edit", "VIP", "Dub", "Instrumental", "Acoustic", "Demo", "Freestyle". null for the original release.
-- riddim: the riddim name if referenced (e.g. "Sleng Teng", "Diwali"), else null.
+- riddim: the riddim name if referenced (e.g. "Sleng Teng", "Diwali"), else null. A part like "Seasons Riddim" is always the riddim, never the artist or the title: dancehall files are often named "Riddim - Artist - Title" ("Seasons Riddim - Gyptian - Is There A Place" is Gyptian's "Is There A Place" on the Seasons riddim), or carry it in brackets ("Title (Diwali Riddim)") or in their folder.
+- Every field holds only its own thing. The artist never contains the title (embedded tags like artist "Bounty Killer & Baby Cham - Another Level" are a mistake: the artists are Bounty Killer and Baby Cham). The title never contains the artist, "(Official Video)", a site name or a track number. A genre ("Reggae") or "Unknown Album" is never an album.
 - year: four-digit year if stated or clearly implied ("live 93" means 1993), else null.
 - event: clash, session, show or festival name if relevant (e.g. "Sting", "Fire in the Booth", "Rinse FM", "Boiler Room", "Glastonbury"), else null.
 - Ignore rip-site names, bitrates, track numbers, "official video" and similar noise.
@@ -188,7 +190,7 @@ export function sanitizeAi(raw: unknown, provider: LlmProviderConfig, aliases: M
         .filter((a) => a.title || a.artists.length)
         .slice(0, 4)
     : []
-  return {
+  const reading: AiParse = {
     artists: strArr(r.artists).map(canon),
     featuring: strArr(r.featuring).map(canon),
     relation: rel,
@@ -208,6 +210,9 @@ export function sanitizeAi(raw: unknown, provider: LlmProviderConfig, aliases: M
     provider: provider.label,
     model: provider.model,
   }
+  // A small model can still put a riddim in the artist or the title in it: the same checks as everything else.
+  const { fields } = checkFields(reading, { names: false })
+  return { ...fields, artists: fields.artists.map(canon) }
 }
 
 /** A configured provider with another model (for escalation or vision), or null when it isn't usable. */

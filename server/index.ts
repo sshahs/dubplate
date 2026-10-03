@@ -9,7 +9,7 @@ import { getDb } from "./db"
 import { startIntegrations } from "./integrations"
 import { markInterruptedJobs } from "./jobs"
 import { log, startLogging } from "./logs"
-import { repairMarkupOnce } from "./pipeline"
+import { recheckFieldsOnce, repairMarkupOnce } from "./pipeline"
 import { upsertAlias } from "./repo"
 import { settingsNow } from "./settings"
 import { pruneHttpCache } from "./sources/http"
@@ -87,4 +87,6 @@ serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => 
   startIntegrations()
   // Tracks a site's links reached before every answer was cleaned.
   repairMarkupOnce()
+  // Every track read again with the field checks, once after they get smarter.
+  recheckFieldsOnce()
 })

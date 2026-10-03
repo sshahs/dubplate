@@ -9,8 +9,8 @@ import { formatKey } from "../shared/keys"
 import type { ExistingTags, FileCheck, Library, Operation, PlanItem, Settings, Track } from "../shared/types"
 import { artToEmbed, describeArt, cachedArt } from "./art"
 import { idsFor } from "./core/ids"
-import { FILL_ONLY, tagDiff, tagsFor, type TagExtras } from "./core/naming"
-import { hasMarkup } from "./core/plain-text"
+import { emptyish, FILL_ONLY, tagDiff, tagsFor, type TagExtras } from "./core/naming"
+import { checkFields, needsALook } from "../shared/fields"
 import { mismatch, sniffFileSync } from "./sniff"
 import { ensureDir, followableSidecars, isInside, moveFile, removeCreatedDirs, removeEmptyDirs, sameFile } from "./fsops"
 import type { JobContext } from "./jobs"
@@ -138,6 +138,8 @@ export function buildPlan(tracks: Track[], settings: Settings, opts: { tagsOnly?
     const tags = meta && s.naming.writeTags ? tagsFor(meta, t.tags, s.naming, { ...extrasFor(t, s), placement: placements.get(t.id) }) : {}
     const tagChanges = tagDiff(t.tags, tags)
     if (!meta) issues.push("No approved artist/title yet")
+    // Never cut a file with a name or tags that are plainly wrong: these need a person.
+    if (meta) for (const n of needsALook(checkFields(meta).notes)) if (n.field === "artists" || n.field === "title") issues.push(n.message)
     if (!fs.existsSync(t.path)) issues.push("File is missing on disk - rescan the library")
     if (rename && fs.existsSync(toPath) && !sameFile(t.path, toPath)) {
       const where = relDirOf(dest, toPath) || (inbox ? `${dest!.name}'s top folder` : "the library's top folder")
@@ -282,7 +284,7 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
       if (item.tagChanges.length) {
         const live = readManagedTags(track.path)
         // (markup from a web page in a field doesn't count: it's replaced)
-        const filled = (f: keyof ExistingTags) => FILL_ONLY.has(f) && live[f] !== undefined && live[f] !== "" && !(typeof live[f] === "string" && hasMarkup(live[f] as string))
+        const filled = (f: keyof ExistingTags) => FILL_ONLY.has(f) && live[f] !== undefined && live[f] !== "" && !emptyish(f, live[f])
         const writes = item.tagChanges.filter((c) => !filled(c.field))
         tagsAfter = { ...item.tags }
         for (const c of item.tagChanges) if (filled(c.field)) (tagsAfter as Record<string, unknown>)[c.field] = live[c.field]
