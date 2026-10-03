@@ -5,6 +5,7 @@ import type { AiParse, Correction, LlmProviderConfig, Settings, Track } from "..
 import { collapseSpaces, normArtist, normKey } from "../core/normalize"
 import { settingsForLibrary } from "../library-settings"
 import { completeJson } from "./providers"
+import { plainText } from "../core/plain-text"
 
 const nullable = (type: string) => ({ type: [type, "null"] })
 
@@ -165,7 +166,7 @@ export function buildUserPrompt(track: Track, corrections: Correction[]): string
   return lines.join("\n")
 }
 
-const str = (v: unknown) => (typeof v === "string" ? collapseSpaces(v) : "")
+const str = (v: unknown) => (typeof v === "string" ? collapseSpaces(plainText(v)) : "")
 const strOrUndef = (v: unknown) => str(v) || undefined
 const strArr = (v: unknown) => (Array.isArray(v) ? v.map(str).filter(Boolean) : [])
 

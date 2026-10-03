@@ -300,6 +300,22 @@ export const MIGRATIONS: string[] = [
   CREATE INDEX idx_videos_library ON videos(library_id);
   ALTER TABLE operations ADD COLUMN hash_after TEXT;
   `,
+  // 8: the console's log, kept for a while (Settings → logs.keepDays) instead of only in memory.
+  `
+  CREATE TABLE logs (
+    id INTEGER PRIMARY KEY,
+    at TEXT NOT NULL,
+    level TEXT NOT NULL,
+    area TEXT NOT NULL,
+    message TEXT NOT NULL,
+    job_id TEXT,
+    track_id INTEGER,
+    detail TEXT
+  );
+  CREATE INDEX idx_logs_job ON logs(job_id);
+  CREATE INDEX idx_logs_track ON logs(track_id);
+  CREATE INDEX idx_logs_at ON logs(at);
+  `,
 ]
 
 export type Db = DatabaseSync

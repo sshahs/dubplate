@@ -22,6 +22,10 @@ import type {
   Job,
   Library,
   LibrarySettings,
+  LogArea,
+  LogEntry,
+  LogLevel,
+  LogSummary,
   MbSubmission,
   MediaServerConfig,
   MixSuggestion,
@@ -129,6 +133,26 @@ export function filterToQuery(f: TrackFilter): string {
   if (f.dir) p.set("dir", f.dir)
   if (f.limit) p.set("limit", String(f.limit))
   if (f.offset) p.set("offset", String(f.offset))
+  return p.toString()
+}
+
+/** What the Console shows: every part is optional, and nothing set means every line. */
+export interface LogFilter {
+  levels?: LogLevel[]
+  areas?: LogArea[]
+  job?: string
+  track?: number
+  q?: string
+}
+
+export function logFilterQuery(f: LogFilter, extra: Record<string, number | undefined> = {}): string {
+  const p = new URLSearchParams()
+  if (f.levels?.length) p.set("levels", f.levels.join(","))
+  if (f.areas?.length) p.set("areas", f.areas.join(","))
+  if (f.job) p.set("job", f.job)
+  if (f.track) p.set("track", String(f.track))
+  if (f.q?.trim()) p.set("q", f.q.trim())
+  for (const [k, v] of Object.entries(extra)) if (v !== undefined) p.set(k, String(v))
   return p.toString()
 }
 
@@ -362,6 +386,11 @@ export const api = {
   rewind: (body: { batchId?: string; opIds?: number[] }) => post<Job>("/api/rewind", body),
 
   jobs: () => get<{ active: Job[]; recent: Job[] }>("/api/jobs"),
+  /** oldest first; `more` says there's more in the direction asked (older by default, newer with `after`) */
+  logs: (f: LogFilter, page: { before?: number; after?: number; limit?: number } = {}) => get<{ entries: LogEntry[]; more: boolean }>(`/api/logs?${logFilterQuery(f, page)}`),
+  logSummary: (f: LogFilter) => get<LogSummary & { detail: boolean; keepDays: number }>(`/api/logs/summary?${logFilterQuery(f)}`),
+  logDownloadUrl: (f: LogFilter) => `/api/logs/download?${logFilterQuery(f)}`,
+  clearLogs: () => del<{ cleared: number }>("/api/logs"),
   cancelJob: (id: string) => post<{ ok: boolean }>(`/api/jobs/${id}/cancel`),
 
   settings: () => get<PublicSettings>("/api/settings"),

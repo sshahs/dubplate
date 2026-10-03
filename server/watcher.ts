@@ -6,6 +6,7 @@ import fs from "node:fs"
 import path from "node:path"
 import type { Library } from "../shared/types"
 import { enqueueJob, log } from "./jobs"
+import { errorDetail } from "./logs"
 import { checkSubmissions, pendingSubmissions } from "./acoustid-submit"
 import { enqueueConversion } from "./convert"
 import { findFfmpeg } from "./media/ffmpeg"
@@ -89,7 +90,7 @@ async function check(libraryId: number, reason: "watch" | "poll" | "nightly") {
   try {
     if (!(await libraryHasChanges(lib, settingsNow()))) return
   } catch (err) {
-    log("warn", `Couldn't check ${lib.name} for new files: ${err instanceof Error ? err.message : err}`)
+    log("warn", `Couldn't check ${lib.name} for new files: ${err instanceof Error ? err.message : err}`, { area: "automation", detail: errorDetail(err) })
     return
   }
   queueScan(lib, reason === "nightly" ? `Nightly scan of ${lib.name}` : `New files in ${lib.name}`)
@@ -151,7 +152,7 @@ function minuteTick() {
   // Pending AcoustID submissions: ask how they got on every 20 minutes.
   if (Date.now() - lastAcoustIdCheck > 20 * 60_000 && pendingSubmissions()) {
     lastAcoustIdCheck = Date.now()
-    void checkSubmissions(s, (level, m) => log(level, m))
+    void checkSubmissions(s, (level, m) => log(level, m, { area: "sources" }))
   }
   extensions = new Set([...s.scanner.extensions, ...(s.scanner.videoExtensions ?? [])])
   const now = new Date()

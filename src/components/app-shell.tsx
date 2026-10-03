@@ -7,6 +7,7 @@ import {
   DatabaseIcon,
   FolderLibraryIcon,
   CloudUploadIcon,
+  ComputerTerminal01Icon,
   FolderTreeIcon,
   HealthIcon,
   Moon02Icon,
@@ -69,6 +70,7 @@ export const NAV = [
   { to: "/duplicates", label: "Duplicates", icon: Copy01Icon, group: "Tools" },
   { to: "/videos", label: "Videos", icon: Video01Icon, group: "Tools", badge: "videos" as const },
   { to: "/health", label: "Health", icon: HealthIcon, group: "Tools" },
+  { to: "/console", label: "Console", icon: ComputerTerminal01Icon, group: "Tools" },
   { to: "/settings", label: "Settings", icon: Settings02Icon, group: "Tools" },
 ]
 

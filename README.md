@@ -239,6 +239,7 @@ sounds that played and the year (its listings start around 2025). Site markup dr
 - **Changes count straight away**: a source or scraper switched on during a run is asked from the next track, and re-running up to 10 tracks runs alongside a long run instead of waiting behind it. Tracks identified before a scraper was switched on keep their old answers until asked again: tick them in **Tracks** (or search, filter and **Select all matching**), then **⋯ → Ask the sources again (no AI)**.
 - **Genre weights**: a scraper (or any source) can count more for particular genres in your crates, e.g. Regime Radio ×1.3 for sound clashes.
 - **Supporting only**: a source like an events listing or a forum can back up a match the others found but never confirms one on its own.
+- **Plain text only**: whatever a site sends, names, titles, labels and riddims arrive as plain text, never as a link's markup or `&amp;`. The same goes for what the AI reads and what you type. Tracks identified before this was in place are cleaned once after upgrading; files already cut with markup in their tags are listed in the Console, ready for **Update tags**.
 - **Health check**: a site that redesigns or puts search behind a login starts answering with "Login" or its home page. After five junk or failed answers in a row the scraper is switched off, with the reason on the Sources and Health pages; switch it back on once its Test works.
 
 **🎯 Tuned to your crates**: each source knows which genres it's strong for
@@ -412,6 +413,7 @@ secrets, and keys entered in the UI take precedence.
 | `FPCALC_PATH` | `fpcalc` on `PATH` | |
 | `FFMPEG_PATH`, `FFPROBE_PATH` | `ffmpeg`, `ffprobe` on `PATH` | For the video converter and previews; `ffprobe` is also looked for next to `FFMPEG_PATH` |
 | `TZ` | `UTC` | The clock the nightly scan runs by, e.g. `Europe/London` |
+| `DUBPLATE_LOG_LEVEL` | `info` | How much of the log the server also prints (what `docker logs` shows): `detail`, `info`, `warn`, `error` or `off`. The Console keeps everything either way. |
 
 </details>
 
@@ -928,6 +930,39 @@ links to the right setting. `/api/health` stays open for Docker's healthcheck.
 </details>
 
 <details>
+<summary><b>Console</b></summary>
+
+**Console** (under Tools, or **Open full console** from the jobs button) is
+everything Dubplate does, as it happens and afterwards. It's kept in the
+database for 14 days (1 to 365 in its settings, and never more than 250,000
+lines), so it survives a restart.
+
+- **Levels**: **Errors**, **Warnings**, **Done**, **Info** and **Detail**. Detail
+  is the step-by-step story: every web request (address, status, time, size,
+  rate-limit waits), what each source answered for each track, every AI call
+  (model, time, tokens and its answer), how each track was read and decided
+  (filename, tags, AI, fingerprint, the sources that agreed, every confidence
+  factor), and every rename, move, tag written and rewind. Switch it off in the
+  Console's settings to keep only the rest.
+- **Linked**: every line knows its job and its track. Click a track to open it,
+  a job to see only its lines. A track's **File** tab links to its whole log.
+- **Filters**: by level, by part of Dubplate (scanning, identifying, sources,
+  web requests, AI, files, automation, integrations, server), by job, by track,
+  and by words in a line or its detail (`/` jumps to the search box). Filters
+  live in the address, so a filtered view can be bookmarked.
+- **Open a line** for its detail: a stack trace, a full request, a decision.
+- **Live**, with **Pause** to read while lines keep arriving underneath, and
+  older lines loaded as you scroll up.
+- **Pop out** opens the Console in a window of its own; **Download** saves the
+  lines that match the filters as a text file; **Clear** empties the log.
+
+Keys and tokens are blanked out of every address that's logged. The server's
+own errors (a request that broke, a crash) are lines too, with their stack
+traces.
+
+</details>
+
+<details>
 <summary><b>Backup & restore</b></summary>
 
 **Settings → Backup & restore** downloads one JSON file with your settings,
@@ -983,6 +1018,7 @@ crates whose names aren't taken.
 - 💿 **Discogs collection**: the records you own count extra when identifying.
 - 💸 **AI usage & cost**: tokens and estimated spend per day, provider and job, with a monthly budget.
 - 🩺 **Health page**: every dependency checked, with a fix for each problem.
+- 🖥️ **Console**: every line Dubplate logs, kept 14 days, live, filtered by level, part, job, track or words, with each request, source answer, AI call, decision and file change in detail. It also opens in its own window and downloads as text.
 - 📲 **Install it on a phone**: add Dubplate to the home screen from the browser (needs HTTPS, or localhost) and it opens like an app.
 - 📤 **Upload from your phone**: send files into a library from the browser, or share them to the installed app from other apps.
 - 🪝 **Download tools**: qBittorrent, slskd and Lidarr tell Dubplate when a download finishes, with API tokens made for them.

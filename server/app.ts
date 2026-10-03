@@ -6,10 +6,10 @@ import { getConnInfo } from "@hono/node-server/conninfo"
 import { Hono, type Context } from "hono"
 import { compress } from "hono/compress"
 import { deleteCookie, getCookie, setCookie } from "hono/cookie"
-import { streamSSE } from "hono/streaming"
+import { stream, streamSSE } from "hono/streaming"
 import { parseKey } from "../shared/keys"
 import type { ApiToken, DjFormat, FinalMeta, Library, MediaServerConfig, PathMapping, ScraperDefinition, ServerEvent, Settings, Track, TrackStatus } from "../shared/types"
-import { TRACK_STATUSES } from "../shared/types"
+import { LOG_AREAS, LOG_LEVELS, TRACK_STATUSES } from "../shared/types"
 import { activeProvider, interpretTrack } from "./ai/interpreter"
 import { listModels, testProvider } from "./ai/providers"
 import { usageReport } from "./ai/usage"
@@ -29,8 +29,10 @@ import { exportPlaylists, type Playlist } from "./dj-export"
 import { healthReport } from "./health"
 import { parseFilename } from "./core/filename-parser"
 import { normArtist } from "./core/normalize"
+import { plainText } from "./core/plain-text"
 import { buildPlan, executePlan, metaFor, proposedFilename, rewind } from "./executor"
 import { activeJobs, cancelJob, emit, enqueueJob, listJobs, log, recentLogEvents, subscribe } from "./jobs"
+import { clearLogs, errorDetail, logOptions, logSummary, logText, queryLogs, type LogFilter } from "./logs"
 import { isBackup, makeBackup, restoreBackup } from "./backup"
 import { duplicateGroups, setAside, setAsideCount, validResolutions, type Resolution } from "./duplicates"
 import { sendChat, type ChatChannel } from "./integrations/chat"
@@ -129,7 +131,8 @@ function sanitizeBpm(v: unknown): number | null {
 }
 
 function sanitizeFinal(input: Partial<FinalMeta>): FinalMeta {
-  const clean = (s?: string) => (s ?? "").replace(/\s+/g, " ").trim()
+  // Whatever was typed or picked, never web page markup (a source's link round a name, "&amp;").
+  const clean = (s?: string) => plainText(s ?? "").replace(/\s+/g, " ").trim()
   const list = (xs?: string[]) => (xs ?? []).map(clean).filter(Boolean)
   const rel = input.relation === "&" || input.relation === "vs" || input.relation === "x" ? input.relation : undefined
   const year = Number(input.year)
@@ -260,7 +263,7 @@ export function createApp() {
   app.use("*", (c, next) => (c.req.path === "/api/events" || /\/(audio|art)$/.test(c.req.path) ? next() : gzip(c, next)))
 
   app.onError((err, c) => {
-    console.error(err)
+    log("error", `${c.req.method} ${c.req.path}: ${err.message}`, { area: "server", detail: errorDetail(err) })
     return c.json({ error: err.message }, 500)
   })
 
@@ -616,7 +619,7 @@ export function createApp() {
     const res = runHook(req, settingsNow().hooks.pathMap, who)
     if (req.test) return c.json({ ok: true, test: true, ...res })
     if (!res.queued.length) return c.json({ error: res.ignored[0]?.reason ?? 'No path given - send {"path": "/where/it/downloaded"}', ...res }, 422)
-    log("info", `${req.from} (${who}): new downloads in ${res.queued.map((l) => l.name).join(", ")} - scanning shortly`)
+    log("info", `${req.from} (${who}): new downloads in ${res.queued.map((l) => l.name).join(", ")} - scanning shortly`, { area: "automation" })
     return c.json({ ok: true, ...res }, 202)
   })
 
@@ -740,7 +743,7 @@ export function createApp() {
   })
 
   app.post("/api/acoustid/check", async (c) => {
-    const imported = await checkSubmissions(settingsNow(), (level, m) => log(level, m))
+    const imported = await checkSubmissions(settingsNow(), (level, m) => log(level, m, { area: "sources" }))
     return c.json({ imported, ...listSubmissions() })
   })
 
@@ -846,6 +849,43 @@ export function createApp() {
   })
 
   // ---- jobs ----
+  // ---- the console's log ----
+  const logFilter = (c: Context): LogFilter => {
+    const list = <T extends string>(v: string | undefined, allowed: readonly T[]) => (v ? v.split(",").filter((x): x is T => (allowed as readonly string[]).includes(x)) : undefined)
+    const track = Number(c.req.query("track"))
+    return {
+      levels: list(c.req.query("levels"), LOG_LEVELS),
+      areas: list(c.req.query("areas"), LOG_AREAS),
+      jobId: c.req.query("job") || undefined,
+      trackId: Number.isInteger(track) && track > 0 ? track : undefined,
+      q: c.req.query("q") || undefined,
+    }
+  }
+  const cursor = (v: string | undefined) => (v !== undefined && v !== "" && Number.isFinite(Number(v)) ? Number(v) : undefined)
+
+  app.get("/api/logs", (c) =>
+    c.json(queryLogs({ ...logFilter(c), before: cursor(c.req.query("before")), after: cursor(c.req.query("after")), limit: cursor(c.req.query("limit")) }))
+  )
+  app.get("/api/logs/summary", (c) => c.json({ ...logSummary(logFilter(c)), ...logOptions() }))
+  app.get("/api/logs/download", (c) => {
+    const f = logFilter(c)
+    const day = new Date().toISOString().slice(0, 10)
+    c.header("content-type", "text/plain; charset=utf-8")
+    c.header("content-disposition", `attachment; filename="dubplate-log-${day}.txt"`)
+    return stream(c, async (s) => {
+      let chunk = ""
+      for (const line of logText(f)) {
+        chunk += line
+        if (chunk.length > 64_000) {
+          await s.write(chunk)
+          chunk = ""
+        }
+      }
+      await s.write(chunk || (f.levels || f.areas || f.jobId || f.trackId || f.q ? "No lines match these filters.\n" : "Nothing logged yet.\n"))
+    })
+  })
+  app.delete("/api/logs", (c) => c.json({ cleared: clearLogs() }))
+
   app.get("/api/jobs", (c) => c.json({ active: activeJobs(), recent: listJobs() }))
   app.post("/api/jobs/:id/cancel", (c) => c.json({ ok: cancelJob(c.req.param("id")) }))
 

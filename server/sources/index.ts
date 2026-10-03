@@ -1,6 +1,8 @@
 import type { Candidate, Settings, SourceConfig, Track, TrackReading } from "../../shared/types"
 import { collapseSpaces, normArtist, normTitle } from "../core/normalize"
 import { getDb, parseJson } from "../db"
+import { log } from "../logs"
+import { cleanCandidate } from "../core/plain-text"
 import { SOURCE_META } from "../settings"
 import { junkResults, recordScraperAnswer, sourceHealth } from "../source-health"
 import { acoustid } from "./acoustid"
@@ -176,33 +178,64 @@ export async function scourTrack(
       if (reason) skipped.push({ source: adapter.label, reason })
       return !reason
     })
+  // What each source said, for the log: how many results, how long, or what went wrong.
+  const answers: { source: string; said: string }[] = []
+  const said = (source: string, hits: Candidate[], how: string) => answers.push({ source, said: `${hits.length} result${hits.length === 1 ? "" : "s"} ${how}` })
   const results = await Promise.all(
     jobs.map(async ({ adapter, cfg }) => {
-      if (precomputed[adapter.id]) return precomputed[adapter.id]!
+      if (precomputed[adapter.id]) {
+        said(adapter.label, precomputed[adapter.id]!, "(asked earlier)")
+        return precomputed[adapter.id]!.map(cleanCandidate)
+      }
       const key = adapter.id === "acoustid" || adapter.local ? null : lookupKey(adapter.cacheKey ?? adapter.id, q)
-      const cached = key && !opts.fresh ? cachedLookup(key) : null
-      if (cached) return cached
+      // (remembered before every answer was cleaned of web page markup: cleaned on the way out)
+      const cached = key && !opts.fresh ? cachedLookup(key)?.map(cleanCandidate) : null
+      if (cached) {
+        said(adapter.label, cached, "(remembered from an earlier search)")
+        return cached
+      }
       const scraper = adapter.id.startsWith("scraper:")
+      const started = Date.now()
       try {
-        const hits = await adapter.search(q, { cfg, settings, signal })
+        // Plain text whatever the site sent: no links round names, no "&amp;".
+        const hits = (await adapter.search(q, { cfg, settings, signal })).map(cleanCandidate)
         breaker?.ok(adapter.label)
         // A scraper whose "results" are its login or home page is broken, however quietly.
         const junk = scraper ? junkResults(hits) : null
         if (scraper && recordScraperAnswer(adapter.id, junk, hits)) tripped.push(adapter.label)
         if (junk) {
           errors.push({ source: adapter.label, message: `Ignored: ${junk}` })
+          answers.push({ source: adapter.label, said: `ignored: ${junk}` })
           return []
         }
         if (key) storeLookup(key, hits)
+        said(adapter.label, hits, `in ${((Date.now() - started) / 1000).toFixed(1)} s`)
         return hits
       } catch (err) {
         if (signal?.aborted) return []
         if (scraper && recordScraperAnswer(adapter.id, err instanceof Error ? err.message.slice(0, 160) : String(err), [])) tripped.push(adapter.label)
         errors.push({ source: adapter.label, message: err instanceof Error ? err.message : String(err) })
+        answers.push({ source: adapter.label, said: `failed after ${((Date.now() - started) / 1000).toFixed(1)} s: ${err instanceof Error ? err.message : String(err)}` })
         if (breaker?.fail(adapter.label)) tripped.push(adapter.label)
         return []
       }
     })
   )
-  return { candidates: results.flat(), errors, skipped, tripped }
+  const candidates = results.flat()
+  if (!signal?.aborted) {
+    const answered = answers.filter((a) => /^[1-9]/.test(a.said)).length
+    const failed = answers.filter((a) => /^(failed|ignored)/.test(a.said)).length
+    const width = Math.max(0, ...answers.map((a) => a.source.length), ...skipped.map((s) => s.source.length)) + 2
+    log("debug", `Searched ${jobs.length} source${jobs.length === 1 ? "" : "s"} for "${q.query || q.title}": ${candidates.length} result${candidates.length === 1 ? "" : "s"} from ${answered}${failed ? `, ${failed} failed` : ""}`, {
+      area: "sources",
+      detail: [
+        `Asked: ${[q.query, ...q.extraQueries].filter(Boolean).join(" | ")}`,
+        "",
+        ...answers.sort((a, b) => a.source.localeCompare(b.source)).map((a) => `${a.source.padEnd(width)}${a.said}`),
+        ...skipped.map((s) => `${s.source.padEnd(width)}not asked: ${s.reason}`),
+        ...(breaker?.tripped.size ? [`Not asked again this run (kept failing): ${[...breaker.tripped].join(", ")}`] : []),
+      ].join("\n"),
+    })
+  }
+  return { candidates, errors, skipped, tripped }
 }

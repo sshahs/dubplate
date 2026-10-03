@@ -10,10 +10,12 @@ import type { ExistingTags, FileCheck, Library, Operation, PlanItem, Settings, T
 import { artToEmbed, describeArt, cachedArt } from "./art"
 import { idsFor } from "./core/ids"
 import { FILL_ONLY, tagDiff, tagsFor, type TagExtras } from "./core/naming"
+import { hasMarkup } from "./core/plain-text"
 import { mismatch, sniffFileSync } from "./sniff"
 import { ensureDir, followableSidecars, isInside, moveFile, removeCreatedDirs, removeEmptyDirs, sameFile } from "./fsops"
 import type { JobContext } from "./jobs"
 import { placementLibraryId, settingsForLibrary } from "./library-settings"
+import { errorDetail } from "./logs"
 import { canonicalGenre } from "./genres"
 import { lyricsToEmbed, usableLyrics } from "./lyrics"
 import { extFor, metaFor, proposedFilename, targetFolder } from "./placement"
@@ -219,6 +221,29 @@ export class MoveTracker {
   }
 }
 
+const shown = (v: unknown) => {
+  const s = typeof v === "string" ? v : JSON.stringify(v)
+  return s === undefined ? "(none)" : s.length > 80 ? `"${s.slice(0, 79)}…"` : typeof v === "string" ? `"${s}"` : s
+}
+
+/** A file change as one log line, with every path and tag in its detail. */
+function changeLine(from: string, to: string, writes: { field: string; after: unknown }[], kept: string[], prefix = ""): { message: string; detail: string } {
+  const renamed = from !== to
+  const moved = renamed && path.dirname(from) !== path.dirname(to)
+  const verb = moved ? "Moved" : renamed ? "Renamed" : "Tagged"
+  const tags = writes.length ? `${renamed ? " and tagged" : ""} (${writes.map((w) => w.field).join(", ")})` : ""
+  const message = renamed ? `${prefix}${verb}${tags}: ${path.basename(from)} → ${moved ? path.relative(path.dirname(from), to) : path.basename(to)}` : `${prefix}${verb} ${path.basename(from)}${tags}`
+  const detail = [
+    `From: ${from}`,
+    renamed ? `To:   ${to}` : "",
+    ...writes.map((w) => `Tag ${w.field}: ${shown(w.after)}`),
+    kept.length ? `Already in the file, left alone: ${kept.join(", ")}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n")
+  return { message, detail }
+}
+
 export async function executePlan(items: PlanItem[], settings: Settings, opts: { dryRun: boolean; label?: string }, ctx: JobContext): Promise<string> {
   if (settings.safety.readOnly && !opts.dryRun) throw new Error("Read-only mode is on - switch it off in Settings to write to files")
   const batchId = randomUUID()
@@ -238,6 +263,8 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
     const base = { batchId, trackId: track.id, kind, fromPath: item.fromPath, toPath: item.toPath, tagsAfter: item.tags, statusBefore: track.status, batchLabel: label }
     if (opts.dryRun) {
       insertOperation({ ...base, tagsBefore: pickBefore(track.tags, item.tagChanges.map((c) => c.field)), status: "dry-run", error: null })
+      const line = changeLine(item.fromPath, item.rename ? item.toPath : item.fromPath, item.tagChanges, [], "Dry run, would have: ")
+      ctx.log("debug", line.message, { trackId: track.id, detail: line.detail })
       ctx.tick(true, item.toName)
       continue
     }
@@ -245,6 +272,8 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
     let createdDirs: string[] = []
     // What the file ends up with: the planned tags, less any gap the file had already filled.
     let tagsAfter = item.tags
+    let written: { field: string; after: unknown }[] = []
+    let kept: string[] = []
     try {
       const st = await fs.promises.stat(track.path)
       if (st.size !== track.size || Math.round(st.mtimeMs) !== Math.round(track.mtimeMs)) {
@@ -252,7 +281,8 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
       }
       if (item.tagChanges.length) {
         const live = readManagedTags(track.path)
-        const filled = (f: keyof ExistingTags) => FILL_ONLY.has(f) && live[f] !== undefined && live[f] !== ""
+        // (markup from a web page in a field doesn't count: it's replaced)
+        const filled = (f: keyof ExistingTags) => FILL_ONLY.has(f) && live[f] !== undefined && live[f] !== "" && !(typeof live[f] === "string" && hasMarkup(live[f] as string))
         const writes = item.tagChanges.filter((c) => !filled(c.field))
         tagsAfter = { ...item.tags }
         for (const c of item.tagChanges) if (filled(c.field)) (tagsAfter as Record<string, unknown>)[c.field] = live[c.field]
@@ -260,6 +290,8 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
         const changes: Partial<Record<keyof ExistingTags, unknown>> = {}
         for (const c of writes) changes[c.field] = c.after
         if (writes.length) writeTags(track.path, changes)
+        written = writes
+        kept = item.tagChanges.filter((c) => filled(c.field)).map((c) => c.field)
       }
       if (item.rename) {
         createdDirs = await ensureDir(path.dirname(item.toPath))
@@ -287,6 +319,8 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
         ...(embedded ? { art: track.artFound, artFound: null } : {}),
       })
       insertOperation({ ...base, tagsAfter, tagsBefore, status: "done", error: null, createdDirs })
+      const line = changeLine(track.path, item.rename ? item.toPath : track.path, written, kept)
+      ctx.log("debug", line.message, { trackId: track.id, detail: `${line.detail}${createdDirs.length ? `\nMade folders: ${createdDirs.join(", ")}` : ""}` })
       changed.push(track.id)
       ctx.tick(true, item.toName)
     } catch (err) {
@@ -302,7 +336,7 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
       await removeCreatedDirs(createdDirs)
       insertOperation({ ...base, tagsBefore, status: "failed", error: message })
       updateTrack(track.id, { status: "error", note: message })
-      ctx.log("error", `${track.filename}: ${message}`)
+      ctx.log("error", `${track.filename}: ${message}`, { trackId: track.id, detail: errorDetail(err) })
       ctx.tick(false)
     }
   }
@@ -375,6 +409,11 @@ export async function rewind(opIds: number[] | null, batchId: string | null, ctx
       }
       markOperationReverted(op.id)
       undone++
+      const backTags = Object.keys(op.tagsBefore ?? {})
+      ctx.log("debug", moves ? `Put back: ${path.basename(op.toPath)} → ${path.basename(op.fromPath)}${backTags.length ? ` (and its old ${backTags.join(", ")})` : ""}` : `Put back the old ${backTags.join(", ") || "tags"} of ${path.basename(op.toPath)}`, {
+        trackId: op.trackId,
+        detail: `From: ${op.toPath}${moves ? `\nTo:   ${op.fromPath}` : ""}${backTags.map((k) => `\nTag ${k}: ${shown((op.tagsBefore as Record<string, unknown>)[k])}`).join("")}`,
+      })
       // A converted video put back where it was.
       if (!op.trackId && op.kind === "set-aside") videoMoved(op.toPath, op.fromPath, null)
       if (op.trackId) {
@@ -415,7 +454,7 @@ export async function rewind(opIds: number[] | null, batchId: string | null, ctx
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       markOperationReverted(op.id, `Rewind failed: ${message}`)
-      ctx.log("error", `Rewind ${path.basename(op.toPath)}: ${message}`)
+      ctx.log("error", `Rewind ${path.basename(op.toPath)}: ${message}`, { trackId: op.trackId, detail: errorDetail(err) })
       ctx.tick(false)
     }
   }

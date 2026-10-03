@@ -2,6 +2,7 @@ import type { GenreRule, LlmProviderConfig, MediaServerConfig, PathMapping, Scra
 import { STARTER_GENRE_RULES } from "../shared/genres"
 import { sanitizeFilename } from "./core/naming"
 import { getDb } from "./db"
+import { clampDays, configureLogs, pruneLogs } from "./logs"
 import { setContact } from "./sources/http"
 import { recipeKey } from "./sources/recipe"
 
@@ -432,6 +433,7 @@ export const DEFAULT_SETTINGS: Settings = {
   acoustid: { submit: false },
   canonicalGenres: { enabled: false, overwrite: true, rules: STARTER_GENRE_RULES },
   contact: "",
+  logs: { detail: true, keepDays: 14 },
 }
 
 type Obj = Record<string, unknown>
@@ -542,6 +544,7 @@ export function loadSettings(): Settings {
   // the default still carries it. Never switched on, it was never chosen: the built-in list replaces it.
   const cg = stored.canonicalGenres
   if (cg && !cg.enabled && cg.rules?.map((r) => r.genre).join("|") === OLD_EXAMPLE_GENRES) s.canonicalGenres.rules = structuredClone(STARTER_GENRE_RULES)
+  configureLogs(s.logs)
   return s
 }
 
@@ -739,11 +742,15 @@ export function saveSettings(patch: Partial<Settings>): Settings {
   }
   if (patch.duplicates) next.duplicates.holdingFolder = sanitizeFilename(next.duplicates.holdingFolder ?? "") || DEFAULT_SETTINGS.duplicates.holdingFolder
   if (patch.organise) next.organise.template = next.organise.template?.trim() || DEFAULT_SETTINGS.organise.template
+  if (patch.logs) next.logs = { detail: next.logs.detail !== false, keepDays: clampDays(next.logs.keepDays) }
   // Guard against inverted thresholds.
   next.confidence.reviewThreshold = Math.min(next.confidence.reviewThreshold, next.confidence.autoThreshold)
   getDb()
     .prepare("INSERT INTO settings (key, value_json) VALUES ('app', ?) ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json")
     .run(JSON.stringify(next))
   saves++
+  configureLogs(next.logs)
+  // Kept for less time: what's past it goes now, not at the next hourly trim.
+  if (patch.logs) pruneLogs()
   return next
 }

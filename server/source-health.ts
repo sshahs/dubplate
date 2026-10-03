@@ -62,7 +62,7 @@ export function recordScraperAnswer(sourceId: string, bad: string | null, hits: 
   const reason = `Switched off by the health check: ${bad} (${r.bad_in_a_row} times in a row)`
   saveSettings({ scrapers: s.scrapers.map((x) => (x.id === id ? { ...x, enabled: false, disabledReason: reason } : x)) })
   db.prepare("UPDATE source_health SET disabled_at = datetime('now') WHERE source_id = ?").run(sourceId)
-  log("error", `${def.name}: ${reason}. Test it in Sources and switch it back on once it works.`)
+  log("error", `${def.name}: ${reason}. Test it in Sources and switch it back on once it works.`, { area: "sources", trackId: null })
   return reason
 }
 

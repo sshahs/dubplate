@@ -14,9 +14,9 @@ export function startIntegrations() {
   onJobFinished(async (job, outcome) => {
     const settings = settingsNow()
     if (outcome.filesChanged) {
-      for (const r of await refreshMediaServers(settings)) log(r.ok ? "info" : "warn", `${r.name}: ${r.message}`)
+      for (const r of await refreshMediaServers(settings)) log(r.ok ? "info" : "warn", `${r.name}: ${r.message}`, { area: "integrations", jobId: job.id, jobLabel: job.label })
     }
     const msg = messageForJob(job, outcome, settings)
-    if (msg) for (const r of await sendChat(settings, msg)) if (!r.ok) log("warn", `Couldn't message ${r.channel === "discord" ? "Discord" : "Telegram"}: ${r.message}`)
+    if (msg) for (const r of await sendChat(settings, msg)) if (!r.ok) log("warn", `Couldn't message ${r.channel === "discord" ? "Discord" : "Telegram"}: ${r.message}`, { area: "integrations", jobId: job.id, jobLabel: job.label })
   })
 }

@@ -9,6 +9,7 @@ import type { Candidate, SourceId } from "../../shared/types"
 import { artistSimilarity, collapseSpaces, titleSimilarity } from "../core/normalize"
 import { httpJson, httpText } from "./http"
 import { enc, yearOf, type SourceAdapter, type SourceQuery } from "./types"
+import { plainText } from "../core/plain-text"
 
 /** Rows kept per track. */
 const MAX_HITS = 8
@@ -106,16 +107,18 @@ interface RiddimIdTune {
 }
 
 export function riddimIdRows(json: { data?: RiddimIdTune[] } | null, term: string): Omit<Candidate, "source" | "sourceLabel">[] {
+  // Artists, riddims and labels come as links to their pages: <a href="/artists/271/…">Linval Thompson</a>.
+  const text = (s: string | null | undefined) => collapseSpaces(plainText(s ?? ""))
   return (json?.data ?? [])
     .filter((t) => t?.title)
     .map((t) => {
-      const read = readDubCredit(collapseSpaces(t.relArtists ?? ""), collapseSpaces(t.title))
+      const read = readDubCredit(text(t.relArtists), text(t.title))
       return {
         artist: read.artist,
         title: read.title,
-        riddim: riddimName(t.relRiddims),
+        riddim: riddimName(text(t.relRiddims)),
         year: yearOf(t.year ?? undefined),
-        label: collapseSpaces(t.relLabels ?? "") || undefined,
+        label: text(t.relLabels) || undefined,
         // Tunes have no page of their own; the search shows the row.
         url: `https://riddim-id.com/search?term=${enc(term)}`,
         externalId: String(t.id),

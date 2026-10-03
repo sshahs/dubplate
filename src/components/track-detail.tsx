@@ -426,6 +426,13 @@ export function TrackDetail({
                 <dd>{track.approvedBy === "person" ? "You" : track.approvedBy === "hands-off" ? "Hands-off" : "Auto-approve"}</dd>
               </>
             )}
+            <dt className="text-muted-foreground">Log</dt>
+            <dd>
+              {/* Its own tab: the console keeps running beside the track. */}
+              <a href={`/console?track=${track.id}`} target="_blank" rel="noopener" className="text-primary hover:underline">
+                Everything Dubplate did with this file
+              </a>
+            </dd>
           </dl>
           {track.original && (
             <div className="mt-4 rounded-2xl border p-3">
