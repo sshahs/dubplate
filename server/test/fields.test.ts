@@ -3,7 +3,7 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { checkFields, isGenreName, isPlaceholder, riddimIn } from "../../shared/fields"
 import { riskOf } from "../../shared/risk"
 import type { Candidate, Decision, FinalMeta, Settings } from "../../shared/types"
@@ -188,10 +188,22 @@ describe("tracks read before the checks", () => {
     setDb(openDb(":memory:"))
     resetJobStateForTests()
   })
-  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
 
   it("are read again, searched again where the artist changed, and cut ones go back to Cut & Tag", async () => {
-    // No sources: the search again finishes straight away.
+    // Like a real network: every request takes its time (sandboxes without one answer at once).
+    const fetch = vi.fn(
+      (_url: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((resolve, reject) => {
+          const t = setTimeout(() => resolve(new Response("{}")), 3000)
+          init?.signal?.addEventListener("abort", () => (clearTimeout(t), reject(new Error("aborted"))))
+        })
+    )
+    vi.stubGlobal("fetch", fetch)
+    // No sources: the search again finishes straight away, asking nothing of the network.
     const settings: Settings = structuredClone({ ...DEFAULT_SETTINGS, sources: Object.fromEntries(Object.entries(DEFAULT_SETTINGS.sources).map(([id, c]) => [id, { ...c, enabled: false }])), scrapers: [] })
     writeMp3(path.join(dir, "Seasons Riddim - Gyptian - Is There A Place.mp3"))
     writeMp3(path.join(dir, "Jah Shaka - African Woman Dub.mp3"))
@@ -228,6 +240,8 @@ describe("tracks read before the checks", () => {
     expect(repo.getTrack(tenor.id)!.status).toBe("done")
     expect(logs.at(-1)).toEqual(["success", "Checked every track's fields: 2 tracks put right, 1 to ask the sources about again, 1 cut file back in Cut & Tag"])
     for (let i = 0; i < 100 && activeJobs().length; i++) await new Promise((r) => setTimeout(r, 20))
+    expect(activeJobs()).toEqual([])
+    expect(fetch).not.toHaveBeenCalled()
     expect(repo.getTrack(gyptian.id)!.decision).toMatchObject({ artists: ["Gyptian"], title: "Is There A Place", riddim: "Seasons" })
   })
 })
