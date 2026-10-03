@@ -554,7 +554,8 @@ export async function recheckFields(ids: number[], settings: Settings, ctx: JobC
   ctx.log(changed.length ? "success" : "info", `Checked every track's fields: ${parts.length ? parts.join(", ") : "nothing needed changing"}`, recut.length ? { detail: recut.join("\n") } : {})
   if (searchAgain.length) {
     enqueueJob("process", `Ask the sources again for ${searchAgain.length} track${searchAgain.length === 1 ? "" : "s"} read wrong before`, (job) =>
-      processTracks(searchAgain, settingsNow(), { interpret: false, scour: true, force: false, rescour: true }, job)
+      // The settings this check ran with (they still follow sources switched on or off during the run).
+      processTracks(searchAgain, settings, { interpret: false, scour: true, force: false, rescour: true }, job)
     )
   }
   getDb().prepare("INSERT INTO settings (key, value_json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json").run(FIELDS_CHECKED, String(FIELDS_CHECK_VERSION))
