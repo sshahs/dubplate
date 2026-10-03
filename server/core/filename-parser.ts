@@ -151,22 +151,38 @@ function findLeadingArtist(s: string, candidates: string[]): { artist: string; r
   return null
 }
 
+const VS = /^(?:vs\.?|versus|v)$/i
+
+/** The artist at the start of what follows a "vs": a known one, else the words up to a hint, a date or a bracket. */
+function takeClashArtist(s: string, known: string[]): { artist: string; rest: string } {
+  const hit = findLeadingArtist(s, known)
+  if (hit) return hit
+  const words = s.split(" ")
+  const stopAt = words.findIndex((w, i) => i > 0 && (/^(live|dubplate|dub|special|clash|sound|at|in|'\d{2}|part|pt|side|tape|session)$/i.test(w) || /^\d/.test(w) || /^[([]/.test(w) || VS.test(w)))
+  const take = stopAt === -1 ? Math.min(words.length, 2) : stopAt
+  return { artist: words.slice(0, take).join(" "), rest: words.slice(take).join(" ") }
+}
+
 /**
  * Split an unseparated clash string: "buju banton vs beenie man live dubplate"
- * → artists before "vs" and the first artist-like chunk after it.
+ * → artists before "vs" and the first artist-like chunk after it - and after
+ * each further "vs", for a three-way clash ("Jaro vs Stone Love vs Metro Media 9-94").
  */
 function splitClash(s: string, known: Set<string>): { artistPart: string; rest: string } | null {
   const m = s.match(/^(.+?)\s+(?:vs\.?|versus|v)\s+(.+)$/i)
   if (!m) return null
-  const left = m[1]
-  const rightWords = m[2].split(" ")
-  // Prefer a known artist on the right; otherwise stop at the first hint word.
   const knownList = [...known]
-  const hit = findLeadingArtist(m[2], knownList)
-  if (hit) return { artistPart: `${left} vs ${hit.artist}`, rest: hit.rest }
-  const stopAt = rightWords.findIndex((w, i) => i > 0 && /^(live|dubplate|dub|special|clash|sound|at|in|\d{2,4}|'\d{2}|part|pt|side|tape|session)$/i.test(w))
-  const take = stopAt === -1 ? Math.min(rightWords.length, 2) : stopAt
-  return { artistPart: `${left} vs ${rightWords.slice(0, take).join(" ")}`, rest: rightWords.slice(take).join(" ") }
+  const names = [m[1]]
+  let rest = m[2]
+  for (let i = 0; i < 4; i++) {
+    const next = takeClashArtist(rest, knownList)
+    names.push(next.artist)
+    rest = next.rest
+    const more = rest.match(/^(?:vs\.?|versus|v)\s+(.+)$/i)
+    if (!more) break
+    rest = more[1]
+  }
+  return { artistPart: names.join(" vs "), rest }
 }
 
 export function parseFilename(filename: string, context: ParseContext = {}): HeuristicParse {
@@ -255,6 +271,16 @@ export function parseFilename(filename: string, context: ParseContext = {}): Heu
     break
   }
 
+  // "Jaro vs Stone Love 1994 - Feat. Josie Wales": the year closes the clash, not a sound's name.
+  let clashYear: number | undefined
+  if (separator && !year && /\s(?:vs\.?|versus|v)\s/i.test(artistPart)) {
+    const y = artistPart.match(/\s[([]?((?:19[5-9]|20[0-4])\d)[)\]]?$/)
+    if (y) {
+      clashYear = Number(y[1])
+      artistPart = artistPart.slice(0, y.index).trim()
+    }
+  }
+
   // "Title by Artist"
   if (!separator) {
     const by = s.match(/^(.+?)\s+by\s+(.+)$/i)
@@ -337,7 +363,7 @@ export function parseFilename(filename: string, context: ParseContext = {}): Heu
     relation,
     title: smartCase(title),
     version: version ? smartCase(version) : undefined,
-    year,
+    year: year ?? clashYear,
     cleaned: s,
     trackNumber: track,
     ...(position ? { position } : {}),

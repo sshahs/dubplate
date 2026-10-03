@@ -68,7 +68,7 @@ audio_track_01 copy.mp3
 flowchart TB
   subgraph pipeline ["The pipeline"]
     direction LR
-    scan["📂 Scan<br/>read-only"] --> parse["⚡ Parse<br/>rule-based"] --> ai["🧠 Interpret<br/>local or cloud AI"] --> scour["🔎 Scour<br/>11 sources + scrapers"] --> score["📊 Score<br/>consensus engine"]
+    scan["📂 Scan<br/>read-only"] --> parse["⚡ Parse<br/>rule-based"] --> ai["🧠 Interpret<br/>local or cloud AI"] --> scour["🔎 Scour<br/>12 sources + scrapers"] --> score["📊 Score<br/>consensus engine"]
   end
   pipeline -->|"90 and up"| matched["Matched"]
   pipeline -->|"60–89 or conflict"| review["Review"]
@@ -196,6 +196,7 @@ on low-risk tracks**; everything else waits for a person.
 | Bandcamp | – | Independent dub, grime and sound-system releases |
 | Internet Archive | – | Clash tapes and pirate radio sets |
 | Mixcloud | – | Radio shows and clash recordings |
+| SoundClash Hub sounds | – | Each sound system's page of featured clash recordings (mostly soundtape.com tapes on SoundCloud). A clash tape whose sounds have a page - Killamanjaro, Stone Love, King Addies, Saxon and 35 more - is checked against them by the sounds and the year. |
 | YouTube | key | Where most specials end up. Uses auto-generated "Artist - Topic" channels when available. |
 | AcoustID | key + `fpcalc` | **Audio fingerprinting**: identifies the audio itself, not the name |
 
@@ -205,8 +206,10 @@ archives, clash databases and label shops all work, and so do pages that carry
 their results as JSON inside them (a `<script>` tag). The built-in **Test**
 button shows exactly what gets extracted. Presets ship switched off: Regime
 Radio Sound Tapes, Traxsource, Genius, Audius, Hype Machine, Grime Archive,
-BritishHipHop.co.uk and SoundClash Hub answered with real results when checked
-in October 2026; Juno Download is untested. SoundClash Hub's past events are
+BritishHipHop.co.uk, SoundClash Hub and SoundCloud answered with real results
+when checked in October 2026; Juno Download is untested. SoundCloud reads the
+first ten results of its own search, as served to browsers without
+JavaScript, so it needs no key: soundtape.com's clash archive lives there. SoundClash Hub's past events are
 the recordings: a clash or juggling tape matches its event listing by the
 sounds that played and the year (its listings start around 2025). Site markup drifts, so test one before trusting it.
 

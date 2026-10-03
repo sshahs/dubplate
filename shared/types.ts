@@ -333,6 +333,7 @@ export type SourceId =
   | "youtube"
   | "acoustid"
   | "discogs-collection"
+  | "soundclashhub"
   | `scraper:${string}`
 
 /**

@@ -10,11 +10,13 @@ import { httpJson, httpText } from "./http"
 import { enc, yearOf, type SourceAdapter } from "./types"
 
 /** Split a free-form "Artist - Title (Official Video)" string with the filename parser. */
-export function readCombined(text: string): { artist: string; artists: string[]; title: string } {
+export function readCombined(text: string): { artist: string; artists: string[]; title: string; year?: number } {
   // A dummy extension stops the parser from treating e.g. "Vol.2" as one.
   const p = parseFilename(`${text}.txt`)
   const artist = p.artists.join(p.relation === "vs" ? " vs " : " & ")
-  return { artist, artists: p.artists, title: p.title + (p.version && !/^(live|dubplate|special)$/i.test(p.version) ? ` (${p.version})` : "") }
+  // "Killamanjaro vs Stone Love 1994": a clash, named by its sounds and the year.
+  const title = p.title || (p.relation === "vs" ? "Clash" : "")
+  return { artist, artists: p.artists, title: title + (p.version && !/^(live|dubplate|special)$/i.test(p.version) ? ` (${p.version})` : ""), year: p.year }
 }
 
 // ---------- Bandcamp ----------

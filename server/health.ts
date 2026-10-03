@@ -38,6 +38,7 @@ const PROBES: Record<string, string> = {
   bandcamp: "https://bandcamp.com/",
   archive: "https://archive.org/",
   mixcloud: "https://api.mixcloud.com/",
+  soundclashhub: "https://soundclashhub.com/api/sounds",
   youtube: "https://www.googleapis.com/",
   acoustid: "https://api.acoustid.org/",
 }

@@ -34,6 +34,12 @@ export const SOURCE_META: Record<
   archive: { label: "Internet Archive", needs: [], about: "Advanced search over archive.org - clash tapes, pirate radio sets and dubplate rips.", suits: ["Sound clashes", "Radio rips", "Live sets", "DJ mixes", "Dubplates & specials", "Blues", "Jazz"] },
   mixcloud: { label: "Mixcloud", needs: [], about: "Radio shows and sets - useful for clash and pirate-radio recordings.", suits: ["DJ mixes", "Radio rips", "Live sets", "Sound clashes"] },
   youtube: { label: "YouTube", needs: ["apiKey"], keyLabel: "Data API v3 key", env: ["YOUTUBE_API_KEY"], about: "Many specials and dubplates only exist as uploads. Low weight - titles are messy.", signup: "https://console.cloud.google.com/apis/library/youtube.googleapis.com", suits: ["Dubplates & specials", "Sound clashes", "Edits & bootlegs", "Radio rips", "Live sets", "Afrobeats", "Amapiano", "Soca"] },
+  soundclashhub: {
+    label: "SoundClash Hub sounds",
+    needs: [],
+    about: "Each sound system's page of featured clash recordings (mostly soundtape.com uploads on SoundCloud): which sounds played and when. A clash tape whose sounds have a page is checked against them.",
+    suits: ["Sound clashes", "Dubplates & specials", "Dancehall", "Reggae"],
+  },
   acoustid: { label: "AcoustID fingerprint", needs: ["apiKey"], keyLabel: "Application API key", env: ["ACOUSTID_API_KEY"], about: "Identifies audio by fingerprint (needs fpcalc / Chromaprint installed). Strongest signal when it hits.", signup: "https://acoustid.org/new-application" },
   "discogs-collection": {
     label: "Your Discogs collection",
@@ -54,6 +60,7 @@ const DEFAULT_SOURCES: Record<string, SourceConfig> = {
   archive: { enabled: true, weight: 0.5 },
   mixcloud: { enabled: true, weight: 0.45 },
   youtube: { enabled: true, weight: 0.4 },
+  soundclashhub: { enabled: true, weight: 0.6 },
   acoustid: { enabled: true, weight: 1.3 },
   "discogs-collection": { enabled: true, weight: 1.2 },
 }
@@ -241,6 +248,22 @@ export const SCRAPER_PRESETS: ScraperDefinition[] = [
     verified: true,
     genres: ["Sound clashes"],
     genreWeights: { "Sound clashes": 1.3 },
+  },
+  {
+    id: "soundcloud",
+    name: "SoundCloud",
+    enabled: false,
+    weight: 0.45,
+    kind: "html",
+    // The first ten results, as SoundCloud serves them to browsers without JavaScript: no API key.
+    searchUrl: "https://soundcloud.com/search/sounds?q={query}",
+    items: "noscript li h2",
+    fields: { combined: "a", url: "a@href" },
+    scene: "Clash tapes, specials, radio rips and DJ uploads",
+    notes: "SoundCloud's own search. soundtape.com's clash archive (the tapes SoundClash Hub embeds) lives here, along with other uploaders' tapes and sets. Uploads are titled by whoever posted them, so it's weighted low. Checked October 2026.",
+    verified: true,
+    genres: ["Sound clashes", "Dubplates & specials", "Radio rips", "Edits & bootlegs", "Dancehall", "Reggae", "Grime", "UK garage", "Jungle", "Drum & bass"],
+    genreWeights: { "Sound clashes": 1.25, "Dubplates & specials": 1.2, "Radio rips": 1.15 },
   },
 ]
 
