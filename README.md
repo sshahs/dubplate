@@ -201,6 +201,26 @@ on low-risk tracks**; everything else waits for a person.
 | YouTube | key | Where most specials end up. Uses auto-generated "Artist - Topic" channels when available. |
 | AcoustID | key + `fpcalc` | **Audio fingerprinting**: identifies the audio itself, not the name |
 
+**Riddims & rave**
+
+| Source | Key | Notes |
+| --- | :-: | --- |
+| Riddimguide | – | 58,000 reggae and dancehall tunes with the riddim each is voiced on, its label and year. Asked for the song by name; only the track's own artists' rows count, so "Ring The Alarm" means Tenor Saw's, not a dozen others. |
+| Riddim-ID | – | Riddim, label and year for reggae, dancehall and soca tunes from the 1960s on. |
+| Reggae Fever | – | The Swiss reggae shop's 66,000-record catalogue: A and B sides with riddim, label, year and pressing country (GB, JM, US). Strong on original UK and JA 7″s and 12″s. |
+| Riddims World | – | 24,000 riddims with their tracklists. Its search only knows riddim names, so it checks a riddim the AI reads in the file name and adds the label and year when the tune is on it. |
+| Rave Tape Packs | – | Jungle, hardcore, drum & bass and UK garage tape packs with their DJs, MCs and year. A set matches when its DJ or MC is on the pack. |
+| Rave Archive UK | – | Raves from 1988 on, with venues, dates and the recordings that survive. A set matches when its DJ is named on the night. |
+| MixesDB | – | DJ mixes and radio shows: who played, which show or club, and the date. Only the artist's own sets count, not mixes that played their tunes. |
+| junglist.co.uk | – | Rare jungle and drum & bass tracks, dubplates and whitelabels as the community names them. |
+
+A tune a riddim database knows gets its riddim: the track page shows "On the
+Stalag riddim" under the new name, and each source hit lists the riddim it
+gave. Not added, because there's nothing a program can read: My Soundtapes
+(a paid app behind a login), Original Kool Archives (a 24/7 stream with no
+list of shows), Jah Troopers' audio archive (one release, on YouTube) and
+RollDaBeats (the discography has closed; only the forum is left).
+
 **🔧 Custom scrapers**: point Dubplate at any specialist site's search page
 (CSS selectors) or JSON API (dot-paths, e.g. WordPress `/wp-json`). Grime
 archives, clash databases and label shops all work, and so do pages that carry

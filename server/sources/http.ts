@@ -23,6 +23,15 @@ const HOST_INTERVAL_MS: Record<string, number> = {
   "lrclib.net": 250,
   // A small static site read page by page once a month.
   "whocorkthedance.com": 400,
+  // Hobby sites and small shops: gently.
+  "www.riddimguide.com": 1500,
+  "riddim-id.com": 1500,
+  "www.reggaefever.ch": 1500,
+  "riddimsworld.com": 1500,
+  "www.ravetapepacks.com": 1500,
+  "rave-archive.com": 1500,
+  "www.mixesdb.com": 1000,
+  "junglist.co.uk": 1500,
 }
 
 const nextSlot = new Map<string, number>()

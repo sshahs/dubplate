@@ -171,6 +171,7 @@ export function TrackDetail({
             <HugeiconsIcon icon={ArrowRight02Icon} strokeWidth={2} className="text-rasta-gold size-4 shrink-0" />
             <span className={cn("font-medium break-words", preview ? "text-foreground" : "text-muted-foreground italic")}>{preview ?? "needs an artist and title"}</span>
           </div>
+          {d?.riddim && <div className="text-muted-foreground text-xs">On the {d.riddim} riddim</div>}
         </div>
       </div>
 
@@ -291,6 +292,7 @@ export function TrackDetail({
                       {c.artist} - {c.title}
                       {c.album ? ` · ${c.album}` : ""}
                       {c.year ? ` · ${c.year}` : ""}
+                      {c.riddim ? ` · ${c.riddim} riddim` : ""}
                       {c.duration ? ` · ${fmtDuration(c.duration)}` : ""}
                     </span>
                     {c.url && (

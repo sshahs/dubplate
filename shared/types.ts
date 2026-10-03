@@ -335,6 +335,14 @@ export type SourceId =
   | "discogs-collection"
   | "soundclashhub"
   | "whocorkthedance"
+  | "riddimguide"
+  | "riddimid"
+  | "reggaefever"
+  | "riddimsworld"
+  | "ravetapepacks"
+  | "ravearchive"
+  | "mixesdb"
+  | "junglist"
   | `scraper:${string}`
 
 /**
@@ -376,6 +384,8 @@ export interface Candidate {
   album?: string
   year?: number
   label?: string
+  /** the riddim a tune is voiced on, where the source names it */
+  riddim?: string
   genre?: string
   duration?: number // seconds
   url?: string
@@ -423,6 +433,7 @@ export interface Decision {
   year?: number
   album?: string
   label?: string
+  riddim?: string
   genre?: string
   confidence: number // 0..100
   status: Extract<TrackStatus, "matched" | "review" | "conflict" | "unmatched">

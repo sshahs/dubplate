@@ -2,6 +2,7 @@ import { HugeiconsIcon } from "@hugeicons/react"
 import {
   Add01Icon,
   ArrowDown01Icon,
+  CassetteTapeIcon,
   Copy01Icon,
   Database01Icon,
   Delete02Icon,
@@ -40,7 +41,7 @@ import { useActiveJobs } from "@/lib/events"
 import { fmtAgo } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
-type GroupId = "catalogues" | "underground" | "fingerprint" | "scrapers"
+type GroupId = "catalogues" | "underground" | "archives" | "fingerprint" | "scrapers"
 
 /** Built-in sources by where they look; anything not listed is a catalogue. */
 const GROUPS: { id: GroupId; label: string; icon: SectionItem["icon"]; title: string; description: string; ids?: string[] }[] = [
@@ -52,6 +53,14 @@ const GROUPS: { id: GroupId; label: string; icon: SectionItem["icon"]; title: st
     title: "Underground",
     description: "Where specials, clash tapes, radio sets and white labels actually turn up.",
     ids: ["bandcamp", "archive", "mixcloud", "youtube", "soundclashhub", "whocorkthedance"],
+  },
+  {
+    id: "archives",
+    label: "Riddims & rave",
+    icon: CassetteTapeIcon,
+    title: "Riddim databases and rave archives",
+    description: "Which riddim a tune is voiced on, with its label and year; and the tape packs, raves and radio sets of UK jungle, hardcore and garage.",
+    ids: ["riddimguide", "riddimid", "reggaefever", "riddimsworld", "ravetapepacks", "ravearchive", "mixesdb", "junglist"],
   },
   {
     id: "fingerprint",

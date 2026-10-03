@@ -14,6 +14,8 @@ export interface SourceQuery {
   descriptiveTitle: boolean
   /** the reading's version ("Dubplate", "VIP"…), for the lookup cache */
   version?: string
+  /** the riddim the reading names ("Sleng Teng"), when it names one */
+  riddim?: string
   filePath: string
 }
 
