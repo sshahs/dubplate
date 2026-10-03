@@ -8,11 +8,12 @@ import { mainstreamSources } from "./catalog"
 import { discogsCollection } from "./discogs-collection"
 import { scraperAdapter } from "./scraper"
 import { soundclashSounds } from "./soundclash"
+import { whoCorkTheDance } from "./whocorkthedance"
 import type { SourceAdapter, SourceQuery } from "./types"
 import { undergroundSources } from "./underground"
 
 export function allAdapters(settings: Settings): { adapter: SourceAdapter; cfg: SourceConfig }[] {
-  const builtIn = [...mainstreamSources(), discogsCollection, ...undergroundSources(), soundclashSounds, acoustid].map((adapter) => ({
+  const builtIn = [...mainstreamSources(), discogsCollection, ...undergroundSources(), soundclashSounds, whoCorkTheDance, acoustid].map((adapter) => ({
     adapter,
     cfg: settings.sources[adapter.id] ?? { enabled: false, weight: 0.5 },
   }))
@@ -172,7 +173,7 @@ export async function scourTrack(
   const results = await Promise.all(
     jobs.map(async ({ adapter, cfg }) => {
       if (precomputed[adapter.id]) return precomputed[adapter.id]!
-      const key = adapter.id === "acoustid" ? null : lookupKey(adapter.cacheKey ?? adapter.id, q)
+      const key = adapter.id === "acoustid" || adapter.local ? null : lookupKey(adapter.cacheKey ?? adapter.id, q)
       const cached = key && !opts.fresh ? cachedLookup(key) : null
       if (cached) return cached
       const scraper = adapter.id.startsWith("scraper:")

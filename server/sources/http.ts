@@ -21,6 +21,8 @@ const HOST_INTERVAL_MS: Record<string, number> = {
   "coverartarchive.org": 1100,
   "i.discogs.com": 1100,
   "lrclib.net": 250,
+  // A small static site read page by page once a month.
+  "whocorkthedance.com": 400,
 }
 
 const nextSlot = new Map<string, number>()
@@ -108,7 +110,14 @@ export async function httpText(url: string, opts: HttpOptions = {}): Promise<{ s
       nextSlot.set(host, Date.now() + delay)
       continue
     }
-    const body = await res.text()
+    // Old sites are often Latin-1 (Windows-1252) whatever they declare: decode as that when it isn't UTF-8.
+    const bytes = new Uint8Array(await res.arrayBuffer())
+    let body: string
+    try {
+      body = new TextDecoder("utf-8", { fatal: true }).decode(bytes)
+    } catch {
+      body = new TextDecoder("windows-1252").decode(bytes)
+    }
     if (!res.ok && res.status !== 404) throw new HttpError(res.status, `${host} replied ${res.status}: ${body.slice(0, 160)}`)
     if (ttl > 0) {
       db.prepare(

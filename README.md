@@ -68,7 +68,7 @@ audio_track_01 copy.mp3
 flowchart TB
   subgraph pipeline ["The pipeline"]
     direction LR
-    scan["📂 Scan<br/>read-only"] --> parse["⚡ Parse<br/>rule-based"] --> ai["🧠 Interpret<br/>local or cloud AI"] --> scour["🔎 Scour<br/>12 sources + scrapers"] --> score["📊 Score<br/>consensus engine"]
+    scan["📂 Scan<br/>read-only"] --> parse["⚡ Parse<br/>rule-based"] --> ai["🧠 Interpret<br/>local or cloud AI"] --> scour["🔎 Scour<br/>13 sources + scrapers"] --> score["📊 Score<br/>consensus engine"]
   end
   pipeline -->|"90 and up"| matched["Matched"]
   pipeline -->|"60–89 or conflict"| review["Review"]
@@ -196,6 +196,7 @@ on low-risk tracks**; everything else waits for a person.
 | Bandcamp | – | Independent dub, grime and sound-system releases |
 | Internet Archive | – | Clash tapes and pirate radio sets |
 | Mixcloud | – | Radio shows and clash recordings |
+| Who Cork The Dance | – | The dancehall sound system tape archive at whocorkthedance.com: sessions from Killamanjaro, Volcano, Jammys, Stereophonic, Gemini and dozens more from 1979 on, read once a month (the site has no search). A tape downloaded from there is recognised by its file name, even with the archive's numbering and credits ("killamanjaro vs stone love 1989keithjaymandrew.mp3"); a renamed one by its sounds and year. |
 | SoundClash Hub sounds | – | Each sound system's page of featured clash recordings (mostly soundtape.com tapes on SoundCloud). A clash tape whose sounds have a page - Killamanjaro, Stone Love, King Addies, Saxon and 35 more - is checked against them by the sounds and the year. |
 | YouTube | key | Where most specials end up. Uses auto-generated "Artist - Topic" channels when available. |
 | AcoustID | key + `fpcalc` | **Audio fingerprinting**: identifies the audio itself, not the name |

@@ -28,6 +28,8 @@ export interface SourceAdapter {
   label: string
   /** what its lookups are cached under, when that's more than its id */
   cacheKey?: string
+  /** answers from its own index (by file name too), so lookups aren't cached */
+  local?: boolean
   /** null when usable, otherwise the reason it's skipped */
   unavailable(ctx: SourceContext): string | null
   search(q: SourceQuery, ctx: SourceContext): Promise<Candidate[]>
