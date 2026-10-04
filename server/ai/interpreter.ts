@@ -6,7 +6,8 @@ import { collapseSpaces, normArtist, normKey } from "../core/normalize"
 import { settingsForLibrary } from "../library-settings"
 import { completeJson } from "./providers"
 import { plainText } from "../core/plain-text"
-import { checkFields, versionBacked } from "../../shared/fields"
+import { checkFields, fileSays, groundReading, versionBacked } from "../../shared/fields"
+import { log } from "../logs"
 
 const nullable = (type: string) => ({ type: [type, "null"] })
 
@@ -98,6 +99,11 @@ Rules:
 - event: clash, session, show or festival name if relevant (e.g. "Sting", "Fire in the Booth", "Rinse FM", "Boiler Room", "Glastonbury"), else null.
 - Ignore rip-site names, bitrates, track numbers, "official video" and similar noise.
 - Never invent facts. When a filename is genuinely ambiguous (e.g. order could be Title - Artist), give your best reading in the main fields and the others in "alternatives".
+
+Where your answer comes from:
+- Everything you return describes this one file, read from its own name, folder and embedded tags (and the right spelling of names you know). Nothing else.
+- You may be shown other files the owner approved before. They are examples for context only: they show how the owner spells and writes names. They are different recordings - never copy anything from them into your answer: no artist, title words, version, year, album, label or riddim that this file doesn't give.
+- Before you answer, check each of version, year, label, riddim and event: if this file's name, folder or tags don't state it, it's null.
 - country: the main artist's home country as an ISO code ("GB", "US", "JM") if you genuinely know it, else null.
 - confidence: 0 to 1 - how sure you are of artists + title together.
 - searchQueries: 1 to 3 short queries you would type into MusicBrainz or Discogs to verify this.
@@ -115,7 +121,7 @@ function fmtDuration(sec: number | null) {
 
 /** Pick past corrections that look like this filename, as few-shot examples. */
 export function similarCorrections(filename: string, corrections: Correction[], max = 5): Correction[] {
-  const tokens = new Set(normKey(filename.replace(/\.[^.]+$/, "")).split(" ").filter((t) => t.length > 2))
+  const tokens = new Set(normKey(filename.replace(/\.[^.]+$/, "")).split(" ").filter((t) => t.length > 2 && !COMMON_WORDS.has(t)))
   if (!tokens.size) return []
   return corrections
     .map((c) => {
@@ -129,6 +135,12 @@ export function similarCorrections(filename: string, corrections: Correction[], 
     .slice(0, max)
     .map((x) => x.c)
 }
+
+/** Words too common to make two filenames alike ("remix", "dubplate", "official"…). */
+const COMMON_WORDS = new Set(
+  "the and feat featuring with mix remix rmx dub dubplate plate special specials version original official video audio lyrics live edit vip riddim radio extended instrumental freestyle track part prod mp3 flac wav m4a wma"
+    .split(" ")
+)
 
 export function buildUserPrompt(track: Track, corrections: Correction[]): string {
   const t = track.tags
@@ -144,12 +156,25 @@ export function buildUserPrompt(track: Track, corrections: Correction[]): string
     .filter(Boolean)
     .join(", ")
   const h = track.heuristic
-  const lines = [
+  const lines: string[] = []
+  if (corrections.length) {
+    lines.push(
+      "EXAMPLES - other files the owner approved, for context only.",
+      "They show how the owner spells and writes names. They are different recordings: never copy anything from them into your answer.",
+    )
+    // An example's version is shown only when this file says the same kind of thing ("dubplate", "remix"…),
+    // or every similar file would be read as one.
+    const says = [track.filename, track.relDir, t.title, t.album, t.comment, t.grouping]
+    for (const c of corrections) lines.push(`- "${c.filename}" → ${c.artists.join(" & ")} - ${c.title}${c.version && versionBacked(c.version, says) ? ` (${c.version})` : ""}`)
+    lines.push("")
+  }
+  lines.push(
+    "THIS FILE - your answer is about this file only:",
     `Filename: ${track.filename}`,
     `Folder: ${track.relDir || "(library root)"}`,
     `Embedded tags: ${tagLine || "none"}`,
     `Duration: ${fmtDuration(track.duration)}`,
-  ]
+  )
   if (h) {
     lines.push(
       `Rule-based first pass (may be wrong): artists=${JSON.stringify(h.artists)}, title=${JSON.stringify(h.title)}` +
@@ -162,11 +187,7 @@ export function buildUserPrompt(track: Track, corrections: Correction[]): string
     else if (p?.side || p?.disc) lines.push(`Position: ${p.side ? `side ${p.side}, ${p.side}${p.number ?? ""}` : `disc ${p.disc}${p.number ? `, track ${p.number}` : ""}`} (a position on the record, not part of any name)`)
   }
   if (corrections.length) {
-    lines.push("", "The owner previously confirmed these readings of similar files - follow their spelling and style (they're other recordings: never copy a version this file doesn't state):")
-    // An example's version is shown only when this file says the same kind of thing ("dubplate", "remix"…),
-    // or every similar file would be read as one.
-    const says = [track.filename, track.relDir, t.title, t.album, t.comment, t.grouping]
-    for (const c of corrections) lines.push(`- "${c.filename}" → ${c.artists.join(" & ")} - ${c.title}${c.version && versionBacked(c.version, says) ? ` (${c.version})` : ""}`)
+    lines.push("", "Answer for THIS FILE. The examples above are context only - nothing in your answer may come from them.")
   }
   return lines.join("\n")
 }
@@ -245,6 +266,12 @@ export async function interpretTrack(
     temperature: settings.llm.temperature,
     signal: opts.signal,
   })
-  return sanitizeAi(raw, provider, opts.aliases)
+  const ai = sanitizeAi(raw, provider, opts.aliases)
+  // Whatever the prompt says, a model can still borrow from the examples or guess: what only the
+  // file can state (version, year, label, riddim, event) is kept only where the file does state it.
+  const { reading, unsupported } = groundReading(ai, fileSays(track))
+  if (!unsupported.length) return ai
+  log("debug", `${provider.label} said ${unsupported.join(", ")} for ${track.filename}, which nothing about the file states - left out`, { area: "ai" })
+  return { ...reading, unsupported }
 }
 

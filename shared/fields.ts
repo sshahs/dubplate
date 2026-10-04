@@ -426,3 +426,62 @@ export function withoutUnbackedVersions(title: string, evidence: (string | undef
   })
   return { title: removed.length ? collapse(out) || title : title, removed: out.trim() ? removed : [] }
 }
+
+// ---------- what the AI may only say when the file does ----------
+
+/** For finding one text in another: no accents, case or punctuation, "&" spelt out. Brackets kept. */
+const flat = (s: string) =>
+  ` ${s
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()} `
+
+/** Everything a file says about itself: its name, its folders and its own tags. */
+export function fileSays(t: { filename: string; relDir?: string; tags?: object }): string[] {
+  const tags = (t.tags ?? {}) as Record<string, unknown>
+  const text = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : Array.isArray(v) ? v.filter((x) => typeof x === "string").join(" ") : "")
+  return [t.filename, t.relDir ?? "", ...["title", "artist", "album", "albumArtist", "comment", "grouping", "label", "year", "genre", "riddim"].map((k) => text(tags[k]))].filter(Boolean)
+}
+
+/** The year, as written in a filename: "1993", "'93", "live 93", "26.11.93". */
+function yearStated(year: number, evidence: string): boolean {
+  const yy = String(year).slice(2)
+  return new RegExp(`\\b${year}\\b|['’‘]${yy}\\b|\\blive(?:\\s+(?:in|at))?\\s+${yy}\\b|\\b\\d{1,2}[./-]\\d{1,2}[./-]${yy}\\b`, "i").test(evidence)
+}
+
+/**
+ * A reading with only what the file states in the fields the AI may never fill
+ * from anything else: version, year, label, riddim and event. Whatever it gave
+ * that the file doesn't say is left out, and named in `unsupported`.
+ */
+export function groundReading<T extends { version?: string; year?: number; label?: string; riddim?: string; event?: string }>(r: T, evidence: string[]): { reading: T; unsupported: string[] } {
+  const all = evidence.join(" \u0000 ")
+  const text = flat(all)
+  const has = (v: string) => text.includes(flat(v))
+  const out: T = { ...r }
+  const unsupported: string[] = []
+  if (r.version && !versionBacked(r.version, evidence)) {
+    unsupported.push(`version "${r.version}"`)
+    out.version = undefined
+  }
+  if (r.year && !yearStated(r.year, all)) {
+    unsupported.push(`year ${r.year}`)
+    out.year = undefined
+  }
+  if (r.label && !has(r.label)) {
+    unsupported.push(`label "${r.label}"`)
+    out.label = undefined
+  }
+  if (r.riddim && !has(r.riddim)) {
+    unsupported.push(`riddim "${r.riddim}"`)
+    out.riddim = undefined
+  }
+  if (r.event && !has(r.event)) {
+    unsupported.push(`event "${r.event}"`)
+    out.event = undefined
+  }
+  return { reading: out, unsupported }
+}

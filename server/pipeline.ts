@@ -14,7 +14,7 @@ import { lyricsForTrack, needsLyrics } from "./lyrics"
 import { scoreTrack } from "./core/confidence"
 import { parseFilename } from "./core/filename-parser"
 import { checkCandidate, cleanCandidate, cleanFinal, hasMarkup } from "./core/plain-text"
-import { checkFields, versionBacked } from "../shared/fields"
+import { checkFields, fileSays, groundReading, versionBacked } from "../shared/fields"
 import { getDb } from "./db"
 import { decisionToFinal, emptyish } from "./core/naming"
 import { proposedFilename } from "./executor"
@@ -480,8 +480,13 @@ export function repairMarkupOnce(): void {
   enqueueJob("score", `Clean web page markup out of ${ids.length} track${ids.length === 1 ? "" : "s"}`, (ctx) => repairMarkup(ids, settingsNow(), ctx), { quick: true })
 }
 
+function groundAi(ai: AiParse, t: Track): AiParse {
+  const { reading, unsupported } = groundReading(ai, fileSays(t))
+  return unsupported.length ? { ...reading, unsupported: [...new Set([...(ai.unsupported ?? []), ...unsupported])] } : ai
+}
+
 const FIELDS_CHECKED = "fieldsChecked"
-/** Raised when the checks learn something new, so every track is checked again once. 2: versions need evidence. */
+/** Raised when the checks learn something new, so every track is checked again once. 2: what only the file can state needs the file to state it. */
 const FIELDS_CHECK_VERSION = 2
 
 /** The reading a track goes by: the AI's, else the filename's. */
@@ -511,7 +516,8 @@ export async function recheckFields(ids: number[], settings: Settings, ctx: JobC
     }
     forTrack(id, () => {
       const heuristic = parseFilename(t.filename, { folders: folderContext(t.relDir), tagArtist: t.tags.artist, tagAlbum: t.tags.album, knownArtists: known })
-      const ai = t.ai ? ({ ...t.ai, ...checkFields(t.ai, { names: false }).fields } as AiParse) : t.ai
+      // The AI's answer, held to what the file states (as every new answer is).
+      const ai = t.ai ? groundAi({ ...t.ai, ...checkFields(t.ai, { names: false }).fields } as AiParse, t) : t.ai
       const candidates = t.candidates ? t.candidates.flatMap((c) => checkCandidate(cleanCandidate(c)) ?? []) : t.candidates
       let final = t.final ? checkFields(t.final, { names: false }).fields : t.final
       const readingChanged = readingKey(readingOf(ai, heuristic)) !== readingKey(readingOf(t.ai, t.heuristic))

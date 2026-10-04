@@ -326,6 +326,11 @@ export function scoreTrack(input: ScoreInput): Decision {
   // Every field in its place before it's proposed; what can't be put right waits for a person.
   const checked = checkFields(reading, { names: false })
   reading = checked.fields
+  // What the AI said that the file never states was left out when it answered: say so here.
+  for (const u of input.ai?.unsupported ?? []) {
+    const field = (["version", "year", "label", "riddim", "event"] as const).find((f) => u.startsWith(f)) ?? "version"
+    checked.notes.push({ field, fixed: true, message: `The AI's ${u} left out: nothing in the file's name, folder or tags says so` })
+  }
 
   // A version, or a "(Remix)" in a source's title, says what kind of recording this is: it only
   // stands when something about the file says the same. (Similar files the owner approved can

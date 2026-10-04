@@ -323,6 +323,9 @@ describe("tracks read before the checks", () => {
     repo.updateTrack(typed.id, { ai: reading(), decision: decided(), status: "approved", final: meta({ artists: ["Asco"], title: "Straight Drop 2", version: "Dubplate" }) })
     await recheckFields([guessed.id, typed.id], DEFAULT_SETTINGS, ctx)
     expect(repo.getTrack(guessed.id)!.final!.version).toBeUndefined()
+    // the stored AI answer is held to the file too, and says what it lost
+    expect(repo.getTrack(guessed.id)!.ai!.version).toBeUndefined()
+    expect(repo.getTrack(guessed.id)!.ai!.unsupported).toEqual(['version "Dubplate"'])
     expect(repo.getTrack(guessed.id)!.proposedName).toBe("Asco - Straight Drop.mp3")
     expect(repo.getTrack(typed.id)!.final!.version).toBe("Dubplate")
   })

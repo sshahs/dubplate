@@ -438,6 +438,15 @@ into the file:
 | A year before 1900 or in the future | Left empty |
 | A version that says what kind of recording it is (`Dubplate`, `Special`, `Remix`, `Live`, `VIP`…) when nothing about the file says so: not its name, folder or tags, nor a source that matched it | Left out. The AI is never shown a similar file's version unless this file shares it, so one approved dubplate can't make every Asco tune one |
 | A source's `(Remix)`, `(Dub)` or `(Extended Version)` on a title the file never mentions | Taken off, unless the audio fingerprint matched that recording |
+| A version, year, label, riddim or event the AI gave that the file's name, folder and tags don't state | Left out as it answers, and listed on the track ("The AI's version "Dubplate" left out") |
+
+**The AI's examples.** With *Learn from my corrections* on, the AI is shown
+a few of your past approvals of similar files (sharing a word that isn't as
+common as "remix" or "dubplate"). They're fenced off in the prompt as context
+only, for how you spell and write names, placed before the file it's reading,
+and an example's version is shown only when this file states the same kind
+of thing. Whatever a model does with them, the code above holds its answer to
+what the file states.
 
 What can't be put right (no artist, `Track 01` as the title, an artist that
 looks like an artist and a title together, the same text as artist and title)
