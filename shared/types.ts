@@ -322,6 +322,8 @@ export interface AiParse extends TrackReading {
   searchQueries: string[]
   provider: string
   model: string
+  /** what the model said that the file doesn't state, and was left out ('version "Dubplate"') */
+  unsupported?: string[]
 }
 
 export type SourceId =
@@ -429,7 +431,7 @@ export interface CandidateCluster {
 
 /** What the field check found in one field: put right automatically, or needing a person. */
 export interface FieldNote {
-  field: "artists" | "featuring" | "title" | "version" | "year" | "album" | "label" | "riddim" | "genre"
+  field: "artists" | "featuring" | "title" | "version" | "year" | "album" | "label" | "riddim" | "genre" | "event"
   fixed: boolean
   message: string
 }

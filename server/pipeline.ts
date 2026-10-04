@@ -14,7 +14,7 @@ import { lyricsForTrack, needsLyrics } from "./lyrics"
 import { scoreTrack } from "./core/confidence"
 import { parseFilename } from "./core/filename-parser"
 import { checkCandidate, cleanCandidate, cleanFinal, hasMarkup } from "./core/plain-text"
-import { checkFields } from "../shared/fields"
+import { checkFields, fileSays, groundReading, versionBacked } from "../shared/fields"
 import { getDb } from "./db"
 import { decisionToFinal, emptyish } from "./core/naming"
 import { proposedFilename } from "./executor"
@@ -480,8 +480,14 @@ export function repairMarkupOnce(): void {
   enqueueJob("score", `Clean web page markup out of ${ids.length} track${ids.length === 1 ? "" : "s"}`, (ctx) => repairMarkup(ids, settingsNow(), ctx), { quick: true })
 }
 
+function groundAi(ai: AiParse, t: Track): AiParse {
+  const { reading, unsupported } = groundReading(ai, fileSays(t))
+  return unsupported.length ? { ...reading, unsupported: [...new Set([...(ai.unsupported ?? []), ...unsupported])] } : ai
+}
+
 const FIELDS_CHECKED = "fieldsChecked"
-const FIELDS_CHECK_VERSION = 1
+/** Raised when the checks learn something new, so every track is checked again once. 2: what only the file can state needs the file to state it. */
+const FIELDS_CHECK_VERSION = 2
 
 /** The reading a track goes by: the AI's, else the filename's. */
 const readingOf = (ai: AiParse | null | undefined, heuristic: Track["heuristic"]) => (ai && (ai.title || ai.artists.length) ? ai : heuristic)
@@ -510,21 +516,34 @@ export async function recheckFields(ids: number[], settings: Settings, ctx: JobC
     }
     forTrack(id, () => {
       const heuristic = parseFilename(t.filename, { folders: folderContext(t.relDir), tagArtist: t.tags.artist, tagAlbum: t.tags.album, knownArtists: known })
-      const ai = t.ai ? ({ ...t.ai, ...checkFields(t.ai, { names: false }).fields } as AiParse) : t.ai
+      // The AI's answer, held to what the file states (as every new answer is).
+      const ai = t.ai ? groundAi({ ...t.ai, ...checkFields(t.ai, { names: false }).fields } as AiParse, t) : t.ai
       const candidates = t.candidates ? t.candidates.flatMap((c) => checkCandidate(cleanCandidate(c)) ?? []) : t.candidates
-      const final = t.final ? checkFields(t.final, { names: false }).fields : t.final
-      const finalChanged = JSON.stringify(final) !== JSON.stringify(t.final)
+      let final = t.final ? checkFields(t.final, { names: false }).fields : t.final
       const readingChanged = readingKey(readingOf(ai, heuristic)) !== readingKey(readingOf(t.ai, t.heuristic))
-      const anyChange = finalChanged || readingChanged || JSON.stringify(candidates) !== JSON.stringify(t.candidates) || JSON.stringify(ai) !== JSON.stringify(t.ai)
-      // A decision made before the checks can hold "reggae" as its album from a source.
-      const decisionWrong = !!t.decision && checkFields(t.decision, { names: false }).notes.some((n) => n.fixed)
+      const anyChange = readingChanged || JSON.stringify(candidates) !== JSON.stringify(t.candidates) || JSON.stringify(ai) !== JSON.stringify(t.ai)
       // A file cut with a placeholder left in its tags ("reggae" as the album, "Other" as the genre).
       const tagsWrong = t.status === "done" && (["album", "label", "genre"] as const).some((f) => emptyish(f, t.tags[f]))
-      if (!anyChange && !decisionWrong && !tagsWrong && JSON.stringify(heuristic) === JSON.stringify(t.heuristic)) return
+      if (!t.decision && !candidates?.length && !anyChange && JSON.stringify(final) === JSON.stringify(t.final) && JSON.stringify(heuristic) === JSON.stringify(t.heuristic)) return
       const next: Track = { ...t, heuristic, ai, candidates, final }
       if (t.status === "rejected") return updateTrack(id, { heuristic, ai, candidates })
       if (t.status === "approved" || t.status === "done") {
-        updateTrack(id, { heuristic, ai, candidates, final })
+        // Decided again under today's checks (the status a person gave it stays).
+        const now = t.decision ? scoreAndSave(next, settings).decision : null
+        if (final && now && t.decision) {
+          const asProposed = readingKey(t.final) === readingKey(t.decision) && (t.final?.version ?? "") === (t.decision.version ?? "")
+          if (asProposed) {
+            // Approved as Dubplate proposed it: what it proposes now ("Straight Drop", not "Straight Drop (Dubplate)").
+            final = { ...final, title: now.title, version: now.version }
+          } else if (final.version && final.version === t.ai?.version && !now.version && !versionBacked(final.version, [t.filename, t.relDir, t.tags.title, t.tags.album, t.tags.comment, t.tags.grouping, ...(t.candidates ?? []).map((c) => c.title)])) {
+            // Edited, but the version is still the AI's guess with nothing behind it.
+            final = { ...final, version: undefined }
+          }
+        }
+        const finalChanged = JSON.stringify(final) !== JSON.stringify(t.final)
+        if (!anyChange && !finalChanged && !tagsWrong && JSON.stringify(heuristic) === JSON.stringify(t.heuristic)) return
+        updateTrack(id, { heuristic, ai, candidates, final, proposedName: proposedFilename({ ...next, final }, settings) })
+        if (finalChanged) ctx.log("debug", `${t.filename}: approved details now ${readingText(final)}`, { trackId: id, detail: `Before: ${readingText(t.final)}` })
         if (finalChanged && t.status === "approved") approved++
         if ((finalChanged || tagsWrong) && t.status === "done") {
           // Cut with a riddim for an artist, or a title in it: ready to cut again, under its right name.
@@ -537,8 +556,12 @@ export async function recheckFields(ids: number[], settings: Settings, ctx: JobC
       }
       updateTrack(id, { heuristic, ai, candidates })
       // The sources were asked about the wrong artist or title: ask again. Otherwise decide again.
+      const shown = (d: Track["decision"]) => JSON.stringify(d ? [d.artists, d.featuring, d.title, d.version, d.album, d.label, d.riddim, d.genre, d.year] : null)
       if (readingChanged && t.candidates) searchAgain.push(id)
-      else if (t.decision || candidates?.length) scoreAndSave(next, settings)
+      else if (t.decision || candidates?.length) {
+        const now = scoreAndSave(next, settings).decision
+        if (!anyChange && shown(now) === shown(t.decision)) return
+      } else if (!anyChange) return
       changed.push(id)
       if (readingChanged) ctx.log("debug", `${t.filename}: now read as ${readingText(readingOf(ai, heuristic))} (was ${readingText(readingOf(t.ai, t.heuristic))})`, { trackId: id })
     })

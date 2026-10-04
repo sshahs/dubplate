@@ -573,7 +573,7 @@ export default function SettingsPage() {
                     <SettingRow title="Parallel requests" description="1–2 for a local Ollama, higher for cloud APIs.">
                       <SliderControl label="Parallel requests" value={draft.llm.concurrency} min={1} max={8} step={1} onChange={(v) => set((d) => void (d.llm.concurrency = v))} />
                     </SettingRow>
-                    <SettingRow title="Learn from my corrections" description="Show the AI your past approvals as examples for similar filenames.">
+                    <SettingRow title="Learn from my corrections" description="Show the AI your past approvals of similar files, for how you spell and write names. They're context only: nothing in them (a version like Dubplate, a year) is copied to another file.">
                       <Switch checked={draft.llm.useCorrections} onCheckedChange={(v) => set((d) => void (d.llm.useCorrections = v))} aria-label="Learn from my corrections" />
                     </SettingRow>
                   </SettingRows>

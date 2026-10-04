@@ -367,3 +367,121 @@ export function checkFields<T extends Fields>(input: T, opts: { names?: boolean;
 
 /** The notes a person needs to act on. */
 export const needsALook = (notes: FieldNote[] | undefined) => (notes ?? []).filter((n) => !n.fixed)
+
+// ---------- versions need evidence ----------
+
+/** Words that say what kind of recording something is, each with the one name it's checked by. */
+const KINDS: [RegExp, string][] = [
+  [/\bdub\s?plates?\b/gi, "dubplate"],
+  [/\bspecials?\b/gi, "special"],
+  [/\b(?:re-?mix(?:es|ed)?|rmx)\b/gi, "remix"],
+  [/\brefix\b/gi, "refix"],
+  [/\bvip\b/gi, "vip"],
+  [/\bbootleg\b/gi, "bootleg"],
+  [/\b(?:acapella|a\s?cappella|acca)\b/gi, "acapella"],
+  [/\b(?:instrumental|inst)\b/gi, "instrumental"],
+  [/\bfreestyle\b/gi, "freestyle"],
+  [/\blive\b/gi, "live"],
+  [/\bedit\b/gi, "edit"],
+  [/\bextended\b/gi, "extended"],
+  [/\brework\b/gi, "rework"],
+  [/\bacoustic\b/gi, "acoustic"],
+  [/\bdemo\b/gi, "demo"],
+  [/\bdub\b/gi, "dub"],
+]
+
+/** The kinds of recording a text names ("Skepta Remix" → remix, "Dub Plate Special" → dubplate, special). */
+function kindsIn(s: string): Set<string> {
+  const out = new Set<string>()
+  // Longest first: "dubplate" isn't also a "dub".
+  let rest = s.replace(/_/g, " ")
+  for (const [re, kind] of KINDS) {
+    if (re.test(rest)) out.add(kind)
+    re.lastIndex = 0
+    rest = rest.replace(re, " ")
+  }
+  return out
+}
+
+/**
+ * A version that says what kind of recording this is ("Dubplate", "Special",
+ * "Skepta Remix", "Live") only stands when the evidence (the filename, its
+ * folders, its tags, a source that matched it) says the same. A version that
+ * names no kind ("Side A", "Part 2") always stands.
+ */
+export function versionBacked(version: string, evidence: (string | undefined | null)[]): boolean {
+  const want = kindsIn(version)
+  if (!want.size) return true
+  const have = kindsIn(evidence.filter(Boolean).join(" \u0000 "))
+  return [...want].every((k) => have.has(k))
+}
+
+/** A title without the bracketed versions the evidence doesn't back: "Eye For An Eye (Remix)" for a file that never says remix. */
+export function withoutUnbackedVersions(title: string, evidence: (string | undefined | null)[]): { title: string; removed: string[] } {
+  const removed: string[] = []
+  const out = title.replace(/\s*([([])([^()[\]]{1,60})[)\]]/g, (m, _open: string, inner: string) => {
+    if (versionBacked(inner, evidence)) return m
+    removed.push(m.trim())
+    return ""
+  })
+  return { title: removed.length ? collapse(out) || title : title, removed: out.trim() ? removed : [] }
+}
+
+// ---------- what the AI may only say when the file does ----------
+
+/** For finding one text in another: no accents, case or punctuation, "&" spelt out. Brackets kept. */
+const flat = (s: string) =>
+  ` ${s
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()} `
+
+/** Everything a file says about itself: its name, its folders and its own tags. */
+export function fileSays(t: { filename: string; relDir?: string; tags?: object }): string[] {
+  const tags = (t.tags ?? {}) as Record<string, unknown>
+  const text = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : Array.isArray(v) ? v.filter((x) => typeof x === "string").join(" ") : "")
+  return [t.filename, t.relDir ?? "", ...["title", "artist", "album", "albumArtist", "comment", "grouping", "label", "year", "genre", "riddim"].map((k) => text(tags[k]))].filter(Boolean)
+}
+
+/** The year, as written in a filename: "1993", "'93", "live 93", "26.11.93". */
+function yearStated(year: number, evidence: string): boolean {
+  const yy = String(year).slice(2)
+  return new RegExp(`\\b${year}\\b|['’‘]${yy}\\b|\\blive(?:\\s+(?:in|at))?\\s+${yy}\\b|\\b\\d{1,2}[./-]\\d{1,2}[./-]${yy}\\b`, "i").test(evidence)
+}
+
+/**
+ * A reading with only what the file states in the fields the AI may never fill
+ * from anything else: version, year, label, riddim and event. Whatever it gave
+ * that the file doesn't say is left out, and named in `unsupported`.
+ */
+export function groundReading<T extends { version?: string; year?: number; label?: string; riddim?: string; event?: string }>(r: T, evidence: string[]): { reading: T; unsupported: string[] } {
+  const all = evidence.join(" \u0000 ")
+  const text = flat(all)
+  const has = (v: string) => text.includes(flat(v))
+  const out: T = { ...r }
+  const unsupported: string[] = []
+  if (r.version && !versionBacked(r.version, evidence)) {
+    unsupported.push(`version "${r.version}"`)
+    out.version = undefined
+  }
+  if (r.year && !yearStated(r.year, all)) {
+    unsupported.push(`year ${r.year}`)
+    out.year = undefined
+  }
+  if (r.label && !has(r.label)) {
+    unsupported.push(`label "${r.label}"`)
+    out.label = undefined
+  }
+  if (r.riddim && !has(r.riddim)) {
+    unsupported.push(`riddim "${r.riddim}"`)
+    out.riddim = undefined
+  }
+  if (r.event && !has(r.event)) {
+    unsupported.push(`event "${r.event}"`)
+    out.event = undefined
+  }
+  return { reading: out, unsupported }
+}

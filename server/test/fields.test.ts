@@ -4,10 +4,11 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { checkFields, isGenreName, isPlaceholder, riddimIn } from "../../shared/fields"
+import { checkFields, isGenreName, isPlaceholder, riddimIn, versionBacked, withoutUnbackedVersions } from "../../shared/fields"
 import { riskOf } from "../../shared/risk"
-import type { Candidate, Decision, FinalMeta, Settings } from "../../shared/types"
-import { sanitizeAi } from "../ai/interpreter"
+import type { AiParse, Candidate, Decision, FinalMeta, Settings } from "../../shared/types"
+import { buildUserPrompt, sanitizeAi } from "../ai/interpreter"
+import { scoreTrack } from "../core/confidence"
 import { parseFilename } from "../core/filename-parser"
 import { formatArtist, tagsFor } from "../core/naming"
 import { checkCandidate } from "../core/plain-text"
@@ -181,6 +182,68 @@ describe("the checks everywhere", () => {
   })
 })
 
+describe("versions need evidence", () => {
+  it("knows when a version is backed up", () => {
+    expect(versionBacked("Dubplate", ["Asco - STRAIGHT DROP .flac", "UK Rap"])).toBe(false)
+    expect(versionBacked("Dubplate", ["Asco - Straight Drop (Dub Plate).flac"])).toBe(true)
+    expect(versionBacked("Dubplate for Stone Love", ["Buju Banton - Murderer Dubplate.mp3"])).toBe(true)
+    expect(versionBacked("Skepta Remix", ["Wiley - Wot Do U Call It (Skepta RMX).mp3"])).toBe(true)
+    expect(versionBacked("Remix", ["Benny Banks - Eye for an Eye .flac"])).toBe(false)
+    expect(versionBacked("Dub", ["Jah Shaka - African Woman Dub.mp3"])).toBe(true)
+    // a dubplate isn't a dub, and a dub isn't a dubplate
+    expect(versionBacked("Dub", ["Murderer (Dubplate).mp3"])).toBe(false)
+    expect(versionBacked("Dubplate", ["King Tubby - Dub.mp3"])).toBe(false)
+    // nothing about the kind of recording: nothing to back up
+    expect(versionBacked("Side A", [])).toBe(true)
+    expect(versionBacked("Part 2", [])).toBe(true)
+    expect(withoutUnbackedVersions("Eye For An Eye (Remix)", ["Benny Banks - Eye for an Eye .flac"])).toEqual({ title: "Eye For An Eye", removed: ["(Remix)"] })
+    expect(withoutUnbackedVersions("Eye For An Eye (Remix)", ["Benny Banks - Eye for an Eye (Remix).flac"]).removed).toEqual([])
+    expect(withoutUnbackedVersions("Could You Be Loved (Is This Love)", []).removed).toEqual([])
+  })
+
+  const ai = (p: Partial<AiParse>): AiParse => ({ artists: [], featuring: [], title: "", confidence: 0.9, reasoning: "", alternatives: [], searchQueries: [], provider: "t", model: "m", ...p })
+  const score = (filename: string, reading: Partial<AiParse>, candidates: Candidate[] = [], folders: string[] = []) =>
+    scoreTrack({
+      heuristic: parseFilename(filename, { folders }),
+      ai: ai(reading),
+      tags: {},
+      candidates,
+      duration: null,
+      weights: { deezer: 0.8, itunes: 0.85, discogs: 0.95, acoustid: 1.3 },
+      thresholds: { autoThreshold: 90, reviewThreshold: 60, parseOnlyMax: 75 },
+      context: { filename, folders, preferOwnRelease: true },
+    })
+  const hit = (source: Candidate["source"], artist: string, title: string, extra: Partial<Candidate> = {}): Candidate => ({ source, sourceLabel: source, artist, title, ...extra })
+
+  it("leaves out a Dubplate the AI gave a file that never says so", () => {
+    const d = score("Asco - STRAIGHT DROP .flac", { artists: ["Asco"], title: "Straight Drop", version: "Dubplate" })
+    expect(d.version).toBeUndefined()
+    expect(d.checks).toContainEqual({ field: "version", fixed: true, message: 'Version "Dubplate" left out: nothing about the file or its sources says so' })
+    expect(score("Asco - Straight Drop (Dubplate).flac", { artists: ["Asco"], title: "Straight Drop", version: "Dubplate" }).version).toBe("Dubplate")
+    expect(score("Asco - Straight Drop.flac", { artists: ["Asco"], title: "Straight Drop", version: "Dubplate" }, [], ["Dubplates"]).version).toBe("Dubplate")
+  })
+
+  it("takes a source's (Remix) off the title when the file isn't one, unless the audio's fingerprint says so", () => {
+    const remix = [hit("deezer", "Benny Banks", "Eye For An Eye (Remix)"), hit("itunes", "Benny Banks", "Eye For An Eye (Remix)"), hit("discogs", "Benny Banks", "Eye For An Eye (Remix)")]
+    const d = score("Benny Banks - Eye for an Eye .flac", { artists: ["Benny Banks"], title: "Eye for an Eye" }, remix)
+    expect(d.basis).toBe("sources")
+    expect(d.title).toBe("Eye For An Eye")
+    expect(d.checks?.map((n) => n.message)).toContain(`Took (Remix) off the title: a source's title says so, but nothing about the file does`)
+    expect(score("Benny Banks - Eye for an Eye (Remix).flac", { artists: ["Benny Banks"], title: "Eye for an Eye", version: "Remix" }, remix).title).toBe("Eye For An Eye (Remix)")
+    const heard = [...remix, hit("acoustid", "Benny Banks", "Eye For An Eye (Remix)", { fingerprint: true, sourceScore: 0.95 })]
+    expect(score("Benny Banks - Eye for an Eye .flac", { artists: ["Benny Banks"], title: "Eye for an Eye" }, heard).title).toBe("Eye For An Eye (Remix)")
+  })
+
+  it("never shows the AI an example's version this file doesn't share", () => {
+    const track = { filename: "Asco - STRAIGHT DROP .flac", relDir: "UK Rap/Asco", tags: {}, duration: 200, heuristic: null } as never
+    const examples = [{ id: 1, filename: "Asco - Bad Boy.flac", artists: ["Asco"], title: "Bad Boy", version: "Dubplate", createdAt: "" }]
+    expect(buildUserPrompt(track, examples)).toContain('- "Asco - Bad Boy.flac" → Asco - Bad Boy')
+    expect(buildUserPrompt(track, examples)).not.toContain("(Dubplate)")
+    const plate = { ...(track as object), filename: "Asco - Straight Drop Dubplate.flac" } as never
+    expect(buildUserPrompt(plate, examples)).toContain("Asco - Bad Boy (Dubplate)")
+  })
+})
+
 describe("tracks read before the checks", () => {
   let dir: string
   beforeEach(() => {
@@ -243,5 +306,27 @@ describe("tracks read before the checks", () => {
     expect(activeJobs()).toEqual([])
     expect(fetch).not.toHaveBeenCalled()
     expect(repo.getTrack(gyptian.id)!.decision).toMatchObject({ artists: ["Gyptian"], title: "Is There A Place", riddim: "Seasons" })
+  })
+
+  it("take back a Dubplate the AI guessed from tracks approved as proposed, but not one a person typed", async () => {
+    writeMp3(path.join(dir, "Asco - STRAIGHT DROP .mp3"))
+    writeMp3(path.join(dir, "Asco - Straight Drop 2.mp3"))
+    const lib = repo.addLibrary(dir, "Crate")
+    const ctx = { job: { id: "j" }, log: () => {}, signal: new AbortController().signal, setTotal: () => {}, tick: () => {}, message: () => {}, tracksChanged: () => {}, filesChanged: () => {}, report: () => {} } as unknown as JobContext
+    await scanLibrary(lib, DEFAULT_SETTINGS, ctx)
+    const [guessed, typed] = repo.queryTracks({ sort: "filename", dir: "asc" }).items
+    const reading = (version?: string) => ({ artists: ["Asco"], featuring: [], title: "Straight Drop", version, confidence: 0.9, reasoning: "", alternatives: [], searchQueries: [], provider: "t", model: "m" })
+    const decided = (version?: string) => ({ artists: ["Asco"], featuring: [], artist: "Asco", title: "Straight Drop", version, confidence: 70, status: "review", basis: "ai", factors: [], clusters: [], warnings: [] }) as unknown as Decision
+    // The AI guessed Dubplate and it was approved as proposed.
+    repo.updateTrack(guessed.id, { ai: reading("Dubplate"), decision: decided("Dubplate"), status: "approved", final: meta({ artists: ["Asco"], title: "Straight Drop", version: "Dubplate" }) })
+    // The AI said nothing; a person typed Dubplate in.
+    repo.updateTrack(typed.id, { ai: reading(), decision: decided(), status: "approved", final: meta({ artists: ["Asco"], title: "Straight Drop 2", version: "Dubplate" }) })
+    await recheckFields([guessed.id, typed.id], DEFAULT_SETTINGS, ctx)
+    expect(repo.getTrack(guessed.id)!.final!.version).toBeUndefined()
+    // the stored AI answer is held to the file too, and says what it lost
+    expect(repo.getTrack(guessed.id)!.ai!.version).toBeUndefined()
+    expect(repo.getTrack(guessed.id)!.ai!.unsupported).toEqual(['version "Dubplate"'])
+    expect(repo.getTrack(guessed.id)!.proposedName).toBe("Asco - Straight Drop.mp3")
+    expect(repo.getTrack(typed.id)!.final!.version).toBe("Dubplate")
   })
 })
