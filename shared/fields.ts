@@ -367,3 +367,62 @@ export function checkFields<T extends Fields>(input: T, opts: { names?: boolean;
 
 /** The notes a person needs to act on. */
 export const needsALook = (notes: FieldNote[] | undefined) => (notes ?? []).filter((n) => !n.fixed)
+
+// ---------- versions need evidence ----------
+
+/** Words that say what kind of recording something is, each with the one name it's checked by. */
+const KINDS: [RegExp, string][] = [
+  [/\bdub\s?plates?\b/gi, "dubplate"],
+  [/\bspecials?\b/gi, "special"],
+  [/\b(?:re-?mix(?:es|ed)?|rmx)\b/gi, "remix"],
+  [/\brefix\b/gi, "refix"],
+  [/\bvip\b/gi, "vip"],
+  [/\bbootleg\b/gi, "bootleg"],
+  [/\b(?:acapella|a\s?cappella|acca)\b/gi, "acapella"],
+  [/\b(?:instrumental|inst)\b/gi, "instrumental"],
+  [/\bfreestyle\b/gi, "freestyle"],
+  [/\blive\b/gi, "live"],
+  [/\bedit\b/gi, "edit"],
+  [/\bextended\b/gi, "extended"],
+  [/\brework\b/gi, "rework"],
+  [/\bacoustic\b/gi, "acoustic"],
+  [/\bdemo\b/gi, "demo"],
+  [/\bdub\b/gi, "dub"],
+]
+
+/** The kinds of recording a text names ("Skepta Remix" → remix, "Dub Plate Special" → dubplate, special). */
+function kindsIn(s: string): Set<string> {
+  const out = new Set<string>()
+  // Longest first: "dubplate" isn't also a "dub".
+  let rest = s.replace(/_/g, " ")
+  for (const [re, kind] of KINDS) {
+    if (re.test(rest)) out.add(kind)
+    re.lastIndex = 0
+    rest = rest.replace(re, " ")
+  }
+  return out
+}
+
+/**
+ * A version that says what kind of recording this is ("Dubplate", "Special",
+ * "Skepta Remix", "Live") only stands when the evidence (the filename, its
+ * folders, its tags, a source that matched it) says the same. A version that
+ * names no kind ("Side A", "Part 2") always stands.
+ */
+export function versionBacked(version: string, evidence: (string | undefined | null)[]): boolean {
+  const want = kindsIn(version)
+  if (!want.size) return true
+  const have = kindsIn(evidence.filter(Boolean).join(" \u0000 "))
+  return [...want].every((k) => have.has(k))
+}
+
+/** A title without the bracketed versions the evidence doesn't back: "Eye For An Eye (Remix)" for a file that never says remix. */
+export function withoutUnbackedVersions(title: string, evidence: (string | undefined | null)[]): { title: string; removed: string[] } {
+  const removed: string[] = []
+  const out = title.replace(/\s*([([])([^()[\]]{1,60})[)\]]/g, (m, _open: string, inner: string) => {
+    if (versionBacked(inner, evidence)) return m
+    removed.push(m.trim())
+    return ""
+  })
+  return { title: removed.length ? collapse(out) || title : title, removed: out.trim() ? removed : [] }
+}

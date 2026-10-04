@@ -6,7 +6,7 @@ import { collapseSpaces, normArtist, normKey } from "../core/normalize"
 import { settingsForLibrary } from "../library-settings"
 import { completeJson } from "./providers"
 import { plainText } from "../core/plain-text"
-import { checkFields } from "../../shared/fields"
+import { checkFields, versionBacked } from "../../shared/fields"
 
 const nullable = (type: string) => ({ type: [type, "null"] })
 
@@ -73,7 +73,7 @@ export function metadataRulebook(naming?: Pick<Settings["naming"], "artistJoiner
   return `Metadata rulebook - follow it exactly:
 - Artist separator: list each main artist separately in "artists". Dubplate joins them with "${join}", and clashes with "${clash}". Never join names yourself.
 - Featured artists: only in "featuring", never "feat."/"ft." inside artists or title. Dubplate writes them ${feat}.
-- Dubplates and specials: version "Dubplate", or "Dubplate for <Sound>" / "<Sound> Special" when the sound it was cut for is named. Never put "dubplate" or "special" in the title.
+- Dubplates and specials: only when the filename, folder or tags say "dubplate", "dub plate" or "special" - never because the collection has dubplates, the genre or the artist suggests it, or similar files had one. Then version "Dubplate", or "Dubplate for <Sound>" / "<Sound> Special" when the sound it was cut for is named. Never put "dubplate" or "special" in the title.
 - VIPs and remixes: version "VIP" (or "<Artist> VIP"), "<Remixer> Remix", "Refix", "Edit". The title stays the song's own name.
 - Never invent an album, year, label or catalogue number. Give year or label only when the filename, folder or embedded tags state them; otherwise null. Never fill them from memory - the sources supply those.
 - Keep an artist's own spelling and capitalisation ("JME", "Ms. Dynamite", "D Double E").
@@ -91,7 +91,7 @@ Rules:
 - artists: the main performer(s) in their commonly credited spelling and capitalisation (e.g. "Buju Banton", "Dizzee Rascal", "JME", "Daft Punk", "Beyoncé", "A Tribe Called Quest"). Featured guests go in "featuring", not "artists".
 - relation: "vs" for clashes / versus, "&" for collaborations, "x" when the name uses " x ", null for a single artist.
 - title: the song name only - no version, year, bitrate or featuring text. If there is no song name (a live clash, DJ set, radio show or session), write a short descriptive title such as "Live Clash" or "Live at Sting".
-- version: e.g. "Dubplate", "Special", "Live", "Remix", "Skepta Remix", "Extended Mix", "Radio Edit", "VIP", "Dub", "Instrumental", "Acoustic", "Demo", "Freestyle". null for the original release.
+- version: e.g. "Dubplate", "Special", "Live", "Remix", "Skepta Remix", "Extended Mix", "Radio Edit", "VIP", "Dub", "Instrumental", "Acoustic", "Demo", "Freestyle" - only when the filename, folder or tags say so. null for the original release, and null when nothing says otherwise.
 - riddim: the riddim name if referenced (e.g. "Sleng Teng", "Diwali"), else null. A part like "Seasons Riddim" is always the riddim, never the artist or the title: dancehall files are often named "Riddim - Artist - Title" ("Seasons Riddim - Gyptian - Is There A Place" is Gyptian's "Is There A Place" on the Seasons riddim), or carry it in brackets ("Title (Diwali Riddim)") or in their folder.
 - Every field holds only its own thing. The artist never contains the title (embedded tags like artist "Bounty Killer & Baby Cham - Another Level" are a mistake: the artists are Bounty Killer and Baby Cham). The title never contains the artist, "(Official Video)", a site name or a track number. A genre ("Reggae") or "Unknown Album" is never an album.
 - year: four-digit year if stated or clearly implied ("live 93" means 1993), else null.
@@ -162,8 +162,11 @@ export function buildUserPrompt(track: Track, corrections: Correction[]): string
     else if (p?.side || p?.disc) lines.push(`Position: ${p.side ? `side ${p.side}, ${p.side}${p.number ?? ""}` : `disc ${p.disc}${p.number ? `, track ${p.number}` : ""}`} (a position on the record, not part of any name)`)
   }
   if (corrections.length) {
-    lines.push("", "The owner previously confirmed these readings of similar files - follow their spelling and style:")
-    for (const c of corrections) lines.push(`- "${c.filename}" → ${c.artists.join(" & ")} - ${c.title}${c.version ? ` (${c.version})` : ""}`)
+    lines.push("", "The owner previously confirmed these readings of similar files - follow their spelling and style (they're other recordings: never copy a version this file doesn't state):")
+    // An example's version is shown only when this file says the same kind of thing ("dubplate", "remix"…),
+    // or every similar file would be read as one.
+    const says = [track.filename, track.relDir, t.title, t.album, t.comment, t.grouping]
+    for (const c of corrections) lines.push(`- "${c.filename}" → ${c.artists.join(" & ")} - ${c.title}${c.version && versionBacked(c.version, says) ? ` (${c.version})` : ""}`)
   }
   return lines.join("\n")
 }

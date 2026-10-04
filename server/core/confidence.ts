@@ -16,7 +16,7 @@ import type {
   TrackReading,
   VersionCheck,
 } from "../../shared/types"
-import { checkFields, needsALook } from "../../shared/fields"
+import { checkFields, needsALook, versionBacked, withoutUnbackedVersions } from "../../shared/fields"
 import { artistSimilarity, collapseSpaces, normArtist, similarity, splitArtists, titleSimilarity } from "./normalize"
 import { KIND_LABEL, pickRelease, releasesOf } from "./releases"
 import { withoutDiscFolders } from "./discs"
@@ -326,6 +326,25 @@ export function scoreTrack(input: ScoreInput): Decision {
   // Every field in its place before it's proposed; what can't be put right waits for a person.
   const checked = checkFields(reading, { names: false })
   reading = checked.fields
+
+  // A version, or a "(Remix)" in a source's title, says what kind of recording this is: it only
+  // stands when something about the file says the same. (Similar files the owner approved can
+  // lead the AI to give every Asco tune "Dubplate"; the only remix a source knows isn't this file.)
+  if (input.context) {
+    const fileSays = [input.context.filename, ...input.context.folders, input.tags.title, input.tags.album, input.tags.comment, input.tags.grouping]
+    if (reading.version && !versionBacked(reading.version, [...fileSays, ...(best?.candidates ?? []).map((c) => c.title)])) {
+      checked.notes.push({ field: "version", fixed: true, message: `Version "${reading.version}" left out: nothing about the file or its sources says so` })
+      reading = { ...reading, version: undefined }
+    }
+    // An audio fingerprint knows the recording itself; a text search only knows the names.
+    if (basis === "sources" && !(best?.candidates ?? []).some((c) => c.fingerprint)) {
+      const t = withoutUnbackedVersions(reading.title, fileSays)
+      if (t.removed.length) {
+        checked.notes.push({ field: "title", fixed: true, message: `Took ${t.removed.join(" ")} off the title: a source's title says so, but nothing about the file does` })
+        reading = { ...reading, title: t.title }
+      }
+    }
+  }
   const unsure = needsALook(checked.notes)
   for (const n of unsure) warnings.push(n.message)
 

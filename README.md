@@ -436,6 +436,8 @@ into the file:
 | `(Official Video)`, `[HD]`, `320kbps`, `.mp3`, a site name or a track number in a title or artist | Taken out |
 | `Unknown Artist`, `Various Artists`, `VA` as an artist | Taken out |
 | A year before 1900 or in the future | Left empty |
+| A version that says what kind of recording it is (`Dubplate`, `Special`, `Remix`, `Live`, `VIP`…) when nothing about the file says so: not its name, folder or tags, nor a source that matched it | Left out. The AI is never shown a similar file's version unless this file shares it, so one approved dubplate can't make every Asco tune one |
+| A source's `(Remix)`, `(Dub)` or `(Extended Version)` on a title the file never mentions | Taken off, unless the audio fingerprint matched that recording |
 
 What can't be put right (no artist, `Track 01` as the title, an artist that
 looks like an artist and a title together, the same text as artist and title)
