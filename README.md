@@ -795,6 +795,12 @@ Anthropic models that take images.
 <details>
 <summary><b>Canonical genres</b></summary>
 
+With this off, the genre a track gets is the one the agreeing sources give
+most (each source's genres and styles, a MusicBrainz recording's most-used
+tags), written as a tag shows it ("Deep House"). The AI's guess only counts
+when no source gives one: an AI that knows an artist for jazz isn't a source
+tagging this tune deep house. Only a file without a genre gets one.
+
 Off by default. **Settings → Genres** gives every track exactly one genre from
 your own list, decided by where the music's from and its style rather than
 whatever a source called it that day. Each rule has:
@@ -807,8 +813,10 @@ whatever a source called it that day. Each rule has:
 - optionally **where the music has to be from** (`UK`; `?` for unknown), so `rap` means UK Rap for a London artist and Hip-Hop for anyone else. A source genre that names a place (`UK drill`, `British hip hop`) counts as from there.
 
 Your own choice wins, then title words, then the sources that agree on the
-track, then the AI, then the file's tag. The most specific match wins; on a
-tie, the rule higher up the list. Where nothing fits, the Decision tab says so
+track, then the AI, then the file's tag. Within those, the rule most of the
+genres point to wins (MusicBrainz's "deep house", "garage house" and one
+"drum and bass" make it House); on a tie, the most specific match, then the
+rule higher up the list. Where nothing fits, the Decision tab says so
 and no genre is written. The sources' own genres are kept for reference; only
 the canonical one goes into files (over an existing genre, unless you turn
 that off). File by it with the **Region / Genre** folder preset

@@ -494,7 +494,8 @@ const FIELDS_CHECKED = "fieldsChecked"
  * Raised when the checks learn something new, so every track is checked again once.
  * 2: what only the file can state needs the file to state it.
  * 3: a version needs the file's own first name or title to say it - not a folder, album,
- *    genre or comment, and not a name Dubplate gave it (files cut as "(Dubplate)" go back to Cut & Tag).
+ *    genre or comment, and not a name Dubplate gave it (files cut as "(Dubplate)" go back to Cut & Tag);
+ *    and the genre the sources give beats the AI's guess.
  */
 const FIELDS_CHECK_VERSION = 3
 
@@ -542,8 +543,9 @@ export async function recheckFields(ids: number[], settings: Settings, ctx: JobC
         if (final && now && t.decision) {
           const asProposed = readingKey(t.final) === readingKey(t.decision) && (t.final?.version ?? "") === (t.decision.version ?? "")
           if (asProposed) {
-            // Approved as Dubplate proposed it: what it proposes now ("Straight Drop", not "Straight Drop (Dubplate)").
-            final = { ...final, title: now.title, version: now.version }
+            // Approved as Dubplate proposed it: what it proposes now ("Straight Drop", not "Straight Drop (Dubplate)"),
+            // and the genre the sources give rather than the AI's guess.
+            final = { ...final, title: now.title, version: now.version, ...(final.genre === t.decision.genre && now.genre ? { genre: now.genre } : {}) }
           } else if (final.version && final.version === t.ai?.version && !now.version && !versionBacked(final.version, [...versionSays(t), ...fingerprinted(t.candidates)])) {
             // Edited, but the version is still the AI's guess with nothing behind it.
             final = { ...final, version: undefined }

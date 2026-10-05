@@ -366,6 +366,18 @@ describe("canonical genres", () => {
     expect(ruleFor("uk drill", STARTER_GENRE_RULES, "UK")?.genre).toBe("UK Drill")
   })
 
+  it("go by what most of the sources' genres say, not the one most specific word", () => {
+    // MusicBrainz's genres for a deep house tune, and its other tags.
+    const mb = ["deep house", "electronic", "broken beat", "drum and bass", "garage house", "future jazz"]
+    expect(canonicalGenre(t(), d(mb), s())).toMatchObject({ genre: "House", from: 'the sources ("garage house")' })
+    // A Jazz rule of your own doesn't win on one "future jazz" tag either.
+    const withJazz = s()
+    withJazz.canonicalGenres.rules = [...withJazz.canonicalGenres.rules, { genre: "Jazz", region: "", match: ["jazz", "future jazz", "nu jazz"] }]
+    expect(canonicalGenre(t(), d(mb), withJazz)?.genre).toBe("House")
+    // nor does the AI's guess, while the sources say anything that fits
+    expect(canonicalGenre(t({ ai: { genre: "Jazz" } as Track["ai"] }), d(mb), withJazz)?.genre).toBe("House")
+  })
+
   it("file into Dee's folders", () => {
     const where = (g: ReturnType<typeof canonicalGenre>) => (g ? [g.region, g.folder].filter(Boolean).join("/") : null)
     const at = (genres: string[], country?: string, over: Partial<Track> = {}, reading: Partial<Decision> = {}) => where(canonicalGenre(t(over), { ...d(genres, country), ...reading }, s()))

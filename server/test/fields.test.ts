@@ -269,6 +269,20 @@ describe("versions need evidence", () => {
     expect(score("Benny Banks - Eye for an Eye .flac", { artists: ["Benny Banks"], title: "Eye for an Eye" }, heard).title).toBe("Eye For An Eye (Remix)")
   })
 
+  it("takes the genre the sources give over the AI's guess", () => {
+    const mb = (title: string) =>
+      hit("musicbrainz", "Domu", title, { genres: ["deep house", "electronic", "broken beat", "drum and bass", "garage house", "future jazz"], sourceScore: 1 })
+    const sources = [mb("Save You"), hit("discogs", "Domu", "Save You", { genre: "Electronic, Jazz", genres: ["Electronic", "Jazz", "Broken Beat", "Future Jazz"] }), hit("deezer", "Domu", "Save You")]
+    const d = score("Domu - Save You.flac", { artists: ["Domu"], title: "Save You", genre: "Jazz" }, sources)
+    expect(d.basis).toBe("sources")
+    expect(d.genre).toBe("Electronic")
+    expect(d.provenance?.genre).toBe("musicbrainz")
+    // MusicBrainz alone: its most-used tag, written as a tag shows it
+    expect(score("Domu - Save You.flac", { artists: ["Domu"], title: "Save You", genre: "Jazz" }, [mb("Save You"), hit("deezer", "Domu", "Save You")]).genre).toBe("Deep House")
+    // No source says: the AI's guess is all there is
+    expect(score("Domu - Save You.flac", { artists: ["Domu"], title: "Save You", genre: "Jazz" }, [hit("deezer", "Domu", "Save You"), hit("itunes", "Domu", "Save You")]).genre).toBe("Jazz")
+  })
+
   it("never shows the AI an example's version this file doesn't share", () => {
     const track = { filename: "Asco - STRAIGHT DROP .flac", relDir: "UK Rap/Asco", tags: {}, duration: 200, heuristic: null } as never
     const examples = [{ id: 1, filename: "Asco - Bad Boy.flac", artists: ["Asco"], title: "Bad Boy", version: "Dubplate", createdAt: "" }]

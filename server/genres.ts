@@ -148,12 +148,22 @@ export function canonicalGenre(t: Pick<Track, "final" | "ai" | "tags" | "escalat
     [t.tags.genre ?? [], "the file's tag"],
   ]
   for (const [terms, from] of inputs) {
-    // Across one input, the most specific match wins (a source saying "UK garage" over another saying "electronic").
-    let best: { rule: GenreRule; term: string; score: number } | null = null
+    // Across one input, the rule most of its genres point to wins ("deep house" and "garage house" make it
+    // House, whatever one "drum and bass" tag says); on a tie, the most specific match (a source saying
+    // "UK garage" over another saying "house"), then the rule higher up the list.
+    const votes = new Map<GenreRule, { rule: GenreRule; term: string; score: number; votes: number }>()
     for (const term of terms) {
       const hit = bestRule(term, cg.rules, region)
-      if (hit && (!best || hit.score > best.score)) best = { ...hit, term }
+      if (!hit) continue
+      const v = votes.get(hit.rule)
+      if (!v) votes.set(hit.rule, { ...hit, term, votes: 1 })
+      else {
+        v.votes++
+        if (hit.score > v.score) Object.assign(v, { score: hit.score, term })
+      }
     }
+    const order = (r: GenreRule) => cg.rules.indexOf(r)
+    const best = [...votes.values()].sort((a, b) => b.votes - a.votes || b.score - a.score || order(a.rule) - order(b.rule))[0]
     if (best) {
       const where = regionInTerm(best.term) ?? region
       return canonicalOf(best.rule, `${from} ("${best.term}"${where ? `, ${where}` : ""})`)

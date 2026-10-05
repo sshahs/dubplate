@@ -16,7 +16,7 @@ import type {
   TrackReading,
   VersionCheck,
 } from "../../shared/types"
-import { checkFields, needsALook, versionBacked, withoutUnbackedVersions } from "../../shared/fields"
+import { checkFields, isPlaceholder, needsALook, versionBacked, withoutUnbackedVersions } from "../../shared/fields"
 import { artistSimilarity, collapseSpaces, normArtist, similarity, splitArtists, titleSimilarity } from "./normalize"
 import { KIND_LABEL, pickRelease, releasesOf } from "./releases"
 import { withoutDiscFolders } from "./discs"
@@ -398,6 +398,25 @@ export function scoreTrack(input: ScoreInput): Decision {
 const SOURCE_NAMES: Record<string, string> = { musicbrainz: "MusicBrainz", discogs: "Discogs", acoustid: "AcoustID", spotify: "Spotify", itunes: "Apple Music", deezer: "Deezer" }
 const sourceName = (id: string) => SOURCE_NAMES[id] ?? (id.startsWith("scraper:") ? id.slice(8) : id)
 
+/** Short genre words written in capitals. */
+const GENRE_CAPS: Record<string, string> = { uk: "UK", us: "US", "r&b": "R&B", rnb: "RnB", edm: "EDM", idm: "IDM", dnb: "DnB", ukg: "UKG", vip: "VIP", "2-step": "2-Step", "2 step": "2 Step" }
+
+/** A genre as a tag shows it: MusicBrainz's "deep house" as "Deep House"; a source's own capitals kept. */
+export function genreCase(g: string): string {
+  if (g !== g.toLowerCase()) return g
+  if (GENRE_CAPS[g]) return GENRE_CAPS[g]
+  return g.replace(/[a-z0-9&'-]+/g, (w) => GENRE_CAPS[w] ?? w.charAt(0).toUpperCase() + w.slice(1))
+}
+
+/**
+ * The genre the agreeing sources give most (each source's genres and styles, a
+ * MusicBrainz recording's tags most-used first). Not a placeholder like "Other".
+ */
+export function sourceGenre(cands: Candidate[]): string | undefined {
+  const top = sourceGenresOf(cands).find((g) => !isPlaceholder("genre", g))
+  return top ? genreCase(top) : undefined
+}
+
 /** Genres the agreeing sources gave, most-mentioned first, as they worded them. */
 function sourceGenresOf(cands: Candidate[]): string[] {
   const count = new Map<string, { name: string; n: number }>()
@@ -433,7 +452,7 @@ function provenanceOf(
   const find = (field: "year" | "album" | "label" | "genre") => {
     const v = reading[field]
     if (v === undefined || v === null || v === "") return
-    const hit = cluster.find((c) => c[field] === v)
+    const hit = cluster.find((c) => c[field] === v || (field === "genre" && c.genres?.some((g) => genreCase(g) === v)))
     out[field] = hit ? hit.sourceLabel : readingFrom
   }
   find("year")
@@ -544,6 +563,8 @@ function mergeFromSources(reading: TrackReading, rep: Candidate, cluster: Candid
     album: reading.album ?? withMeta("album"),
     label: reading.label ?? withMeta("label"),
     riddim: reading.riddim ?? withMeta("riddim"),
-    genre: reading.genre ?? withMeta("genre"),
+    // What the sources call it beats the AI's guess (an AI that knows the artist for jazz isn't a source
+    // tagging this tune deep house); the AI's only counts when no source gives one.
+    genre: sourceGenre(cluster) ?? reading.genre ?? withMeta("genre"),
   }
 }
