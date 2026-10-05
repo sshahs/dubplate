@@ -1080,6 +1080,7 @@ crates whose names aren't taken.
 - 💿 **Release priority**: the artist's own album, EP or single before compilations and DJ mixes, unless the file says otherwise.
 - 📀 **Discs and sides**: CD1/CD2 and Side A/B folders, A1/B2 positions and whole-side rips understood, with disc and track numbers written.
 - 🧭 **How it was decided**: recording, release, version, genre, risk, verification, AcoustID and MusicBrainz, step by step, with where each field came from.
+- 🎛️ **Pick any source's option**: the track's Sources tab lists every hit in each group (the same song as a 7", an album, a compilation…), each with its own **Use**, which fills in that option's artist, title, album, year and label together.
 - 🧠 **Second opinion**: a bigger model for the uncertain ones, and a vision model to check covers.
 - 🏷️ **Canonical genres**: one genre per track from your own list, with region folders.
 - 🫆 **Give back**: send verified fingerprints to AcoustID and add missing releases to MusicBrainz.

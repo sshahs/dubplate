@@ -36,14 +36,19 @@ function initialMeta(t: Track): Partial<FinalMeta> | null {
   return t.final ?? (t.decision?.title ? t.decision : null) ?? t.ai ?? t.heuristic
 }
 
+/**
+ * One source's option as the details to approve: its artist, title, album, year
+ * and label together (a different release's album or year isn't kept beside
+ * them). A riddim or a version it doesn't name stays as it was.
+ */
 function candidateToMeta(c: Candidate, base: MetaDraft): MetaDraft {
   return {
     ...base,
     artists: (c.artists?.length ? c.artists : [c.artist]).join(", "),
     title: c.title,
-    album: c.album ?? base.album,
-    year: c.year ? String(c.year) : base.year,
-    label: c.label ?? base.label,
+    album: c.album ?? "",
+    year: c.year ? String(c.year) : "",
+    label: c.label ?? "",
     riddim: c.riddim ?? base.riddim,
   }
 }
@@ -70,6 +75,8 @@ export function TrackDetail({
   // The form follows the saved track until you edit it; edits are tied to the track they were made on.
   // Derived during render (not in an effect) so a cached track appears without a skeleton frame.
   const [edit, setEdit] = useState<{ trackId: number; draft: MetaDraft } | null>(null)
+  // Source groups showing every option, not just the first six.
+  const [allShown, setAllShown] = useState<Set<number>>(new Set())
   const saved = useMemo(() => (track ? toDraft(initialMeta(track)) : null), [track])
   const dirty = edit?.trackId === trackId
   const draft = dirty ? edit.draft : saved
@@ -241,7 +248,8 @@ export function TrackDetail({
       </div>
 
       <Tabs defaultValue="decision">
-        <TabsList>
+        {/* Five tabs are wider than a phone: they scroll on their own rather than pushing the panel sideways. */}
+        <TabsList className="max-w-full justify-start overflow-x-auto [scrollbar-width:none]">
           <TabsTrigger value="decision">Decision</TabsTrigger>
           <TabsTrigger value="evidence">Evidence</TabsTrigger>
           <TabsTrigger value="sources">Sources {d?.clusters.length ? `(${d.clusters.length})` : ""}</TabsTrigger>
@@ -282,49 +290,78 @@ export function TrackDetail({
               {track.candidates?.length ? `${track.candidates.length} raw hits, none close enough to this reading.` : "No source hits."}
             </p>
           )}
-          {d?.clusters.map((cl, i) => (
-            <div key={i} className={cn("rounded-2xl border p-3", i === 0 && "border-rasta-green/40 bg-rasta-green/5")}>
-              <div className="flex items-start gap-2">
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium">
-                    {cl.artist} - {cl.title}
-                  </div>
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {[...new Set(cl.candidates.map((c) => c.sourceLabel))].map((s) => (
-                      <Badge key={s} variant="secondary">
-                        {s}
-                      </Badge>
-                    ))}
-                    <span className="text-muted-foreground ml-1 text-xs">
-                      support {cl.support.toFixed(2)} · match {Math.round(cl.relevance * 100)}%
-                    </span>
-                  </div>
+          {d?.clusters.map((cl, i) => {
+            // Every option in a group can be picked on its own: the same song can come back as different
+            // releases, years, labels or spellings, and the first isn't always the one you want.
+            const shown = allShown.has(i) ? cl.candidates : cl.candidates.slice(0, 6)
+            return (
+              <div key={i} className={cn("rounded-2xl border p-3", i === 0 && "border-rasta-green/40 bg-rasta-green/5")}>
+                <div className="font-medium">
+                  {cl.artist} - {cl.title}
                 </div>
-                <Button size="xs" variant="outline" onClick={() => editDraft(candidateToMeta(cl.candidates[0], draft))}>
-                  Use this
-                </Button>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {[...new Set(cl.candidates.map((c) => c.sourceLabel))].map((s) => (
+                    <Badge key={s} variant="secondary">
+                      {s}
+                    </Badge>
+                  ))}
+                  <span className="text-muted-foreground ml-1 text-xs">
+                    support {cl.support.toFixed(2)} · match {Math.round(cl.relevance * 100)}%
+                  </span>
+                </div>
+                <div className="bg-background/40 mt-2 divide-y rounded-xl border">
+                  {shown.map((c, j) => {
+                    const details = [c.album, c.year, c.label, c.riddim && `${c.riddim} riddim`, c.duration && fmtDuration(c.duration)].filter(Boolean).join(" · ")
+                    return (
+                      <div key={j} className="flex items-center gap-2 px-2.5 py-1.5 text-xs">
+                        <span className="w-20 shrink-0 sm:w-24">
+                          <span className="text-muted-foreground block truncate" title={c.sourceLabel}>
+                            {c.sourceLabel}
+                          </span>
+                          {i === 0 && j === 0 && <span className="text-rasta-green block">best match</span>}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate font-medium" title={`${c.artist} - ${c.title}`}>
+                            {c.artist} - {c.title}
+                          </div>
+                          {details && (
+                            <div className="text-muted-foreground truncate" title={details}>
+                              {details}
+                            </div>
+                          )}
+                        </div>
+                        {c.url && (
+                          <a href={c.url} target="_blank" rel="noreferrer noopener" className="text-muted-foreground hover:text-foreground" aria-label={`Open on ${c.sourceLabel}`}>
+                            <HugeiconsIcon icon={LinkSquare02Icon} strokeWidth={2} className="size-3.5" />
+                          </a>
+                        )}
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          aria-label={`Use ${c.sourceLabel}'s ${c.artist} - ${c.title}${details ? ` (${details})` : ""}`}
+                          onClick={() => {
+                            editDraft(candidateToMeta(c, draft))
+                            toast(`Filled in from ${c.sourceLabel}`, { description: "Check the details below, then approve." })
+                          }}
+                        >
+                          Use
+                        </Button>
+                      </div>
+                    )
+                  })}
+                  {cl.candidates.length > 6 && (
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-foreground w-full px-2.5 py-1.5 text-left text-xs"
+                      onClick={() => setAllShown((s) => new Set(s.has(i) ? [...s].filter((x) => x !== i) : [...s, i]))}
+                    >
+                      {allShown.has(i) ? "Show fewer" : `Show all ${cl.candidates.length}`}
+                    </button>
+                  )}
+                </div>
               </div>
-              <div className="mt-2 space-y-1">
-                {cl.candidates.slice(0, 6).map((c, j) => (
-                  <div key={j} className="text-muted-foreground flex items-center gap-2 text-xs">
-                    <span className="w-24 shrink-0 truncate">{c.sourceLabel}</span>
-                    <span className="flex-1 truncate">
-                      {c.artist} - {c.title}
-                      {c.album ? ` · ${c.album}` : ""}
-                      {c.year ? ` · ${c.year}` : ""}
-                      {c.riddim ? ` · ${c.riddim} riddim` : ""}
-                      {c.duration ? ` · ${fmtDuration(c.duration)}` : ""}
-                    </span>
-                    {c.url && (
-                      <a href={c.url} target="_blank" rel="noreferrer noopener" className="hover:text-foreground" aria-label="Open source">
-                        <HugeiconsIcon icon={LinkSquare02Icon} strokeWidth={2} className="size-3.5" />
-                      </a>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </TabsContent>
 
         <TabsContent value="readings" className="space-y-3 pt-3">
