@@ -128,6 +128,7 @@ export function rowToTrack(r: Row): Track {
     analysis: parseJson(r.analysis_json, null),
     art: parseJson<ArtRef | null>(r.art_json, null),
     artFound: parseJson<ArtRef | null>(r.art_found_json, null),
+    artDeclined: parseJson<string[]>(r.art_declined_json, []),
     aside: parseJson<SetAside | null>(r.aside_json, null),
     fileCheck: parseJson<FileCheck | null>(r.file_check_json, null),
     lyrics: parseJson<LyricsFound | null>(r.lyrics_json, null),
@@ -155,7 +156,7 @@ export function toSummary(t: Track): TrackSummary {
 
 /** A full track: its row plus the bulky readings/hits/decision kept in track_data. */
 const FULL_TRACK =
-  "SELECT t.*, d.heuristic_json, d.ai_json, d.candidates_json, d.decision_json, d.lyrics_json, d.fingerprint_json, d.original_json, d.escalation_json FROM tracks t LEFT JOIN track_data d ON d.track_id = t.id"
+  "SELECT t.*, d.heuristic_json, d.ai_json, d.candidates_json, d.decision_json, d.lyrics_json, d.fingerprint_json, d.original_json, d.escalation_json, d.art_declined_json FROM tracks t LEFT JOIN track_data d ON d.track_id = t.id"
 
 export function getTrack(id: number): Track | null {
   const r = getDb().prepare(`${FULL_TRACK} WHERE t.id = ?`).get(id) as Row | undefined
@@ -317,7 +318,7 @@ export function queryTrackIds(q: TrackQuery): number[] {
   return (getDb().prepare(`SELECT id FROM tracks ${sql} ORDER BY id`).all(...params) as { id: number }[]).map((r) => r.id)
 }
 
-const JSON_COLS = new Set(["tags", "heuristic", "ai", "candidates", "decision", "final", "analysis", "art", "artFound", "aside", "fileCheck", "lyrics", "fingerprint", "original", "idsOverride", "escalation"])
+const JSON_COLS = new Set(["tags", "heuristic", "ai", "candidates", "decision", "final", "analysis", "art", "artFound", "aside", "fileCheck", "lyrics", "fingerprint", "original", "idsOverride", "escalation", "artDeclined"])
 /** Kept in track_data rather than on the track row. */
 const DATA_COLS: Record<string, string> = {
   heuristic: "heuristic_json",
@@ -328,6 +329,7 @@ const DATA_COLS: Record<string, string> = {
   fingerprint: "fingerprint_json",
   original: "original_json",
   escalation: "escalation_json",
+  artDeclined: "art_declined_json",
 }
 const COLS: Record<string, string> = {
   libraryId: "library_id",

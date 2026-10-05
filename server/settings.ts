@@ -423,7 +423,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   safety: { readOnly: true },
   convert: { keepAudio: true, encodeTo: "mp3", originals: "keep", auto: false },
-  artwork: { fetch: true, embed: true, replaceExisting: false },
+  artwork: { fetch: true, embed: true, replaceExisting: false, confirm: "always" },
   analysis: { onProcess: true, writeTags: true, keyNotation: "musical", bpmMin: 88, quality: true, loudness: true, writeReplayGain: true, integrity: true },
   automation: { autoProcess: true, pollMinutes: 15, nightly: false, nightlyAt: "03:00", handsOffMin: 95 },
   exports: { pathMap: [], traktorVolume: "Macintosh HD" },

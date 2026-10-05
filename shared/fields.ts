@@ -455,15 +455,21 @@ function yearStated(year: number, evidence: string): boolean {
 /**
  * A reading with only what the file states in the fields the AI may never fill
  * from anything else: version, year, label, riddim and event. Whatever it gave
- * that the file doesn't say is left out, and named in `unsupported`.
+ * that the file doesn't say is left out, and named in `unsupported`. The version
+ * is held to its own, narrower evidence when given: what the file itself is
+ * called, not the folders and tags round it.
  */
-export function groundReading<T extends { version?: string; year?: number; label?: string; riddim?: string; event?: string }>(r: T, evidence: string[]): { reading: T; unsupported: string[] } {
+export function groundReading<T extends { version?: string; year?: number; label?: string; riddim?: string; event?: string }>(
+  r: T,
+  evidence: string[],
+  versionEvidence: string[] = evidence
+): { reading: T; unsupported: string[] } {
   const all = evidence.join(" \u0000 ")
   const text = flat(all)
   const has = (v: string) => text.includes(flat(v))
   const out: T = { ...r }
   const unsupported: string[] = []
-  if (r.version && !versionBacked(r.version, evidence)) {
+  if (r.version && !versionBacked(r.version, versionEvidence)) {
     unsupported.push(`version "${r.version}"`)
     out.version = undefined
   }

@@ -7,7 +7,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { formatKey } from "../shared/keys"
 import type { ExistingTags, FileCheck, Library, Operation, PlanItem, Settings, Track } from "../shared/types"
-import { artToEmbed, describeArt, cachedArt } from "./art"
+import { artPlan, artToEmbed, describeArt, cachedArt } from "./art"
 import { idsFor } from "./core/ids"
 import { emptyish, FILL_ONLY, tagDiff, tagsFor, type TagExtras } from "./core/naming"
 import { checkFields, needsALook } from "../shared/fields"
@@ -149,7 +149,9 @@ export function buildPlan(tracks: Track[], settings: Settings, opts: { tagsOnly?
       const key = toPath.toLowerCase()
       targets.set(key, (targets.get(key) ?? 0) + 1)
     }
-    if (!rename && !tagChanges.length && meta) issues.push(opts.tagsOnly ? "Already clean - tags are up to date" : "Already clean - nothing to change")
+    // Found artwork: written with the cut, or waiting for a person's OK first (Settings → Artwork).
+    const art = meta && s.naming.writeTags ? artPlan(t, s) : undefined
+    if (!rename && !tagChanges.length && meta) issues.push(art?.waiting ? "Only new artwork to write - waiting for your OK on it" : opts.tagsOnly ? "Already clean - tags are up to date" : "Already clean - nothing to change")
     return {
       trackId: t.id,
       fromPath: t.path,
@@ -165,6 +167,7 @@ export function buildPlan(tracks: Track[], settings: Settings, opts: { tagsOnly?
       issues,
       blocked: false,
       confidence: t.confidence,
+      ...(art ? { art } : {}),
     }
   })
   for (const item of items) {

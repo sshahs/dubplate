@@ -97,6 +97,8 @@ export interface ArtRef {
   url?: string
   /** what a vision model said about it, when the match was in doubt */
   check?: CoverCheck
+  /** a person said to use it (found artwork waits for that when Settings → Artwork asks first) */
+  confirmed?: boolean
 }
 
 /** A vision model's look at a found cover. */
@@ -636,8 +638,10 @@ export interface Track {
   analysis: TrackAnalysis | null
   /** the picture embedded in the file now */
   art: ArtRef | null
-  /** artwork found online, embedded when the track is cut */
+  /** artwork found online, embedded when the track is cut (once a person says so, when asked to) */
   artFound: ArtRef | null
+  /** found artwork a person turned down (by hash), so it isn't offered again */
+  artDeclined: string[]
   /** moved to the library's holding folder as a duplicate (the track is then hidden) */
   aside: SetAside | null
   /** what reading the file found (a wrong extension, unreadable tags…) */
@@ -801,6 +805,17 @@ export interface OperationBatch {
   dryRun: boolean
 }
 
+export type ArtworkConfirm = "always" | "replacing" | "never"
+
+export interface PlanArt {
+  waiting: boolean
+  /** the file has a picture of its own that this replaces */
+  replaces: boolean
+  /** the file's picture now, and the one that would be written */
+  before: Pick<ArtRef, "hash" | "width" | "height"> | null
+  after: Pick<ArtRef, "hash" | "width" | "height" | "source" | "sourceLabel">
+}
+
 export interface PlanItem {
   trackId: number
   fromPath: string
@@ -819,6 +834,8 @@ export interface PlanItem {
   issues: string[]
   blocked: boolean
   confidence: number | null
+  /** found artwork for this file: waiting for a person's OK (not written until then), or OK'd and written with the cut */
+  art?: PlanArt
 }
 
 export interface Stats {
@@ -1010,6 +1027,8 @@ export interface Settings {
     embed: boolean
     /** replace artwork a file already has */
     replaceExisting: boolean
+    /** when found artwork waits for a person to say "use it" before it's written: every time, only when it replaces the file's own picture, or never */
+    confirm: ArtworkConfirm
   }
   analysis: {
     /** analyse BPM and key as part of identifying tracks */

@@ -97,7 +97,7 @@ flowchart TB
 | **🔎 Metadata scourer** | With AcoustID set up, the audio fingerprint goes first: a sure fingerprint match skips the AI altogether. Then it asks every enabled source at once, with polite per-host rate limits, a 7-day response cache and a two-week cache of lookups by artist, title, version and length (so a renamed copy doesn't ask again). One source never holds a run up: each gets a minute per track, and a source that says "too many requests, come back in an hour" (Spotify does) is skipped until then, with a warning in the Console, rather than waited on. |
 | **🧹 Field checks** | Every reading, AI answer, source hit, decision and edit goes through the same checks, so each field holds only its own thing (see **Field checks** below). What's plainly in the wrong place is put right; what isn't keeps the track out of auto-approve and hands-off. |
 | **📊 Confidence engine** | Groups the hits by recording, then weighs consensus across independent sources, agreement between readings, duration, fingerprint matches and conflicts. The result is an explainable 0–100 score, plus which **release** the track belongs to (the artist's own album, EP or single before a compilation or DJ mix) and a separate **risk** rating for letting automation change the file. |
-| **🎨 Artwork, tempo & key** | Fetches a cover from the sources that confirmed the track (Cover Art Archive, Discogs, Bandcamp, Apple Music, Deezer…), and listens to the audio for BPM and musical key. |
+| **🎨 Artwork, tempo & key** | Fetches a cover from the sources that confirmed the track (Cover Art Archive, Discogs, Bandcamp, Apple Music, Deezer, Spotify, in that order), else by searching Apple Music and Deezer for the approved artist and title. New artwork waits for your OK: the track shows the file's picture before and after (and the one it came with, if a cut already replaced it), and **Cut & Tag → Compare & choose** does the same for every file at once. A picture you turn down isn't offered for that track again. Listens to the audio for BPM and musical key. |
 | **✂️ Verify & execute** | Bulk-approve the matches, review the rest, then rename and tag in place, writing MusicBrainz and Discogs IDs where the sources found them. Every operation is logged so any batch can be put back. |
 | **🗄️ Organise** | Optionally moves cut tracks into a folder layout of your choosing inside the library (`Artist / Year - Album`, `A-Z / Artist`, `BPM / Key`…), bringing cover images along and tidying empty folders. Previewed as a tree first, rewindable after. |
 
@@ -436,9 +436,9 @@ into the file:
 | `(Official Video)`, `[HD]`, `320kbps`, `.mp3`, a site name or a track number in a title or artist | Taken out |
 | `Unknown Artist`, `Various Artists`, `VA` as an artist | Taken out |
 | A year before 1900 or in the future | Left empty |
-| A version that says what kind of recording it is (`Dubplate`, `Special`, `Remix`, `Live`, `VIP`…) when nothing about the file says so: not its name, folder or tags, nor a source that matched it | Left out. The AI is never shown a similar file's version unless this file shares it, so one approved dubplate can't make every Asco tune one |
+| A version that says what kind of recording it is (`Dubplate`, `Special`, `Remix`, `Live`, `VIP`…) when the file's own name and title don't say so | Left out. Only the file's own first name and title count, as they were before Dubplate changed anything (plus a source that matched the audio's fingerprint). A folder, album, genre or comment that mentions dubplates describes the collection, not the recording, so a "Dubplates" folder doesn't make each file in it one; set the version by hand or with bulk edit for those. A name Dubplate gave a file earlier doesn't count either, so a file wrongly cut as "(Dubplate)" goes back to Cut & Tag under its right name. The AI is never shown a similar file's version unless this file shares it, so one approved dubplate can't make every Asco tune one |
 | A source's `(Remix)`, `(Dub)` or `(Extended Version)` on a title the file never mentions | Taken off, unless the audio fingerprint matched that recording |
-| A version, year, label, riddim or event the AI gave that the file's name, folder and tags don't state | Left out as it answers, and listed on the track ("The AI's version "Dubplate" left out") |
+| A version, year, label, riddim or event the AI gave that the file's name, folder and tags don't state (for the version, its own name and title) | Left out as it answers, and listed on the track ("The AI's version "Dubplate" left out") |
 
 **The AI's examples.** With *Learn from my corrections* on, the AI is shown
 a few of your past approvals of similar files (sharing a word that isn't as
@@ -795,6 +795,12 @@ Anthropic models that take images.
 <details>
 <summary><b>Canonical genres</b></summary>
 
+With this off, the genre a track gets is the one the agreeing sources give
+most (each source's genres and styles, a MusicBrainz recording's most-used
+tags), written as a tag shows it ("Deep House"). The AI's guess only counts
+when no source gives one: an AI that knows an artist for jazz isn't a source
+tagging this tune deep house. Only a file without a genre gets one.
+
 Off by default. **Settings → Genres** gives every track exactly one genre from
 your own list, decided by where the music's from and its style rather than
 whatever a source called it that day. Each rule has:
@@ -807,8 +813,10 @@ whatever a source called it that day. Each rule has:
 - optionally **where the music has to be from** (`UK`; `?` for unknown), so `rap` means UK Rap for a London artist and Hip-Hop for anyone else. A source genre that names a place (`UK drill`, `British hip hop`) counts as from there.
 
 Your own choice wins, then title words, then the sources that agree on the
-track, then the AI, then the file's tag. The most specific match wins; on a
-tie, the rule higher up the list. Where nothing fits, the Decision tab says so
+track, then the AI, then the file's tag. Within those, the rule most of the
+genres point to wins (MusicBrainz's "deep house", "garage house" and one
+"drum and bass" make it House); on a tie, the most specific match, then the
+rule higher up the list. Where nothing fits, the Decision tab says so
 and no genre is written. The sources' own genres are kept for reference; only
 the canonical one goes into files (over an existing genre, unless you turn
 that off). File by it with the **Region / Genre** folder preset
@@ -1041,7 +1049,7 @@ crates whose names aren't taken.
 ## 🎁 Extra riddims
 
 - 🧠 **Learning**: approvals become examples for the AI, and an alias table maps shorthand to credited names (`buju` → Buju Banton, `kartel` → Vybz Kartel).
-- 🎨 **Cover art**: found from the sources that identified a track, shown as thumbnails everywhere, and embedded when you cut.
+- 🎨 **Cover art**: found from the sources that identified a track, shown as thumbnails everywhere, compared before and after, and embedded when you cut once you've said yes (**Settings → Artwork → Ask before using new artwork**: every time, only when it replaces a picture, or never).
 - 🥁 **BPM & key**: worked out by listening (pure JS/WASM decoders, no ffmpeg), folded into a DJ-style range (88–175 by default, so a one-drop at 75 reads 150). Tags from the file and your own edits always win.
 - 👀 **Watch folders**: new files are scanned and identified as they land, with a periodic re-check for network shares and an optional nightly rescan.
 - ✏️ **Bulk edit**: set album, label, genre, year, artists, BPM or key across a selection - with Undo.
@@ -1072,6 +1080,7 @@ crates whose names aren't taken.
 - 💿 **Release priority**: the artist's own album, EP or single before compilations and DJ mixes, unless the file says otherwise.
 - 📀 **Discs and sides**: CD1/CD2 and Side A/B folders, A1/B2 positions and whole-side rips understood, with disc and track numbers written.
 - 🧭 **How it was decided**: recording, release, version, genre, risk, verification, AcoustID and MusicBrainz, step by step, with where each field came from.
+- 🎛️ **Pick any source's option**: the track's Sources tab lists every hit in each group (the same song as a 7", an album, a compilation…), each with its own **Use**, which fills in that option's artist, title, album, year and label together.
 - 🧠 **Second opinion**: a bigger model for the uncertain ones, and a vision model to check covers.
 - 🏷️ **Canonical genres**: one genre per track from your own list, with region folders.
 - 🫆 **Give back**: send verified fingerprints to AcoustID and add missing releases to MusicBrainz.

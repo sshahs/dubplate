@@ -206,9 +206,13 @@ describe("artwork", () => {
 
     repo.updateTrack(t.id, { artFound: found })
     const withArt = repo.getTrack(t.id)!
-    expect(artToEmbed(withArt, settings)?.hash).toBe(found!.hash)
-    expect(artToEmbed(withArt, { ...settings, artwork: { ...settings.artwork, embed: false } })).toBeNull()
-    expect(artToEmbed({ ...withArt, art: { ...found!, hash: "other" } }, settings)).toBeNull()
+    // Waits for a person's OK first (Settings → Artwork), unless asked never to.
+    expect(artToEmbed(withArt, settings)).toBeNull()
+    expect(artToEmbed(withArt, { ...settings, artwork: { ...settings.artwork, confirm: "never" } })?.hash).toBe(found!.hash)
+    const ok = { ...withArt, artFound: { ...found!, confirmed: true } }
+    expect(artToEmbed(ok, settings)?.hash).toBe(found!.hash)
+    expect(artToEmbed(ok, { ...settings, artwork: { ...settings.artwork, embed: false } })).toBeNull()
+    expect(artToEmbed({ ...ok, art: { ...found!, hash: "other" } }, settings)).toBeNull()
   })
 })
 
@@ -231,7 +235,7 @@ describe("tags: BPM, key and cover", () => {
     const { tracks } = await scanned(["skepta - shutdown.mp3"])
     const id = tracks[0].id
     const cover = storeArt(jpegBytes(200, 200, [30, 30, 30]), "deezer")!
-    repo.updateTrack(id, { final: { artists: ["Skepta"], featuring: [], title: "Shutdown" }, status: "approved", bpm: 140, key: "F#m", artFound: cover })
+    repo.updateTrack(id, { final: { artists: ["Skepta"], featuring: [], title: "Shutdown" }, status: "approved", bpm: 140, key: "F#m", artFound: { ...cover, confirmed: true } })
     const camelot = { ...settings, analysis: { ...settings.analysis, keyNotation: "camelot" as const } }
     const plan = buildPlan(repo.getTracks([id]), camelot)
     expect(plan[0].tagChanges.map((c) => c.field).sort()).toEqual(["artist", "bpm", "cover", "key", "title"])
@@ -246,6 +250,62 @@ describe("tags: BPM, key and cover", () => {
     expect(readManagedTags(back.path).cover).toBeUndefined()
     expect(back.art).toBeNull()
     expect(back.artFound?.hash).toBe(cover.hash)
+  })
+})
+
+describe("new artwork waits for a person's OK", () => {
+  const app = () => createApp()
+  const call = (url: string, init: RequestInit = {}) => app().request(`http://localhost${url}`, { ...init, headers: { "x-dubplate": "1", "content-type": "application/json", ...init.headers } })
+
+  it("shows the file's picture before and after, writes neither until asked, and keeps a turned-down picture away", async () => {
+    // One file came with a picture of its own.
+    const own = storeArt(jpegBytes(300, 300, [200, 30, 30]), "embedded")!
+    writeMp3(path.join(dir, "skepta - shutdown.mp3"))
+    writeTags(path.join(dir, "skepta - shutdown.mp3"), { cover: own.hash })
+    const { tracks } = await scanned(["kano - ps and qs.mp3"])
+    const [a, b] = ["skepta - shutdown.mp3", "kano - ps and qs.mp3"].map((f) => tracks.find((t) => t.filename === f)!.id)
+    const found = storeArt(jpegBytes(600, 600, [30, 30, 200]), "itunes", "https://img/new.jpg", "Apple Music")!
+    const meta = (title: string) => ({ final: { artists: ["X"], featuring: [], title }, status: "approved" as const, artFound: found })
+    repo.updateTrack(a, meta("Shutdown"))
+    repo.updateTrack(b, meta("Ps and Qs"))
+    const replacing = { ...settings, artwork: { ...settings.artwork, replaceExisting: true } }
+
+    // The plan says so, with both pictures; the cover isn't among the tag changes.
+    let plan = buildPlan(repo.getTracks([a, b]), replacing)
+    expect(plan[0].art).toEqual({ waiting: true, replaces: true, before: { hash: own.hash, width: 300, height: 300 }, after: { hash: found.hash, width: 600, height: 600, source: "itunes", sourceLabel: "Apple Music" } })
+    expect(plan[1].art).toMatchObject({ waiting: true, replaces: false, before: null })
+    expect(plan.flatMap((p) => p.tagChanges.map((c) => c.field))).not.toContain("cover")
+    // Only asked when it replaces a picture: the file without one gets it straight away.
+    const onlyReplacing = { ...replacing, artwork: { ...replacing.artwork, confirm: "replacing" as const } }
+    expect(buildPlan(repo.getTracks([a, b]), onlyReplacing).map((p) => p.art?.waiting)).toEqual([true, false])
+
+    // Use it for one, keep the original for the other.
+    let res = await call("/api/artwork/choose", { method: "POST", body: JSON.stringify({ ids: [a], use: true }) })
+    expect(await res.json()).toMatchObject({ changed: 1, tracks: { id: a, artFound: { hash: found.hash, confirmed: true } } })
+    res = await call("/api/artwork/choose", { method: "POST", body: JSON.stringify({ ids: [b], use: false }) })
+    expect(((await res.json()) as { changed: number }).changed).toBe(1)
+    expect(repo.getTrack(b)).toMatchObject({ artFound: null, artDeclined: [found.hash] })
+    plan = buildPlan(repo.getTracks([a, b]), replacing)
+    expect(plan[0].art?.waiting).toBe(false)
+    expect(plan[0].tagChanges.map((c) => c.field)).toContain("cover")
+    expect(plan[1].art).toBeUndefined()
+
+    // A picture turned down isn't found again for that track.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(cachedArt(found.hash)!, { status: 200 })))
+    const decided = { artists: ["X"], featuring: [], artist: "X", title: "Ps and Qs", clusters: [{ sources: ["itunes"], candidates: [{ source: "itunes", sourceLabel: "Apple Music", artist: "X", title: "Ps and Qs", artwork: "https://img/new.jpg" }] }] } as unknown as Decision
+    repo.updateTrack(b, { decision: decided })
+    expect(await findArtwork(repo.getTrack(b)!, settings)).toBeNull()
+
+    // Cut: the new picture goes in, and the one the file came with can still be seen.
+    await executePlan(buildPlan(repo.getTracks([a]), replacing), replacing, { dryRun: false }, ctx())
+    expect(readManagedTags(repo.getTrack(a)!.path).cover).toBe(found.hash)
+    const original = await call(`/api/tracks/${a}/art?which=original&size=1200`)
+    expect(original.status).toBe(200)
+    expect(Buffer.from(await original.arrayBuffer()).equals(cachedArt(own.hash)!)).toBe(true)
+  })
+
+  it("asks for an answer it can act on", async () => {
+    expect((await call("/api/artwork/choose", { method: "POST", body: JSON.stringify({ ids: [1] }) })).status).toBe(400)
   })
 })
 
