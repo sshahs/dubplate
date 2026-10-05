@@ -13,6 +13,7 @@ import { canonicalGenre } from "./genres"
 import { lyricsForTrack, needsLyrics } from "./lyrics"
 import { scoreTrack } from "./core/confidence"
 import { parseFilename } from "./core/filename-parser"
+import { versionSays } from "./core/evidence"
 import { checkCandidate, cleanCandidate, cleanFinal, hasMarkup } from "./core/plain-text"
 import { checkFields, fileSays, groundReading, versionBacked } from "../shared/fields"
 import { getDb } from "./db"
@@ -109,7 +110,7 @@ export function scoreAndSave(track: Track, settings: Settings): Track {
     duration: track.duration,
     weights: weightsFrom(settingsForLibrary(settings, track.libraryId)),
     thresholds: settings.confidence,
-    context: { filename: track.filename, folders: folderContext(track.relDir), preferOwnRelease: settings.confidence.preferOwnRelease },
+    context: { filename: track.filename, folders: folderContext(track.relDir), preferOwnRelease: settings.confidence.preferOwnRelease, versionSays: versionSays(track) },
     supporting: supportingSources(settings),
   })
   if (track.escalation) {
@@ -480,14 +481,22 @@ export function repairMarkupOnce(): void {
   enqueueJob("score", `Clean web page markup out of ${ids.length} track${ids.length === 1 ? "" : "s"}`, (ctx) => repairMarkup(ids, settingsNow(), ctx), { quick: true })
 }
 
+/** Titles of the hits that matched the audio itself: only those know which recording this is. */
+const fingerprinted = (candidates: Track["candidates"]) => (candidates ?? []).filter((c) => c.fingerprint).map((c) => c.title)
+
 function groundAi(ai: AiParse, t: Track): AiParse {
-  const { reading, unsupported } = groundReading(ai, fileSays(t))
+  const { reading, unsupported } = groundReading(ai, fileSays(t), versionSays(t))
   return unsupported.length ? { ...reading, unsupported: [...new Set([...(ai.unsupported ?? []), ...unsupported])] } : ai
 }
 
 const FIELDS_CHECKED = "fieldsChecked"
-/** Raised when the checks learn something new, so every track is checked again once. 2: what only the file can state needs the file to state it. */
-const FIELDS_CHECK_VERSION = 2
+/**
+ * Raised when the checks learn something new, so every track is checked again once.
+ * 2: what only the file can state needs the file to state it.
+ * 3: a version needs the file's own first name or title to say it - not a folder, album,
+ *    genre or comment, and not a name Dubplate gave it (files cut as "(Dubplate)" go back to Cut & Tag).
+ */
+const FIELDS_CHECK_VERSION = 3
 
 /** The reading a track goes by: the AI's, else the filename's. */
 const readingOf = (ai: AiParse | null | undefined, heuristic: Track["heuristic"]) => (ai && (ai.title || ai.artists.length) ? ai : heuristic)
@@ -535,7 +544,7 @@ export async function recheckFields(ids: number[], settings: Settings, ctx: JobC
           if (asProposed) {
             // Approved as Dubplate proposed it: what it proposes now ("Straight Drop", not "Straight Drop (Dubplate)").
             final = { ...final, title: now.title, version: now.version }
-          } else if (final.version && final.version === t.ai?.version && !now.version && !versionBacked(final.version, [t.filename, t.relDir, t.tags.title, t.tags.album, t.tags.comment, t.tags.grouping, ...(t.candidates ?? []).map((c) => c.title)])) {
+          } else if (final.version && final.version === t.ai?.version && !now.version && !versionBacked(final.version, [...versionSays(t), ...fingerprinted(t.candidates)])) {
             // Edited, but the version is still the AI's guess with nothing behind it.
             final = { ...final, version: undefined }
           }
@@ -547,7 +556,7 @@ export async function recheckFields(ids: number[], settings: Settings, ctx: JobC
         if (finalChanged && t.status === "approved") approved++
         if ((finalChanged || tagsWrong) && t.status === "done") {
           // Cut with a riddim for an artist, or a title in it: ready to cut again, under its right name.
-          updateTrack(id, { status: "approved", proposedName: proposedFilename({ ...next, status: "approved" }, settings) })
+          updateTrack(id, { status: "approved", proposedName: proposedFilename({ ...next, final, status: "approved" }, settings) })
           recut.push(t.filename)
           ctx.log("info", `${t.filename} was cut with details in the wrong place - back in Cut & Tag to be renamed and tagged again`, { trackId: id })
         }

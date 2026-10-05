@@ -4,11 +4,12 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { checkFields, isGenreName, isPlaceholder, riddimIn, versionBacked, withoutUnbackedVersions } from "../../shared/fields"
+import { checkFields, fileSays, groundReading, isGenreName, isPlaceholder, riddimIn, versionBacked, withoutUnbackedVersions } from "../../shared/fields"
 import { riskOf } from "../../shared/risk"
 import type { AiParse, Candidate, Decision, FinalMeta, Settings } from "../../shared/types"
-import { buildUserPrompt, sanitizeAi } from "../ai/interpreter"
+import { buildUserPrompt, sanitizeAi, systemPrompt } from "../ai/interpreter"
 import { scoreTrack } from "../core/confidence"
+import { versionSays } from "../core/evidence"
 import { parseFilename } from "../core/filename-parser"
 import { formatArtist, tagsFor } from "../core/naming"
 import { checkCandidate } from "../core/plain-text"
@@ -218,9 +219,43 @@ describe("versions need evidence", () => {
   it("leaves out a Dubplate the AI gave a file that never says so", () => {
     const d = score("Asco - STRAIGHT DROP .flac", { artists: ["Asco"], title: "Straight Drop", version: "Dubplate" })
     expect(d.version).toBeUndefined()
-    expect(d.checks).toContainEqual({ field: "version", fixed: true, message: 'Version "Dubplate" left out: nothing about the file or its sources says so' })
+    expect(d.checks).toContainEqual({ field: "version", fixed: true, message: `Version "Dubplate" left out: the file's own name and title don't say so` })
     expect(score("Asco - Straight Drop (Dubplate).flac", { artists: ["Asco"], title: "Straight Drop", version: "Dubplate" }).version).toBe("Dubplate")
-    expect(score("Asco - Straight Drop.flac", { artists: ["Asco"], title: "Straight Drop", version: "Dubplate" }, [], ["Dubplates"]).version).toBe("Dubplate")
+    // A "Dubplates" folder holds a collection: it doesn't make each file in it one.
+    expect(score("Asco - Straight Drop.flac", { artists: ["Asco"], title: "Straight Drop", version: "Dubplate" }, [], ["Dubplates"]).version).toBeUndefined()
+    expect(score("Asco - Straight Drop.flac", { artists: ["Asco"], title: "Straight Drop", version: "Dubplate" }, [], ["Dubplates & specials"]).version).toBeUndefined()
+  })
+
+  it("goes by the file's own first name and title, never a folder, album, genre, comment or a name Dubplate gave it", () => {
+    const track = (over: Record<string, unknown>) => ({ filename: "Asco - Straight Drop.flac", relDir: "", tags: {}, heuristic: null, ...over }) as never
+    // its own name or title tag
+    expect(versionSays(track({ filename: "Asco - Straight Drop (Dub Plate).flac" }))).toEqual(["Asco - Straight Drop (Dub Plate).flac"])
+    expect(versionSays(track({ tags: { title: "Straight Drop (Dubplate)" } }))).toEqual(["Asco - Straight Drop.flac", "Straight Drop (Dubplate)"])
+    // not what's round it
+    const round = track({ relDir: "Dubplates & specials/Asco", tags: { album: "Dubplate Selection", genre: ["Dubplate"], comment: "Identified by Dubplate", grouping: "Dubplates" } })
+    expect(versionBacked("Dubplate", versionSays(round))).toBe(false)
+    // cut before as "(Dubplate)": the name it came with is what counts, and the tags are Dubplate's own
+    const cut = { filename: "Asco - Straight Drop (Dubplate).mp3", originalPath: "/music/Asco - STRAIGHT DROP .mp3", relDir: "", tags: { title: "Straight Drop (Dubplate)" }, heuristic: null }
+    expect(versionSays({ ...cut, original: { filename: "Asco - STRAIGHT DROP .mp3", path: "/music/Asco - STRAIGHT DROP .mp3", tags: { title: "STRAIGHT DROP" }, scannedAt: "" } } as never)).toEqual(["Asco - STRAIGHT DROP .mp3", "STRAIGHT DROP"])
+    expect(versionSays({ ...cut, original: null } as never)).toEqual(["Asco - STRAIGHT DROP .mp3"])
+    // a whole side is named by its folder
+    const side = track({ filename: "Side A.mp3", relDir: "Stone Love vs Killamanjaro 1994 Dubplate Clash/Tape 1", heuristic: parseFilename("Side A.mp3") })
+    expect(versionSays(side)).toEqual(["Side A.mp3", "Stone Love vs Killamanjaro 1994 Dubplate Clash"])
+  })
+
+  it("never lets the AI's Dubplate stand on a folder, album, genre or comment", () => {
+    const track = { filename: "Asco - Straight Drop.flac", relDir: "Dubplates & specials", tags: { album: "Dubplate Selection", genre: ["Dubplate"], year: 2019 }, heuristic: null } as never
+    const { reading, unsupported } = groundReading({ version: "Dubplate", year: 2019 }, fileSays(track), versionSays(track))
+    expect([reading.version, reading.year, unsupported]).toEqual([undefined, 2019, ['version "Dubplate"']])
+  })
+
+  it("asks the AI with no word of Dubplate it didn't need", () => {
+    const prompt = systemPrompt("Any genre.")
+    expect(prompt).not.toMatch(/inside "Dubplate"|Dubplate joins|Dubplate writes/)
+    expect(prompt).toContain("Never because a folder, album, genre or comment mentions dubplates")
+    const user = buildUserPrompt({ filename: "Asco - Straight Drop (Dubplate).mp3", originalPath: "/m/Asco - STRAIGHT DROP .mp3", original: null, relDir: "", tags: { comment: "Identified by Dubplate" }, duration: 200, heuristic: null } as never, [])
+    expect(user).toContain("Filename it came with (before this app renamed it): Asco - STRAIGHT DROP .mp3")
+    expect(user).not.toContain("Identified by Dubplate")
   })
 
   it("takes a source's (Remix) off the title when the file isn't one, unless the audio's fingerprint says so", () => {
@@ -328,5 +363,37 @@ describe("tracks read before the checks", () => {
     expect(repo.getTrack(guessed.id)!.ai!.unsupported).toEqual(['version "Dubplate"'])
     expect(repo.getTrack(guessed.id)!.proposedName).toBe("Asco - Straight Drop.mp3")
     expect(repo.getTrack(typed.id)!.final!.version).toBe("Dubplate")
+  })
+
+  it("sends a file already cut as \"(Dubplate)\" back to Cut & Tag under its right name", async () => {
+    writeMp3(path.join(dir, "Asco - STRAIGHT DROP .mp3"))
+    writeMp3(path.join(dir, "Tenor Saw - Ring The Alarm.mp3"))
+    const lib = repo.addLibrary(dir, "Crate")
+    const ctx = { job: { id: "j" }, log: () => {}, signal: new AbortController().signal, setTotal: () => {}, tick: () => {}, message: () => {}, tracksChanged: () => {}, filesChanged: () => {}, report: () => {} } as unknown as JobContext
+    await scanLibrary(lib, DEFAULT_SETTINGS, ctx)
+    const [asco, tenor] = repo.queryTracks({ sort: "filename", dir: "asc" }).items
+    const reading = (artist: string, title: string) => ({ artists: [artist], featuring: [], title, version: "Dubplate", confidence: 0.9, reasoning: "", alternatives: [], searchQueries: [], provider: "t", model: "m" })
+    const decided = (artist: string, title: string) => ({ artists: [artist], featuring: [], artist, title, version: "Dubplate", confidence: 70, status: "review", basis: "ai", factors: [], clusters: [], warnings: [] }) as unknown as Decision
+    // Cut before the checks: renamed "(Dubplate)" and tagged so, as the AI wrongly proposed.
+    for (const [t, artist, title] of [[asco, "Asco", "Straight Drop"], [tenor, "Tenor Saw", "Ring The Alarm"]] as const) {
+      const filename = `${artist} - ${title} (Dubplate).mp3`
+      fs.renameSync(t.path, path.join(dir, filename))
+      repo.updateTrack(t.id, {
+        path: path.join(dir, filename),
+        filename,
+        tags: { artist, title: `${title} (Dubplate)` },
+        ai: reading(artist, title),
+        decision: decided(artist, title),
+        status: "done",
+        final: meta({ artists: [artist], title, version: "Dubplate" }),
+      })
+    }
+    // One cut before the app kept a copy of each file's first name and tags.
+    repo.updateTrack(tenor.id, { original: null })
+    await recheckFields([asco.id, tenor.id], DEFAULT_SETTINGS, ctx)
+    for (const [t, name] of [[asco, "Asco - Straight Drop.mp3"], [tenor, "Tenor Saw - Ring The Alarm.mp3"]] as const) {
+      const now = repo.getTrack(t.id)!
+      expect([now.status, now.final!.version, now.proposedName]).toEqual(["approved", undefined, name])
+    }
   })
 })

@@ -31,7 +31,13 @@ export interface ScoreInput {
   weights: Record<string, number>
   thresholds: { autoThreshold: number; reviewThreshold: number; parseOnlyMax: number }
   /** what the file itself says about its release, for choosing among the sources' releases */
-  context?: { filename: string; folders: string[]; preferOwnRelease: boolean }
+  context?: {
+    filename: string
+    folders: string[]
+    preferOwnRelease: boolean
+    /** what may say what kind of recording this is: its own first name and title (else the filename and title tag) */
+    versionSays?: string[]
+  }
   /** sources whose hits back others up but never confirm a track on their own */
   supporting?: Set<string>
 }
@@ -333,12 +339,15 @@ export function scoreTrack(input: ScoreInput): Decision {
   }
 
   // A version, or a "(Remix)" in a source's title, says what kind of recording this is: it only
-  // stands when something about the file says the same. (Similar files the owner approved can
-  // lead the AI to give every Asco tune "Dubplate"; the only remix a source knows isn't this file.)
+  // stands when the file's own name or title says the same, or a hit that matched the audio does.
+  // (Similar files the owner approved can lead the AI to give every Asco tune "Dubplate"; a
+  // "Dubplates" folder holds a collection, not this recording; the only remix a text search
+  // knows isn't this file.)
   if (input.context) {
-    const fileSays = [input.context.filename, ...input.context.folders, input.tags.title, input.tags.album, input.tags.comment, input.tags.grouping]
-    if (reading.version && !versionBacked(reading.version, [...fileSays, ...(best?.candidates ?? []).map((c) => c.title)])) {
-      checked.notes.push({ field: "version", fixed: true, message: `Version "${reading.version}" left out: nothing about the file or its sources says so` })
+    const fileSays = input.context.versionSays ?? [input.context.filename, input.tags.title]
+    const heard = (best?.candidates ?? []).filter((c) => c.fingerprint).map((c) => c.title)
+    if (reading.version && !versionBacked(reading.version, [...fileSays, ...heard])) {
+      checked.notes.push({ field: "version", fixed: true, message: `Version "${reading.version}" left out: the file's own name and title don't say so` })
       reading = { ...reading, version: undefined }
     }
     // An audio fingerprint knows the recording itself; a text search only knows the names.

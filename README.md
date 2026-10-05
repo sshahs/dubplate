@@ -436,9 +436,9 @@ into the file:
 | `(Official Video)`, `[HD]`, `320kbps`, `.mp3`, a site name or a track number in a title or artist | Taken out |
 | `Unknown Artist`, `Various Artists`, `VA` as an artist | Taken out |
 | A year before 1900 or in the future | Left empty |
-| A version that says what kind of recording it is (`Dubplate`, `Special`, `Remix`, `Live`, `VIP`…) when nothing about the file says so: not its name, folder or tags, nor a source that matched it | Left out. The AI is never shown a similar file's version unless this file shares it, so one approved dubplate can't make every Asco tune one |
+| A version that says what kind of recording it is (`Dubplate`, `Special`, `Remix`, `Live`, `VIP`…) when the file's own name and title don't say so | Left out. Only the file's own first name and title count, as they were before Dubplate changed anything (plus a source that matched the audio's fingerprint). A folder, album, genre or comment that mentions dubplates describes the collection, not the recording, so a "Dubplates" folder doesn't make each file in it one; set the version by hand or with bulk edit for those. A name Dubplate gave a file earlier doesn't count either, so a file wrongly cut as "(Dubplate)" goes back to Cut & Tag under its right name. The AI is never shown a similar file's version unless this file shares it, so one approved dubplate can't make every Asco tune one |
 | A source's `(Remix)`, `(Dub)` or `(Extended Version)` on a title the file never mentions | Taken off, unless the audio fingerprint matched that recording |
-| A version, year, label, riddim or event the AI gave that the file's name, folder and tags don't state | Left out as it answers, and listed on the track ("The AI's version "Dubplate" left out") |
+| A version, year, label, riddim or event the AI gave that the file's name, folder and tags don't state (for the version, its own name and title) | Left out as it answers, and listed on the track ("The AI's version "Dubplate" left out") |
 
 **The AI's examples.** With *Learn from my corrections* on, the AI is shown
 a few of your past approvals of similar files (sharing a word that isn't as
