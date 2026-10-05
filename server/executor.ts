@@ -18,7 +18,7 @@ import { placementLibraryId, settingsForLibrary } from "./library-settings"
 import { errorDetail } from "./logs"
 import { canonicalGenre } from "./genres"
 import { lyricsToEmbed, usableLyrics } from "./lyrics"
-import { extFor, metaFor, proposedFilename, targetFolder } from "./placement"
+import { extFor, listedPlacement, metaFor, proposedFilename, targetFolder } from "./placement"
 import { eligibility, submitTracks } from "./acoustid-submit"
 import { enqueueJob } from "./jobs"
 import { getLibrary, getTrack, getTracks, insertOperation, libraryForPath, listLibraries, listOperations, markOperationReverted, updateTrack } from "./repo"
@@ -135,7 +135,7 @@ export function buildPlan(tracks: Track[], settings: Settings, opts: { tagsOnly?
     }
     const toPath = path.join(dir, name)
     const rename = toPath !== t.path
-    const tags = meta && s.naming.writeTags ? tagsFor(meta, t.tags, s.naming, { ...extrasFor(t, s), placement: placements.get(t.id) }) : {}
+    const tags = meta && s.naming.writeTags ? tagsFor(meta, t.tags, s.naming, { ...extrasFor(t, s), placement: { ...listedPlacement(t, meta), ...placements.get(t.id) } }) : {}
     const tagChanges = tagDiff(t.tags, tags)
     if (!meta) issues.push("No approved artist/title yet")
     // Never cut a file with a name or tags that are plainly wrong: these need a person.

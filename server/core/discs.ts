@@ -3,7 +3,8 @@
 // sits on its record - and a folder called "CD1" or "Side A" is never taken
 // for an album or an artist. Pure, so the web app can use it too.
 
-import type { DiscPosition } from "../../shared/types"
+import type { DiscPosition, ReleasePosition } from "../../shared/types"
+import { normTitle } from "./normalize"
 
 const SIDES = "ABCDEFGH"
 const WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 }
@@ -174,10 +175,50 @@ export function positionLabel(tags: { track?: number }, p?: DiscPosition | null)
   return n ? String(n).padStart(2, "0") : undefined
 }
 
-/** The values naming templates get for where a track sits: {position}, {track}, {disc}. */
-export function placeValues(tags: { track?: number; disc?: number; discTotal?: number }, p?: DiscPosition | null): { position?: string; track?: string; disc?: string } {
-  const n = tags.track ?? (p?.side || p?.whole ? undefined : p?.number)
-  const d = multiDisc(tags, p)
-  return { position: positionLabel(tags, p), track: n ? String(n).padStart(2, "0") : undefined, disc: d ? String(d) : undefined }
+/**
+ * A source's track position as a release lists it: "5", "05", "A2", "1-05",
+ * "CD2-3", "2.07". Null for what isn't a position ("Video", "", "1a-b").
+ */
+export function releasePosition(raw: string | number | undefined | null, disc?: number, discs?: number): ReleasePosition | null {
+  const s = String(raw ?? "").trim()
+  const d = disc && disc > 0 ? disc : undefined
+  const ds = discs && discs > 0 ? discs : undefined
+  let m = s.match(/^(?:cd|dis[ck])?\s?(\d{1,2})\s?[-.]\s?(\d{1,3})$/i)
+  if (m) return { track: String(Number(m[2])), disc: Number(m[1]), ...(ds ? { discs: ds } : {}) }
+  m = s.match(/^\d{1,3}$/)
+  if (m && Number(s) > 0) return { track: String(Number(s)), ...(d ? { disc: d } : {}), ...(ds ? { discs: ds } : {}) }
+  m = s.match(/^([a-h])\s?(\d{1,2})$/i)
+  if (m) return { track: `${m[1].toUpperCase()}${Number(m[2])}`, ...(d ? { disc: d } : {}), ...(ds ? { discs: ds } : {}) }
+  return null
 }
 
+/**
+ * The values naming templates get for where a track sits: {position}, {track}, {disc}.
+ * What the file says (its track tag, a number or "A1" in its name, a CD2 folder) comes
+ * first; where it says nothing, where a source lists the track on the album it's given.
+ */
+export function placeValues(
+  tags: { track?: number; disc?: number; discTotal?: number },
+  p?: DiscPosition | null,
+  onRelease?: ReleasePosition | null
+): { position?: string; track?: string; disc?: string } {
+  const own = positionLabel(tags, p)
+  const listed = onRelease?.track
+  const listedNumber = listed && /^\d+$/.test(listed) ? Number(listed) : undefined
+  const n = tags.track ?? (p?.side || p?.whole ? undefined : p?.number) ?? (own ? undefined : listedNumber)
+  const d = multiDisc(tags, p) ?? (own || !onRelease ? undefined : multiDisc({ disc: onRelease.disc, discTotal: onRelease.discs }))
+  const position = own ?? (listed ? (listedNumber ? String(listedNumber).padStart(2, "0") : listed) : undefined)
+  return { position, track: n ? String(n).padStart(2, "0") : undefined, disc: d ? String(d) : undefined }
+}
+
+/**
+ * Where a source lists the track on its album ("5", "A2", disc 2), for the file that
+ * doesn't say: only when the file is going into that same album (its own album tag, or
+ * the one it's given, is the release the number comes from).
+ */
+export function listedPosition(t: { decision?: { album?: string; position?: ReleasePosition } | null; tags: { album?: string } }, meta: { album?: string }): ReleasePosition | null {
+  const p = t.decision?.position
+  const album = t.tags.album || meta.album
+  if (!p || !album || !t.decision?.album || normTitle(album) !== normTitle(t.decision.album)) return null
+  return p
+}

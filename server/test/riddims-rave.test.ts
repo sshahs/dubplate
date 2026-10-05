@@ -141,8 +141,8 @@ describe("riddim databases", () => {
 
   it("a reading's riddim is part of what a lookup is kept under", () => {
     const q = tune(["Sister Nancy"], "Bam Bam")
-    expect(lookupKey("riddimsworld", q)).toBe("riddimsworld::sister nancy::bam bam::::40")
-    expect(lookupKey("riddimsworld", { ...q, riddim: "Stalag" })).toBe("riddimsworld::sister nancy::bam bam::::40::riddim:stalag")
+    expect(lookupKey("riddimsworld", q)).toBe("v2::riddimsworld::sister nancy::bam bam::::40")
+    expect(lookupKey("riddimsworld", { ...q, riddim: "Stalag" })).toBe("v2::riddimsworld::sister nancy::bam bam::::40::riddim:stalag")
   })
 })
 

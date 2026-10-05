@@ -305,6 +305,13 @@ export interface DiscPosition {
   part?: number
 }
 
+/** Where a track sits on a release, as a source lists it: "5", "A2"; its disc, and how many discs the release has. */
+export interface ReleasePosition {
+  track: string
+  disc?: number
+  discs?: number
+}
+
 export interface HeuristicParse extends TrackReading {
   cleaned: string
   trackNumber?: string
@@ -381,6 +388,8 @@ export interface ReleaseInfo {
   /** the recording on it (MusicBrainz), and that recording's length in seconds */
   recordingId?: string
   length?: number
+  /** where the track sits on this release */
+  position?: ReleasePosition
 }
 
 export interface Candidate {
@@ -390,6 +399,8 @@ export interface Candidate {
   artists?: string[]
   title: string
   album?: string
+  /** where the track sits on that album, as the source lists it */
+  position?: ReleasePosition
   year?: number
   label?: string
   /** the riddim a tune is voiced on, where the source names it */
@@ -458,6 +469,8 @@ export interface Decision {
   warnings: string[]
   /** the release chosen for the recording, and why */
   release?: ReleaseChoice | null
+  /** where the track sits on the album it's given, as a source lists it - for {position} when the file doesn't say */
+  position?: ReleasePosition & { from: string }
   /** what kind of recording this is, and whether length and fingerprint back it up */
   versionCheck?: VersionCheck
   /** which reading or source each field came from */

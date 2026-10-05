@@ -17,7 +17,7 @@ import type {
   VersionCheck,
 } from "../../shared/types"
 import { checkFields, isPlaceholder, needsALook, versionBacked, withoutUnbackedVersions } from "../../shared/fields"
-import { artistSimilarity, collapseSpaces, normArtist, similarity, splitArtists, titleSimilarity } from "./normalize"
+import { artistSimilarity, collapseSpaces, normArtist, normTitle, similarity, splitArtists, titleSimilarity } from "./normalize"
 import { KIND_LABEL, pickRelease, releasesOf } from "./releases"
 import { withoutDiscFolders } from "./discs"
 
@@ -391,8 +391,26 @@ export function scoreTrack(input: ScoreInput): Decision {
     versionCheck,
     provenance,
     sourceGenres: sourceGenresOf(best?.candidates ?? []),
+    ...positionOnAlbum(reading.album, release, basis === "sources" ? (best?.candidates ?? []) : []),
     ...(checked.notes.length ? { checks: checked.notes } : {}),
   }
+}
+
+/** Sources by how far their track numbers are trusted: catalogues first, then the stores. */
+const POSITION_ORDER = ["musicbrainz", "discogs", "itunes", "spotify"]
+
+/**
+ * Where the track sits on the album it's given, as a source lists it: the chosen
+ * release's own track number, else a hit on that same album that numbers it. For
+ * {position} and the track number when the file says nothing itself.
+ */
+export function positionOnAlbum(album: string | undefined, release: ReleaseChoice | null, cands: Candidate[]): { position?: Decision["position"] } {
+  if (!album) return {}
+  const same = (t: string | undefined) => !!t && normTitle(t) === normTitle(album)
+  if (release?.release.position && same(release.release.title)) return { position: { ...release.release.position, from: sourceName(release.release.source) } }
+  const rank = (s: string) => (POSITION_ORDER.indexOf(s) + 1 || POSITION_ORDER.length + 1)
+  const hit = cands.filter((c) => c.position && same(c.album)).sort((a, b) => rank(a.source) - rank(b.source))[0]
+  return hit?.position ? { position: { ...hit.position, from: hit.sourceLabel } } : {}
 }
 
 const SOURCE_NAMES: Record<string, string> = { musicbrainz: "MusicBrainz", discogs: "Discogs", acoustid: "AcoustID", spotify: "Spotify", itunes: "Apple Music", deezer: "Deezer" }

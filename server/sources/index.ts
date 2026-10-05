@@ -105,7 +105,8 @@ const DAY = 86_400_000
  */
 export function lookupKey(sourceId: string, q: SourceQuery): string {
   const bucket = q.duration ? Math.round(q.duration / 5) : "-"
-  const key = [sourceId, q.artists.map(normArtist).join("|"), normTitle(q.title), normTitle(q.version ?? ""), bucket]
+  // "v2": answers kept before sources listed where a track sits on its release are asked again.
+  const key = ["v2", sourceId, q.artists.map(normArtist).join("|"), normTitle(q.title), normTitle(q.version ?? ""), bucket]
   // A riddim decides what Riddims World finds, so a reading naming one is asked again.
   if (q.riddim) key.push(`riddim:${normTitle(q.riddim)}`)
   return key.join("::")

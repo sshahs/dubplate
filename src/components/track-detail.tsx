@@ -12,13 +12,14 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
-import { describePosition, placeValues } from "@core/discs"
+import { describePosition, listedPosition, placeValues } from "@core/discs"
 import { renderTemplate } from "@core/naming"
 import { checkFields } from "@shared/fields"
 import { RISK_LABEL, riskOf } from "@shared/risk"
 import type { Candidate, FinalMeta, Track } from "@shared/types"
 import { AudioPlayer } from "@/components/audio-player"
 import { ConfidenceDial, StatusBadge } from "@/components/confidence"
+import { ListenButton } from "@/components/listen-dialog"
 import { fromDraft, MetaEditor, toDraft, type MetaDraft } from "@/components/meta-editor"
 import { QueryError } from "@/components/query-error"
 import { ArtworkPanel, AudioQualityPanel, FileProblemsPanel, LyricsPanel, MixesPanel, TempoKeyPanel } from "@/components/track-extras"
@@ -88,7 +89,7 @@ export function TrackDetail({
     if (!meta.title || !meta.artists.length) return null
     // A library can have its own naming template.
     const template = libraries?.find((l) => l.id === track.libraryId)?.settings.template ?? settings.naming.template
-    return `${renderTemplate(template, meta, settings.naming, placeValues(track.tags, track.heuristic?.position))}.${track.ext.toLowerCase()}`
+    return `${renderTemplate(template, meta, settings.naming, placeValues(track.tags, track.heuristic?.position, listedPosition(track, meta)))}.${track.ext.toLowerCase()}`
   }, [draft, settings, track, libraries])
 
   const refresh = () => {
@@ -241,6 +242,8 @@ export function TrackDetail({
           <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} data-icon="inline-start" />
           Leave as-is
         </Button>
+        {/* Like Shazam: what the audio itself sounds like, for files with nothing else to go on. */}
+        <ListenButton track={track} onUse={(c) => editDraft(candidateToMeta(c, draft))} />
         <Button variant="ghost" onClick={() => rerun.mutate()} disabled={rerun.isPending}>
           <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} data-icon="inline-start" />
           Re-run
@@ -467,6 +470,16 @@ export function TrackDetail({
                 <dd>
                   {describePosition(track.heuristic?.position, track.tags.track, track.tags.disc, track.tags.discTotal)}
                   {track.heuristic?.position?.label && !track.heuristic.position.whole ? <span className="text-muted-foreground"> (named “{track.heuristic.position.label}”)</span> : null}
+                </dd>
+              </>
+            )}
+            {!describePosition(track.heuristic?.position, track.tags.track, track.tags.disc, track.tags.discTotal) && d?.position && (
+              <>
+                <dt className="text-muted-foreground">Position</dt>
+                <dd>
+                  {/^\d+$/.test(d.position.track) ? `Track ${d.position.track}` : d.position.track}
+                  {d.position.disc && ((d.position.discs ?? 0) > 1 || d.position.disc > 1) ? ` of disc ${d.position.disc}` : ""} on {d.album}
+                  <span className="text-muted-foreground"> (as {d.position.from} lists it - the file doesn't say)</span>
                 </dd>
               </>
             )}

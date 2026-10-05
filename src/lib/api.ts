@@ -376,6 +376,8 @@ export const api = {
   /** Use the found artwork (written when cut), or keep the file's own picture. */
   chooseArtwork: (ids: number[], use: boolean) => post<{ changed: number; tracks?: Track }>("/api/artwork/choose", { ids, use }),
   rescoreOne: (id: number) => post<Track>(`/api/tracks/${id}/rescore`),
+  /** Identify a track by its sound alone (AcoustID): what it heard, best first. */
+  listen: (id: number) => post<{ suggestions: Candidate[]; unnamed: number; track: Track }>(`/api/tracks/${id}/listen`),
   insight: (id: number) => get<TrackInsight>(`/api/tracks/${id}/insight`),
   retag: (s: Selection) => post<Job>("/api/retag", sel(s)),
   mixes: (id: number) => get<MixSuggestion[]>(`/api/tracks/${id}/mixes`),

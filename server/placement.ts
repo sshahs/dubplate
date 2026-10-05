@@ -5,10 +5,11 @@ import { checkFields } from "../shared/fields"
 import { formatKey } from "../shared/keys"
 import type { FinalMeta, Settings, Track } from "../shared/types"
 import { bpmRange, decadeOf, initialOf, renderFolderTemplate, type FolderValues } from "./core/folders"
-import { placeValues } from "./core/discs"
+import { listedPosition, placeValues } from "./core/discs"
 import { decisionToFinal, formatArtist, renderTemplate } from "./core/naming"
 import { canonicalGenre } from "./genres"
 import { placementLibraryId, settingsForLibrary } from "./library-settings"
+import type { Placement } from "./positions"
 
 export function metaFor(t: Track): FinalMeta | null {
   const meta = t.final ?? (t.decision && t.decision.title && t.decision.artists.length ? decisionToFinal(t.decision) : null)
@@ -16,12 +17,20 @@ export function metaFor(t: Track): FinalMeta | null {
   return meta ? checkFields(meta, { names: false }).fields : null
 }
 
+/** What a source's position adds to the file's tags: its track number (and disc of a set), only as numbers. */
+export function listedPlacement(t: Pick<Track, "decision" | "tags">, meta: FinalMeta): Placement | undefined {
+  const p = listedPosition(t, meta)
+  if (!p || !/^\d+$/.test(p.track)) return undefined
+  const multi = (p.discs ?? 0) > 1 || (p.disc ?? 0) > 1
+  return { track: Number(p.track), ...(multi && p.disc ? { disc: p.disc, ...(p.discs ? { discTotal: p.discs } : {}) } : {}) }
+}
+
 /** The name the track would be cut to, under its library's naming template (an inbox: the library it feeds). */
 export function proposedFilename(t: Track, settings: Settings): string | null {
   const meta = metaFor(t)
   if (!meta || !meta.title || !meta.artists.length) return null
   const s = settingsForLibrary(settings, placementLibraryId(t.libraryId))
-  const base = renderTemplate(s.naming.template, meta, s.naming, placeValues(t.tags, t.heuristic?.position))
+  const base = renderTemplate(s.naming.template, meta, s.naming, placeValues(t.tags, t.heuristic?.position, listedPosition(t, meta)))
   return base ? `${base}.${extFor(t, settings)}` : null
 }
 
@@ -51,7 +60,7 @@ export function folderValues(t: Track, meta: FinalMeta, settings: Settings): Fol
     firstartist: meta.artists[0] ?? "",
     albumartist: t.tags.albumArtist || artist,
     album: t.tags.album || meta.album || "",
-    disc: placeValues(t.tags, t.heuristic?.position).disc ?? "",
+    disc: placeValues(t.tags, t.heuristic?.position, listedPosition(t, meta)).disc ?? "",
     year: year ? String(year) : "",
     decade: decadeOf(year),
     label: t.tags.label || meta.label || "",

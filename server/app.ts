@@ -15,6 +15,7 @@ import { listModels, testProvider } from "./ai/providers"
 import { usageReport } from "./ai/usage"
 import { analyzeTracks } from "./analysis"
 import { artBytes, chooseArtwork, findArtwork, originalArt, thumbnail } from "./art"
+import { cantListen, listenTo } from "./listen"
 import { lyricsForTrack, lyricsTracks, topUpLyrics } from "./lyrics"
 import { checkSubmissions, eligibility, listSubmissions, submitTracks } from "./acoustid-submit"
 import { completeMbSubmission, listMbSubmissions, markMbSubmitted, startMbSubmission } from "./musicbrainz-seed"
@@ -33,7 +34,7 @@ import { plainText } from "./core/plain-text"
 import { checkFields } from "../shared/fields"
 import { buildPlan, executePlan, metaFor, proposedFilename, rewind } from "./executor"
 import { activeJobs, cancelJob, emit, enqueueJob, listJobs, log, recentLogEvents, subscribe } from "./jobs"
-import { clearLogs, errorDetail, logOptions, logSummary, logText, queryLogs, type LogFilter } from "./logs"
+import { clearLogs, errorDetail, errorText, logOptions, logSummary, logText, queryLogs, type LogFilter } from "./logs"
 import { isBackup, makeBackup, restoreBackup } from "./backup"
 import { duplicateGroups, setAside, setAsideCount, validResolutions, type Resolution } from "./duplicates"
 import { sendChat, type ChatChannel } from "./integrations/chat"
@@ -526,6 +527,22 @@ export function createApp() {
     const t = repo.getTrack(Number(c.req.param("id")))
     if (!t) return c.json({ error: "Not found" }, 404)
     return c.json(scoreAndSave(t, settingsNow()))
+  })
+
+  /** Identify a track by its sound alone (AcoustID), with what it heard as suggestions. */
+  app.post("/api/tracks/:id/listen", async (c) => {
+    const t = repo.getTrack(Number(c.req.param("id")))
+    if (!t) return c.json({ error: "Not found" }, 404)
+    const settings = settingsNow()
+    const why = cantListen(settings)
+    if (why) return c.json({ error: why }, 409)
+    if (t.missing || !fs.existsSync(t.path)) return c.json({ error: "The file isn't there any more - rescan the library" }, 404)
+    try {
+      return c.json(await listenTo(t, settings, c.req.raw.signal))
+    } catch (err) {
+      log("warn", `Couldn't listen to ${t.filename}: ${errorText(err)}`, { area: "identify", trackId: t.id, detail: errorDetail(err) })
+      return c.json({ error: `Couldn't listen to the file: ${errorText(err)}` }, 502)
+    }
   })
 
   /** A file with byte ranges, so the browser can seek. */
