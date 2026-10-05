@@ -473,6 +473,14 @@ The default template is `{artist} - {title}`. The available tokens are
 with no value leaves no gap, so `{position} - {artist} - {title}` is just
 `Artist - Title` for a file with no position.
 
+Where a track sits comes from the file first: its track-number tag, a number
+or `A1` at the start of its name, a `CD2` or `Side B` folder. A file that says
+none of that gets the position the matched release lists (MusicBrainz,
+Discogs, Apple Music or Spotify), as long as it's going into that same album,
+and that track number is written into its tags too. The track's **File** tab
+says where its position came from. Tracks identified before this need a
+**Re-run** to pick up their sources' positions.
+
 - Clashes are joined with ` vs `, collaborations with ` & `, and three or more names become `A, B & C`.
 - Featured artists go in the artist (`A feat. B - Title`) or the title (`A - Title (feat. B)`), as you prefer.
 - Characters that filesystems reject are replaced. Names that would collide are **blocked, never overwritten**.

@@ -1,7 +1,8 @@
 // Mainstream catalogue APIs: MusicBrainz, Discogs, Last.fm, Spotify,
 // Apple Music (iTunes Search) and Deezer.
 
-import type { Candidate, ReleaseInfo } from "../../shared/types"
+import type { Candidate, ReleaseInfo, ReleasePosition } from "../../shared/types"
+import { releasePosition } from "../core/discs"
 import { titleSimilarity } from "../core/normalize"
 import { discogsKind, isOwnRelease, mbKind, spotifyKind } from "../core/releases"
 import { HttpError, httpJson } from "./http"
@@ -32,6 +33,16 @@ interface MbRelease {
   country?: string
   "artist-credit"?: { name: string; artist?: { name: string } }[]
   "release-group"?: { id?: string; "primary-type"?: string; "secondary-types"?: string[] }
+  /** the medium this recording is on, with the track's place on it */
+  media?: { position?: number; format?: string; track?: { number?: string; position?: number }[] }[]
+  "medium-count"?: number
+}
+
+/** Where the recording sits on a MusicBrainz release: its track number ("5", "A2") and disc. */
+function mbPosition(rel: MbRelease): ReleasePosition | undefined {
+  const medium = rel.media?.[0]
+  const track = medium?.track?.[0]
+  return releasePosition(track?.number ?? track?.position, medium?.position, rel["medium-count"]) ?? undefined
 }
 
 /** A recording's releases as ReleaseInfo, each typed by its release group. */
@@ -53,6 +64,7 @@ function mbReleases(r: MbRecording, artists: string[]): ReleaseInfo[] {
       typeText: [group["primary-type"], ...(group["secondary-types"] ?? [])].filter(Boolean).join(" + ") || undefined,
       recordingId: r.id,
       length: r.length ? r.length / 1000 : undefined,
+      position: mbPosition(rel),
     }
   })
 }
@@ -80,6 +92,7 @@ export const musicbrainz: SourceAdapter = {
         artists: credits.map((c) => c.name),
         title: r.title,
         album: r.releases?.[0]?.title,
+        position: r.releases?.[0] ? mbPosition(r.releases[0]) : undefined,
         year: yearOf(r["first-release-date"] ?? r.releases?.[0]?.date),
         duration: r.length ? r.length / 1000 : undefined,
         url: `https://musicbrainz.org/recording/${r.id}`,
@@ -118,7 +131,13 @@ export interface DiscogsRelease {
   genres?: string[]
   styles?: string[]
   images?: { type?: string; uri?: string }[]
-  tracklist?: { title: string; duration?: string; type_?: string; artists?: { name: string; join?: string }[] }[]
+  tracklist?: { title: string; position?: string; duration?: string; type_?: string; artists?: { name: string; join?: string }[] }[]
+}
+
+/** Where a track sits on a Discogs release ("A2", "3", "1-05"), with how many discs its tracklist runs to. */
+function discogsPosition(rel: DiscogsRelease, position?: string): ReleasePosition | undefined {
+  const discs = new Set((rel.tracklist ?? []).map((t) => releasePosition(t.position)?.disc).filter((d): d is number => !!d))
+  return releasePosition(position, undefined, discs.size > 1 ? discs.size : undefined) ?? undefined
 }
 
 function discogsDuration(d?: string) {
@@ -176,6 +195,7 @@ export function releaseCandidate(rel: DiscogsRelease, title: string, opts: { sou
     artists: credits.map((a) => cleanArtistName(a.name)),
     title: best.t.title,
     album: rel.title,
+    position: discogsPosition(rel, best.t.position),
     year: rel.year || opts.year,
     label: rel.labels?.[0]?.name,
     genre: [...(rel.genres ?? []), ...(rel.styles ?? [])].join(", ") || undefined,
@@ -186,7 +206,7 @@ export function releaseCandidate(rel: DiscogsRelease, title: string, opts: { sou
     externalId: String(rel.id),
     ids: { discogsReleaseId: String(rel.id) },
     artwork: (rel.images?.find((i) => i.type === "primary") ?? rel.images?.[0])?.uri || undefined,
-    releases: [discogsReleaseInfo(rel, credits.map((a) => cleanArtistName(a.name)), discogsDuration(best.t.duration))],
+    releases: [{ ...discogsReleaseInfo(rel, credits.map((a) => cleanArtistName(a.name)), discogsDuration(best.t.duration)), position: discogsPosition(rel, best.t.position) }],
   }
 }
 
@@ -279,6 +299,8 @@ export const spotify: SourceAdapter = {
           name: string
           popularity?: number
           duration_ms: number
+          track_number?: number
+          disc_number?: number
           artists: { name: string }[]
           album: { name: string; album_type?: string; artists?: { name: string }[]; release_date?: string; images?: { url: string; width?: number }[] }
           external_urls?: { spotify?: string }
@@ -296,6 +318,7 @@ export const spotify: SourceAdapter = {
       artists: t.artists.map((a) => a.name),
       title: t.name,
       album: t.album.name,
+      position: releasePosition(t.track_number, t.disc_number) ?? undefined,
       year: yearOf(t.album.release_date),
       duration: t.duration_ms / 1000,
       url: t.external_urls?.spotify,
@@ -314,6 +337,7 @@ export const spotify: SourceAdapter = {
           date: t.album.release_date,
           typeText: t.album.album_type,
           length: t.duration_ms / 1000,
+          position: releasePosition(t.track_number, t.disc_number) ?? undefined,
         },
       ],
     }))
@@ -330,7 +354,20 @@ export const itunes: SourceAdapter = {
     if (q.descriptiveTitle && !q.artist) return []
     const term = q.descriptiveTitle ? q.artist : q.query
     const j = await httpJson<{
-      results?: { trackId: number; trackName: string; artistName: string; collectionName?: string; releaseDate?: string; trackTimeMillis?: number; trackViewUrl?: string; primaryGenreName?: string; artworkUrl100?: string }[]
+      results?: {
+        trackId: number
+        trackName: string
+        artistName: string
+        collectionName?: string
+        releaseDate?: string
+        trackTimeMillis?: number
+        trackViewUrl?: string
+        primaryGenreName?: string
+        artworkUrl100?: string
+        trackNumber?: number
+        discNumber?: number
+        discCount?: number
+      }[]
     }>(`https://itunes.apple.com/search?media=music&entity=song&limit=10&term=${enc(term)}`, { signal })
     return (j?.results ?? []).map((r) => ({
       source: "itunes" as const,
@@ -338,6 +375,7 @@ export const itunes: SourceAdapter = {
       artist: r.artistName,
       title: r.trackName,
       album: r.collectionName,
+      position: releasePosition(r.trackNumber, r.discNumber, r.discCount) ?? undefined,
       year: yearOf(r.releaseDate),
       genre: r.primaryGenreName,
       genres: r.primaryGenreName ? [r.primaryGenreName] : undefined,
