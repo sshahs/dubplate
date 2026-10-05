@@ -369,8 +369,12 @@ export const api = {
   /** Thumbnail URL; the hash in it keeps the browser cache honest. */
   artUrl: (t: { id: number; art: { hash: string } | null; artFound: { hash: string } | null }, which: "current" | "found", size = 160) => {
     const ref = which === "found" ? t.artFound : t.art
-    return ref ? `/api/tracks/${t.id}/art?which=${which}&size=${size}&h=${ref.hash.slice(0, 12)}` : null
+    return ref ? api.artUrlFor(t.id, which, ref.hash, size) : null
   },
+  /** "original": the picture the file came with, kept when a cut replaced it. */
+  artUrlFor: (trackId: number, which: "current" | "found" | "original", hash: string, size = 160) => `/api/tracks/${trackId}/art?which=${which}&size=${size}&h=${hash.slice(0, 12)}`,
+  /** Use the found artwork (written when cut), or keep the file's own picture. */
+  chooseArtwork: (ids: number[], use: boolean) => post<{ changed: number; tracks?: Track }>("/api/artwork/choose", { ids, use }),
   rescoreOne: (id: number) => post<Track>(`/api/tracks/${id}/rescore`),
   insight: (id: number) => get<TrackInsight>(`/api/tracks/${id}/insight`),
   retag: (s: Selection) => post<Job>("/api/retag", sel(s)),

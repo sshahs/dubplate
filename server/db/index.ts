@@ -316,6 +316,10 @@ export const MIGRATIONS: string[] = [
   CREATE INDEX idx_logs_track ON logs(track_id);
   CREATE INDEX idx_logs_at ON logs(at);
   `,
+  // 9: found artwork a person turned down, so it isn't offered again.
+  `
+  ALTER TABLE track_data ADD COLUMN art_declined_json TEXT;
+  `,
 ]
 
 export type Db = DatabaseSync

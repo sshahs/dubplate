@@ -14,7 +14,7 @@ import { activeProvider, interpretTrack } from "./ai/interpreter"
 import { listModels, testProvider } from "./ai/providers"
 import { usageReport } from "./ai/usage"
 import { analyzeTracks } from "./analysis"
-import { findArtwork, thumbnail } from "./art"
+import { artBytes, chooseArtwork, findArtwork, originalArt, thumbnail } from "./art"
 import { lyricsForTrack, lyricsTracks, topUpLyrics } from "./lyrics"
 import { checkSubmissions, eligibility, listSubmissions, submitTracks } from "./acoustid-submit"
 import { completeMbSubmission, listMbSubmissions, markMbSubmitted, startMbSubmission } from "./musicbrainz-seed"
@@ -565,8 +565,16 @@ export function createApp() {
   // ---- artwork ----
   app.get("/api/tracks/:id/art", async (c) => {
     const t = repo.getTrack(Number(c.req.param("id")))
-    const ref = c.req.query("which") === "found" ? t?.artFound : t?.art
+    const which = c.req.query("which")
+    // "original": the picture the file came with, kept when a cut replaced it.
+    const ref = which === "found" ? t?.artFound : which === "original" ? t && originalArt(t) : t?.art
     if (!t || !ref) return c.json({ error: "No artwork" }, 404)
+    // Full size, to look at closely before choosing.
+    if (Number(c.req.query("size")) >= 1000) {
+      const bytes = await artBytes(t, ref)
+      if (!bytes) return c.json({ error: "Artwork unavailable" }, 404)
+      return c.body(bytes as Uint8Array<ArrayBuffer>, 200, { "content-type": ref.mime, "cache-control": "private, max-age=31536000, immutable" })
+    }
     const img = await thumbnail(t, ref, Number(c.req.query("size")) || 160)
     if (!img) return c.json({ error: "Artwork unavailable" }, 404)
     // The URL carries the picture's hash, so a cached copy never goes stale.
@@ -582,11 +590,33 @@ export function createApp() {
     return c.json(repo.getTrack(t.id))
   })
 
+  /** Keep the file's own picture: the found one goes, and isn't offered for this track again. */
   app.delete("/api/tracks/:id/artwork/found", (c) => {
-    const id = Number(c.req.param("id"))
-    if (!repo.getTrack(id)) return c.json({ error: "Not found" }, 404)
-    repo.updateTrack(id, { artFound: null })
-    return c.json(repo.getTrack(id))
+    const t = repo.getTrack(Number(c.req.param("id")))
+    if (!t) return c.json({ error: "Not found" }, 404)
+    const patch = chooseArtwork(t, false)
+    if (patch) repo.updateTrack(t.id, patch)
+    return c.json(repo.getTrack(t.id))
+  })
+
+  /** A person's answer about found artwork, for one track or many: use it, or keep the file's own picture. */
+  app.post("/api/artwork/choose", async (c) => {
+    const body = await c.req.json<{ ids?: number[]; use?: boolean }>()
+    const ids = (body.ids ?? []).filter((n) => Number.isInteger(n))
+    if (!ids.length || typeof body.use !== "boolean") return c.json({ error: "Say which tracks, and whether to use the new artwork" }, 400)
+    const changed: number[] = []
+    for (const id of ids) {
+      const t = repo.getTrack(id)
+      const patch = t && chooseArtwork(t, body.use)
+      if (!patch) continue
+      repo.updateTrack(id, patch)
+      changed.push(id)
+    }
+    if (changed.length) {
+      log("info", `${body.use ? "Using the new artwork" : "Keeping the files' own artwork"} for ${changed.length} track${changed.length === 1 ? "" : "s"}`, { area: "files" })
+      emit({ type: "tracks", ids: changed })
+    }
+    return c.json({ changed: changed.length, tracks: ids.length === 1 ? repo.getTrack(ids[0]) : undefined })
   })
 
   app.post("/api/artwork", async (c) => {

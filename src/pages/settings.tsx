@@ -791,6 +791,20 @@ export default function SettingsPage() {
                     <SettingRow title="Replace covers files already have" description="Off: files with their own picture keep it.">
                       <Switch checked={draft.artwork.replaceExisting} onCheckedChange={(v) => set((d) => void (d.artwork.replaceExisting = v))} aria-label="Replace existing covers" />
                     </SettingRow>
+                    <SettingRow
+                      title="Ask before using new artwork"
+                      description="Found artwork waits for your OK - on the track, or with Compare & choose in Cut & Tag - showing the file's picture before and after. Until then cutting leaves the file's own picture alone."
+                    >
+                      <Choice
+                        value={draft.artwork.confirm ?? "always"}
+                        items={[
+                          { value: "always", label: "Every time" },
+                          { value: "replacing", label: "Only when it replaces a picture" },
+                          { value: "never", label: "Never - use it straight away" },
+                        ]}
+                        onChange={(v) => set((d) => void (d.artwork.confirm = v))}
+                      />
+                    </SettingRow>
                   </SettingRows>
                 </CardContent>
               </Card>

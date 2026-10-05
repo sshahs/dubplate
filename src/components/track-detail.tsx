@@ -181,7 +181,7 @@ export function TrackDetail({
       <AudioPlayer src={api.audioUrl(track.id)} />
 
       <div className={cn("grid gap-3", !compact && "sm:grid-cols-2")}>
-        <ArtworkPanel track={track} embed={settings?.artwork.embed ?? true} replace={settings?.artwork.replaceExisting ?? false} />
+        <ArtworkPanel track={track} embed={settings?.artwork.embed ?? true} replace={settings?.artwork.replaceExisting ?? false} confirm={settings?.artwork.confirm ?? "always"} />
         <TempoKeyPanel track={track} notation={settings?.analysis.keyNotation ?? "musical"} />
         <FileProblemsPanel track={track} fixExtensions={settings?.naming.fixExtensions ?? true} />
         <AudioQualityPanel track={track} />

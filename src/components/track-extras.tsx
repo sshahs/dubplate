@@ -6,22 +6,15 @@ import { toast } from "sonner"
 import { formatBpm, parseKey, toCamelot } from "@shared/keys"
 import { lyricLines, lyricsKey } from "@shared/lyrics"
 import { fileProblems } from "@shared/problems"
-import type { FileProblem, Track } from "@shared/types"
+import type { ArtworkConfirm, FileProblem, Track } from "@shared/types"
+import { ArtCompare, ArtCompareOriginal } from "@/components/art-compare"
 import { Cover } from "@/components/cover"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { api } from "@/lib/api"
+import { artSourceName } from "@/lib/art"
 import { cn } from "@/lib/utils"
-
-const SOURCE_NAMES: Record<string, string> = {
-  musicbrainz: "Cover Art Archive",
-  discogs: "Discogs",
-  bandcamp: "Bandcamp",
-  itunes: "Apple Music",
-  deezer: "Deezer",
-  spotify: "Spotify",
-}
 
 function useTrackUpdate(trackId: number) {
   const qc = useQueryClient()
@@ -31,57 +24,104 @@ function useTrackUpdate(trackId: number) {
   }
 }
 
-/** The file's picture, the one Dubplate found to replace it, and what happens on cut. */
-export function ArtworkPanel({ track, embed, replace }: { track: Track; embed: boolean; replace: boolean }) {
+/**
+ * The file's picture, the one Dubplate found to replace it, side by side, and a
+ * plain question: use it or keep the original? Found artwork waits for that
+ * answer (Settings → Artwork) before it's written to the file.
+ */
+export function ArtworkPanel({ track, embed, replace, confirm }: { track: Track; embed: boolean; replace: boolean; confirm: ArtworkConfirm }) {
   const saved = useTrackUpdate(track.id)
+  const qc = useQueryClient()
   const find = useMutation({
     mutationFn: () => api.findTrackArtwork(track.id),
     onSuccess: (t) => {
       saved(t)
-      toast(t.artFound ? "Found artwork" : "The file's own artwork is the best match")
+      toast(t.artFound ? "Found artwork - compare it with the file's own" : "The file's own artwork is the best match")
     },
     onError: (e) => toast.error(e.message),
   })
-  const drop = useMutation({ mutationFn: () => api.dropFoundArtwork(track.id), onSuccess: saved, onError: (e) => toast.error(e.message) })
+  const choose = useMutation({
+    mutationFn: (use: boolean) => api.chooseArtwork([track.id], use),
+    onSuccess: (r, use) => {
+      if (r.tracks) saved(r.tracks)
+      toast(use ? (track.status === "done" ? "Using the new artwork - write it to the file when you're ready" : "Using the new artwork - it's written when you cut") : "Keeping the file's own picture")
+    },
+    onError: (e) => toast.error(e.message),
+  })
+  const write = useMutation({
+    mutationFn: () => api.retag({ ids: [track.id] }),
+    onSuccess: () => {
+      toast("Writing the artwork into the file…")
+      void qc.invalidateQueries({ queryKey: ["tracks"] })
+    },
+    onError: (e) => toast.error(e.message),
+  })
   const found = track.artFound
-  const willEmbed = !!found && embed && (!track.art || replace)
+  const original = track.original?.tags?.cover
+  const originalPic = original && original !== track.art?.hash ? { hash: original } : null
+  const willWrite = !!found && embed && (!track.art || replace)
+  const needsOk = confirm === "always" || (confirm === "replacing" && !!track.art)
+  const waiting = willWrite && needsOk && !found.confirmed
   const size = (a: { width?: number; height?: number } | null) => (a?.width ? `${a.width}×${a.height}` : "")
 
   let line: string
   if (found) {
-    const from = SOURCE_NAMES[found.source] ?? found.sourceLabel ?? found.source
-    line = willEmbed
-      ? `From ${from}${size(found) ? ` · ${size(found)}` : ""} - embedded when you cut.`
-      : !embed
-        ? `From ${from}. Embedding is off in Settings.`
-        : `From ${from}. The file already has a picture; replacing it is off in Settings.`
+    line = !embed
+      ? "Embedding artwork is off in Settings, so the file keeps its own."
+      : !willWrite
+        ? "The file already has a picture, and replacing it is off in Settings."
+        : waiting
+          ? `Use the new artwork from ${artSourceName(found)}? Nothing is written until you say so.`
+          : track.status === "done"
+            ? "You chose the new artwork. Write it into the file to finish."
+            : "You chose the new artwork: it's written when you cut."
   } else line = track.art ? `The file has its own picture${size(track.art) ? ` (${size(track.art)})` : ""}.` : "No picture yet."
 
   return (
-    <div className="bg-card/60 flex items-center gap-3 rounded-2xl border p-3">
-      <div className="flex shrink-0 items-center gap-1.5">
-        {found && track.art && <Cover track={track} which="current" size={44} className="opacity-60" />}
-        <Cover track={track} which={found ? "found" : "current"} size={64} />
-      </div>
-      <div className="min-w-0 flex-1">
+    <div className={cn("bg-card/60 rounded-2xl border p-3", waiting && "border-rasta-gold/50")}>
+      <div className="mb-2 flex items-center gap-2">
         <div className="text-sm font-medium">Artwork</div>
-        <p className="text-muted-foreground text-xs">{line}</p>
-        {found?.check && (
-          <p className={cn("mt-0.5 text-xs", found.check.matches ? "text-muted-foreground" : "text-rasta-gold")}>
-            {found.check.matches ? `${found.check.model} looked: it fits this release.` : `${found.check.model} isn't sure it's this release: ${found.check.reason}`}
-          </p>
-        )}
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
-          <Button size="xs" variant="outline" onClick={() => find.mutate()} disabled={find.isPending}>
-            {find.isPending ? <Spinner data-icon="inline-start" /> : <HugeiconsIcon icon={Image01Icon} strokeWidth={2} data-icon="inline-start" />}
-            {found ? "Look again" : "Find artwork"}
-          </Button>
-          {found && (
-            <Button size="xs" variant="ghost" onClick={() => drop.mutate()} disabled={drop.isPending}>
-              Don't use it
-            </Button>
-          )}
+        {waiting && <span className="bg-rasta-gold/15 text-rasta-gold rounded-full px-2 py-0.5 text-[11px] font-medium">Waiting for your OK</span>}
+      </div>
+      {found ? (
+        <ArtCompare trackId={track.id} before={track.art} after={found} original={originalPic} size={112} />
+      ) : (
+        <div className="flex items-center gap-3">
+          {originalPic && <ArtCompareOriginal trackId={track.id} hash={originalPic.hash} />}
+          <Cover track={track} which="current" size={64} />
         </div>
+      )}
+      <p className="text-muted-foreground mt-2 text-xs">{line}</p>
+      {found?.check && (
+        <p className={cn("mt-0.5 text-xs", found.check.matches ? "text-muted-foreground" : "text-rasta-gold")}>
+          {found.check.matches ? `${found.check.model} looked: it fits this release.` : `${found.check.model} isn't sure it's this release: ${found.check.reason}`}
+        </p>
+      )}
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {waiting && (
+          <>
+            <Button size="xs" onClick={() => choose.mutate(true)} disabled={choose.isPending}>
+              Use new artwork
+            </Button>
+            <Button size="xs" variant="outline" onClick={() => choose.mutate(false)} disabled={choose.isPending}>
+              {track.art ? "Keep the original" : "No artwork"}
+            </Button>
+          </>
+        )}
+        {found && !waiting && willWrite && track.status === "done" && (
+          <Button size="xs" onClick={() => write.mutate()} disabled={write.isPending}>
+            Write it into the file
+          </Button>
+        )}
+        {found && !waiting && (
+          <Button size="xs" variant="ghost" onClick={() => choose.mutate(false)} disabled={choose.isPending}>
+            {track.art ? "Keep the original instead" : "Don't use it"}
+          </Button>
+        )}
+        <Button size="xs" variant="outline" onClick={() => find.mutate()} disabled={find.isPending}>
+          {find.isPending ? <Spinner data-icon="inline-start" /> : <HugeiconsIcon icon={Image01Icon} strokeWidth={2} data-icon="inline-start" />}
+          {found ? "Look again" : "Find artwork"}
+        </Button>
       </div>
     </div>
   )

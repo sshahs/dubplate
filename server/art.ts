@@ -6,7 +6,7 @@ import { createHash } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
 import { parseFile } from "music-metadata"
-import type { ArtRef, Candidate, Settings, SourceId, Track, TrackReading } from "../shared/types"
+import type { ArtRef, Candidate, PlanItem, Settings, SourceId, Track, TrackReading } from "../shared/types"
 import { sniffImage } from "./art-image"
 import { ensureDataDir } from "./config"
 import { artistSimilarity, titleSimilarity } from "./core/normalize"
@@ -152,13 +152,15 @@ async function searchArtwork(track: Track, meta: TrackReading, settings: Setting
  */
 export async function findArtwork(track: Track, settings: Settings, signal?: AbortSignal): Promise<ArtRef | null> {
   const tried = new Set<string>()
+  // A picture a person already turned down for this track isn't offered again.
+  const declined = new Set(track.artDeclined ?? [])
   const attempt = async (list: ArtLead[]) => {
     for (const { url, source, label } of list.slice(0, 4)) {
       if (tried.has(url)) continue
       tried.add(url)
       try {
         const ref = await fetchArt(url, source, signal, label)
-        if (ref) return ref
+        if (ref && !declined.has(ref.hash)) return ref
       } catch {
         if (signal?.aborted) return null
       }
@@ -172,10 +174,48 @@ export async function findArtwork(track: Track, settings: Settings, signal?: Abo
   return attempt(await searchArtwork(track, meta, settings, signal))
 }
 
+/** Whether found artwork waits for a person to say "use it" before it's written. */
+export function artNeedsOk(track: Pick<Track, "art">, settings: Settings): boolean {
+  const confirm = settings.artwork.confirm ?? "always"
+  return confirm === "always" || (confirm === "replacing" && !!track.art)
+}
+
+/** What cutting does with a track's found artwork: nothing, wait for a person's OK, or write it. */
+export function artPlan(track: Pick<Track, "art" | "artFound">, settings: Settings): PlanItem["art"] {
+  if (!settings.artwork.embed || !track.artFound) return undefined
+  if (track.art && !settings.artwork.replaceExisting) return undefined
+  if (track.art?.hash === track.artFound.hash) return undefined
+  const { art, artFound: found } = track
+  return {
+    waiting: artNeedsOk(track, settings) && !found.confirmed,
+    replaces: !!art,
+    before: art ? { hash: art.hash, width: art.width, height: art.height } : null,
+    after: { hash: found.hash, width: found.width, height: found.height, source: found.source, sourceLabel: found.sourceLabel },
+  }
+}
+
 /** Whether a found cover would actually be written when the track is cut. */
 export function artToEmbed(track: Track, settings: Settings): ArtRef | null {
-  if (!settings.artwork.embed || !track.artFound) return null
-  if (track.art && !settings.artwork.replaceExisting) return null
-  if (track.art?.hash === track.artFound.hash) return null
-  return track.artFound
+  const plan = artPlan(track, settings)
+  return plan && !plan.waiting ? track.artFound : null
+}
+
+/**
+ * A person's answer about a track's found artwork: use it (it's written when the
+ * track is cut), or keep the file's own picture (the found one is dropped, and
+ * never offered for this track again).
+ */
+export function chooseArtwork(track: Track, use: boolean): Partial<Track> | null {
+  if (!track.artFound) return null
+  if (use) return track.artFound.confirmed ? null : { artFound: { ...track.artFound, confirmed: true } }
+  return { artFound: null, artDeclined: [...new Set([...(track.artDeclined ?? []), track.artFound.hash])] }
+}
+
+/** The file's picture as it was first scanned (before any cut replaced it), if it had one. */
+export function originalArt(track: Track): ArtRef | null {
+  const hash = track.original?.tags?.cover
+  if (!hash) return null
+  if (track.art?.hash === hash) return track.art
+  const bytes = cachedArt(hash)
+  return bytes ? describeArt(bytes, "embedded") : null
 }

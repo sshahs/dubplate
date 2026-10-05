@@ -1,11 +1,12 @@
 import { HugeiconsIcon } from "@hugeicons/react"
-import { Alert02Icon, Folder01Icon, Scissor01Icon, SquareLock02Icon, TestTube01Icon } from "@hugeicons/core-free-icons"
+import { Alert02Icon, ArrowRight02Icon, Folder01Icon, Image01Icon, Scissor01Icon, SquareLock02Icon, TestTube01Icon } from "@hugeicons/core-free-icons"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 import { Link } from "react-router"
 import { toast } from "sonner"
 import type { ExistingTags } from "@shared/types"
 import { PageHeader } from "@/components/app-shell"
+import { ArtworkChoiceDialog } from "@/components/art-compare"
 import { BatchRow } from "@/components/batch-row"
 import { QueryError } from "@/components/query-error"
 import { ConfidenceMeter } from "@/components/confidence"
@@ -55,6 +56,7 @@ export default function ExecutePage() {
   const { data: libraries } = useQuery({ queryKey: ["libraries"], queryFn: api.libraries })
   const libName = (id: number) => libraries?.find((l) => l.id === id)?.name ?? "another library"
   const [excluded, setExcluded] = useState<Set<number>>(new Set())
+  const [choosingArt, setChoosingArt] = useState(false)
   // A cut or rewind in flight: lock the controls and show its progress.
   const writing = useActiveJobs().find((j) => j.kind === "execute" || j.kind === "rewind")
 
@@ -70,6 +72,9 @@ export default function ExecutePage() {
 
   const runnable = useMemo(() => (plan ?? []).filter((p) => !p.blocked && !excluded.has(p.trackId)), [plan, excluded])
   const blocked = (plan ?? []).filter((p) => p.blocked)
+  // Found artwork waits for a person's OK before it's written (Settings → Artwork).
+  const artWaiting = (plan ?? []).filter((p) => p.art?.waiting)
+  const artChosen = (plan ?? []).filter((p) => p.art && !p.art.waiting)
 
   const execute = useMutation({
     mutationFn: (dryRun: boolean) => api.execute({ ids: runnable.map((p) => p.trackId) }, dryRun),
@@ -150,6 +155,29 @@ export default function ExecutePage() {
           )}
           {!!plan?.length && (
             <>
+              {(artWaiting.length > 0 || artChosen.length > 0) && (
+                <div className={cn("flex flex-wrap items-center gap-3 rounded-2xl border p-3", artWaiting.length ? "border-rasta-gold/50 bg-rasta-gold/5" : "bg-card/60")}>
+                  <HugeiconsIcon icon={Image01Icon} strokeWidth={2} className={cn("size-5 shrink-0", artWaiting.length ? "text-rasta-gold" : "text-muted-foreground")} />
+                  <div className="min-w-0 flex-1 text-sm">
+                    {artWaiting.length ? (
+                      <>
+                        <span className="font-medium">
+                          {artWaiting.length} file{artWaiting.length === 1 ? " has" : "s have"} new artwork waiting for your OK.
+                        </span>{" "}
+                        <span className="text-muted-foreground">Until you choose, cutting leaves each file's own picture as it is.</span>
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground">
+                        New artwork you chose goes into {artChosen.length} file{artChosen.length === 1 ? "" : "s"} with this cut.
+                      </span>
+                    )}
+                  </div>
+                  <Button size="sm" variant={artWaiting.length ? "default" : "outline"} onClick={() => setChoosingArt(true)}>
+                    Compare & choose
+                  </Button>
+                </div>
+              )}
+              <ArtworkChoiceDialog items={plan} open={choosingArt} onOpenChange={setChoosingArt} />
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="secondary">{runnable.length} ready</Badge>
                 {blocked.length > 0 && <Badge variant="outline">{blocked.length} blocked or already clean</Badge>}
@@ -236,6 +264,19 @@ export default function ExecutePage() {
                         </TableCell>
                         <TableCell className="text-muted-foreground hidden text-xs md:table-cell">
                           {p.tagChanges.length ? [...new Set(p.tagChanges.map((c) => TAG_NAMES[c.field] ?? c.field))].join(", ") : "–"}
+                          {p.art && (
+                            <button
+                              type="button"
+                              onClick={() => setChoosingArt(true)}
+                              title={p.art.waiting ? "New artwork, waiting for your OK - compare and choose" : "New artwork you chose - change your mind"}
+                              className="hover:bg-muted mt-1 flex items-center gap-1 rounded-lg p-0.5"
+                            >
+                              <Thumb url={p.art.before ? api.artUrlFor(p.trackId, "current", p.art.before.hash, 64) : null} />
+                              <HugeiconsIcon icon={ArrowRight02Icon} strokeWidth={2} className="size-3" />
+                              <Thumb url={api.artUrlFor(p.trackId, "found", p.art.after.hash, 64)} />
+                              {p.art.waiting && <span className="text-rasta-gold ml-1 font-medium">needs your OK</span>}
+                            </button>
+                          )}
                         </TableCell>
                         <TableCell className="hidden md:table-cell">
                           <ConfidenceMeter value={p.confidence} />
@@ -264,4 +305,9 @@ export default function ExecutePage() {
       </Card>
     </>
   )
+}
+
+/** A small cover in the plan; an empty box when the file has no picture. */
+function Thumb({ url }: { url: string | null }) {
+  return url ? <img src={url} alt="" width={28} height={28} loading="lazy" className="size-7 rounded-md border object-cover" /> : <span className="bg-muted size-7 rounded-md border border-dashed" />
 }
