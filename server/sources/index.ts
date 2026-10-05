@@ -155,6 +155,9 @@ export class SourceBreaker {
   }
 }
 
+/** The longest one source may take to answer for one track (a setting only tests change). */
+export const sourceLimits = { deadlineMs: 60_000 }
+
 export async function scourTrack(
   track: Track,
   reading: TrackReading,
@@ -196,9 +199,16 @@ export async function scourTrack(
       }
       const scraper = adapter.id.startsWith("scraper:")
       const started = Date.now()
+      // One slow source never holds the run up: every track waits on every source.
+      const deadline = AbortSignal.timeout(sourceLimits.deadlineMs)
+      const sourceSignal = signal ? AbortSignal.any([signal, deadline]) : deadline
       try {
+        const answer = adapter.search(q, { cfg, settings, signal: sourceSignal })
+        const late = new Promise<never>((_, reject) =>
+          deadline.addEventListener("abort", () => reject(new Error(`no answer within ${sourceLimits.deadlineMs / 1000} s - skipped for this track`)), { once: true })
+        )
         // Plain text whatever the site sent: no links round names, no "&amp;".
-        const hits = (await adapter.search(q, { cfg, settings, signal })).map(cleanCandidate)
+        const hits = (await Promise.race([answer, late])).map(cleanCandidate)
         breaker?.ok(adapter.label)
         // A scraper whose "results" are its login or home page is broken, however quietly.
         const junk = scraper ? junkResults(hits) : null

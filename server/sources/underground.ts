@@ -158,38 +158,93 @@ export const mixcloud: SourceAdapter = {
 }
 
 // ---------- YouTube ----------
+// Asked the way youtube.com's own search box asks (the "Innertube" API the site itself
+// runs on): no Google Cloud project, no API key and no daily quota to run out of.
+
+const INNERTUBE_SEARCH = "https://www.youtube.com/youtubei/v1/search?prettyPrint=false"
+const INNERTUBE_CLIENT = { clientName: "WEB", clientVersion: "2.20250925.01.00", hl: "en", gl: "GB" }
+/** The search page's "Type: Video" filter. */
+const VIDEOS_ONLY = "EgIQAQ=="
+
+interface YtText {
+  simpleText?: string
+  runs?: { text: string }[]
+}
+
+interface YtVideo {
+  videoId?: string
+  title?: YtText
+  ownerText?: YtText
+  longBylineText?: YtText
+  lengthText?: YtText
+  publishedTimeText?: YtText
+}
+
+const ytText = (t?: YtText) => (t?.simpleText ?? t?.runs?.map((r) => r.text).join("") ?? "").trim()
+
+/** "1:02:03" or "3:45" as seconds. */
+export function ytLength(text: string): number | undefined {
+  if (!/^\d+(:\d{1,2}){1,2}$/.test(text)) return undefined
+  return text.split(":").reduce((total, part) => total * 60 + Number(part), 0)
+}
+
+/** Every video in a search answer, wherever YouTube has nested it this month. */
+export function ytVideos(node: unknown, out: YtVideo[] = []): YtVideo[] {
+  if (Array.isArray(node)) for (const n of node) ytVideos(n, out)
+  else if (node && typeof node === "object") {
+    for (const [k, v] of Object.entries(node)) {
+      if (k === "videoRenderer" && v && typeof v === "object" && (v as YtVideo).videoId) out.push(v as YtVideo)
+      else ytVideos(v, out)
+    }
+  }
+  return out
+}
+
+/** One video as a candidate: "Artist - Topic" channels carry clean catalogue data; other titles are read like a filename. */
+export function youtubeCandidate(v: YtVideo): Candidate | null {
+  const title = ytText(v.title)
+  if (!v.videoId || !title) return null
+  const channel = ytText(v.ownerText) || ytText(v.longBylineText)
+  const topic = channel.match(/^(.+?) - Topic$/)
+  const read: { artist: string; artists: string[]; title: string; riddim?: string } = topic ? { artist: topic[1], artists: [topic[1]], title } : readCombined(title)
+  if (!read.artist || !read.title) return null
+  return {
+    source: "youtube",
+    sourceLabel: "YouTube",
+    artist: read.artist,
+    artists: read.artists,
+    title: read.title,
+    riddim: read.riddim,
+    duration: ytLength(ytText(v.lengthText)),
+    url: `https://www.youtube.com/watch?v=${v.videoId}`,
+    externalId: v.videoId,
+    sourceScore: topic ? 0.9 : undefined,
+  }
+}
 
 export const youtube: SourceAdapter = {
   id: "youtube",
   label: "YouTube",
-  unavailable: ({ cfg }) => (cfg.apiKey ? null : "needs a Data API key"),
-  async search(q, { cfg, signal }) {
+  unavailable: () => null,
+  async search(q, { signal }) {
     const query = q.descriptiveTitle ? [q.artist, q.title].join(" ") : q.query
     if (!query) return []
-    const j = await httpJson<{ items?: { id: { videoId?: string }; snippet: { title: string; channelTitle: string; publishedAt?: string } }[] }>(
-      `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=8&q=${enc(query)}&key=${enc(cfg.apiKey!)}`,
-      { signal }
-    )
-    return (j?.items ?? [])
-      .filter((i) => i.id.videoId)
-      .map((i) => {
-        const title = cheerio.load(i.snippet.title).text()
-        // Auto-generated "Artist - Topic" channels carry clean catalogue data.
-        const topic = i.snippet.channelTitle.match(/^(.+?) - Topic$/)
-        const read: { artist: string; artists: string[]; title: string; riddim?: string } = topic ? { artist: topic[1], artists: [topic[1]], title } : readCombined(title)
-        return {
-          source: "youtube" as const,
-          sourceLabel: "YouTube",
-          artist: read.artist,
-          artists: read.artists,
-          title: read.title,
-          riddim: read.riddim,
-          year: yearOf(i.snippet.publishedAt),
-          url: `https://www.youtube.com/watch?v=${i.id.videoId}`,
-          externalId: i.id.videoId,
-          sourceScore: topic ? 0.9 : undefined,
-        }
-      })
+    const j = await httpJson<unknown>(INNERTUBE_SEARCH, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://www.youtube.com",
+        "x-youtube-client-name": "1",
+        "x-youtube-client-version": INNERTUBE_CLIENT.clientVersion,
+        // Past the cookie-consent page some countries get first.
+        cookie: "SOCS=CAI",
+      },
+      body: JSON.stringify({ context: { client: INNERTUBE_CLIENT }, query, params: VIDEOS_ONLY }),
+      signal,
+    })
+    return ytVideos(j)
+      .flatMap((v) => youtubeCandidate(v) ?? [])
+      .slice(0, 8)
   },
 }
 

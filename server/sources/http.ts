@@ -17,7 +17,8 @@ const HOST_INTERVAL_MS: Record<string, number> = {
   "bandcamp.com": 1200,
   "archive.org": 600,
   "api.mixcloud.com": 400,
-  "www.googleapis.com": 120,
+  // YouTube's own web search (no API key, no quota): asked like a person browsing would.
+  "www.youtube.com": 1000,
   "api.acoustid.org": 350,
   "coverartarchive.org": 1100,
   "i.discogs.com": 1100,
@@ -36,6 +37,31 @@ const HOST_INTERVAL_MS: Record<string, number> = {
 }
 
 const nextSlot = new Map<string, number>()
+
+/** The longest "come back later" worth waiting for in a run; anything longer and the host is skipped until then. */
+const MAX_RETRY_WAIT_MS = 30_000
+/** Hosts that told us to stay away (a 429 with a long Retry-After), and until when. */
+const restingUntil = new Map<string, number>()
+
+/** How long a host has told us to stay away for, if it has. */
+export function hostResting(host: string): number {
+  const until = restingUntil.get(host) ?? 0
+  if (until <= Date.now()) {
+    restingUntil.delete(host)
+    return 0
+  }
+  return until - Date.now()
+}
+
+/** Forget every host's "stay away" (tests, and a fresh start). */
+export function clearResting() {
+  restingUntil.clear()
+}
+
+function forHow(ms: number) {
+  const s = Math.round(ms / 1000)
+  return s < 120 ? `${s} s` : s < 7200 ? `${Math.round(s / 60)} min` : `${Math.round(s / 3600)} h`
+}
 
 /** Keys, tokens and passwords in a URL (query or path) blanked out, so it can go in the log. */
 export function redactUrl(url: string): string {
@@ -138,6 +164,9 @@ export async function httpText(url: string, opts: HttpOptions = {}): Promise<{ s
     }
   }
   const host = new URL(url).host
+  // Told to stay away (Spotify can ask for hours): say so at once rather than hold the run up.
+  const resting = hostResting(host)
+  if (resting) throw new HttpError(429, `${host} asked us to wait ${forHow(resting)} more (too many requests) - skipped until then`)
   let attempt = 0
   while (true) {
     const queued = Date.now()
@@ -166,6 +195,13 @@ export async function httpText(url: string, opts: HttpOptions = {}): Promise<{ s
       attempt++
       const retryAfter = Number(res.headers.get("retry-after"))
       const delay = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1500 * 2 ** attempt
+      if (delay > MAX_RETRY_WAIT_MS) {
+        // Waiting would stall the whole run (every track waits on every source): skip this host until then.
+        restingUntil.set(host, Date.now() + delay)
+        await res.body?.cancel()
+        log("warn", `${host} said too many requests and to come back in ${forHow(delay)}: it's skipped until then`, { area: "http", detail: `${redactUrl(url)}\nRetry-After: ${res.headers.get("retry-after")}` })
+        throw new HttpError(res.status, `${host} is rate-limiting us for ${forHow(delay)} (too many requests) - skipped until then`)
+      }
       nextSlot.set(host, Date.now() + delay)
       log("debug", `${method} ${shortUrl(url)} - ${res.status} (too busy), trying again in ${Math.round(delay / 1000)} s`, { area: "http", detail: redactUrl(url) })
       continue
