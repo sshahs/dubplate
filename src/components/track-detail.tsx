@@ -19,6 +19,7 @@ import { RISK_LABEL, riskOf } from "@shared/risk"
 import type { Candidate, FinalMeta, Track } from "@shared/types"
 import { AudioPlayer } from "@/components/audio-player"
 import { ConfidenceDial, StatusBadge } from "@/components/confidence"
+import { ListenButton } from "@/components/listen-dialog"
 import { fromDraft, MetaEditor, toDraft, type MetaDraft } from "@/components/meta-editor"
 import { QueryError } from "@/components/query-error"
 import { ArtworkPanel, AudioQualityPanel, FileProblemsPanel, LyricsPanel, MixesPanel, TempoKeyPanel } from "@/components/track-extras"
@@ -241,6 +242,8 @@ export function TrackDetail({
           <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} data-icon="inline-start" />
           Leave as-is
         </Button>
+        {/* Like Shazam: what the audio itself sounds like, for files with nothing else to go on. */}
+        <ListenButton track={track} onUse={(c) => editDraft(candidateToMeta(c, draft))} />
         <Button variant="ghost" onClick={() => rerun.mutate()} disabled={rerun.isPending}>
           <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} data-icon="inline-start" />
           Re-run

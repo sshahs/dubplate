@@ -64,6 +64,20 @@ export const acoustid: SourceAdapter = {
 
 /** Recordings AcoustID knows this fingerprint as (the response is cached for a month). */
 export async function acoustidLookup(fp: Fingerprint, apiKey: string, signal?: AbortSignal): Promise<Candidate[]> {
+  return (await acoustidMatches(fp, apiKey, signal)).candidates
+}
+
+/**
+ * What AcoustID heard: the recordings it knows the fingerprint as, best first, down to
+ * `minScore`; and how many matches it has that nobody has put a name to on MusicBrainz yet.
+ */
+export async function acoustidMatches(
+  fp: Fingerprint,
+  apiKey: string,
+  signal?: AbortSignal,
+  opts: { minScore?: number; limit?: number } = {}
+): Promise<{ candidates: Candidate[]; unnamed: number }> {
+  const minScore = opts.minScore ?? 0.5
   const body = new URLSearchParams({
     client: apiKey,
     meta: "recordings releasegroups compress",
@@ -78,8 +92,10 @@ export async function acoustidLookup(fp: Fingerprint, apiKey: string, signal?: A
     ttlMs: 30 * 86400_000,
   })
   const out: Candidate[] = []
+  let unnamed = 0
   for (const r of j?.results ?? []) {
-    if (r.score < 0.5) continue
+    if (r.score < minScore) continue
+    if (!r.recordings?.some((rec) => rec.title && rec.artists?.length)) unnamed++
     for (const rec of r.recordings ?? []) {
       if (!rec.title || !rec.artists?.length) continue
       out.push({
@@ -108,5 +124,5 @@ export async function acoustidLookup(fp: Fingerprint, apiKey: string, signal?: A
       })
     }
   }
-  return out.slice(0, 6)
+  return { candidates: out.sort((a, b) => (b.sourceScore ?? 0) - (a.sourceScore ?? 0)).slice(0, opts.limit ?? 6), unnamed }
 }

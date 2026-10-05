@@ -200,7 +200,7 @@ on low-risk tracks**; everything else waits for a person.
 | Who Cork The Dance | – | The dancehall sound system tape archive at whocorkthedance.com: sessions from Killamanjaro, Volcano, Jammys, Stereophonic, Gemini and dozens more from 1979 on, read once a month (the site has no search). A tape downloaded from there is recognised by its file name, even with the archive's numbering and credits ("killamanjaro vs stone love 1989keithjaymandrew.mp3"); a renamed one by its sounds and year. |
 | SoundClash Hub sounds | – | Each sound system's page of featured clash recordings (mostly soundtape.com tapes on SoundCloud). A clash tape whose sounds have a page - Killamanjaro, Stone Love, King Addies, Saxon and 35 more - is checked against them by the sounds and the year. |
 | YouTube | – | Where most specials end up. Searched the way youtube.com's own search box does (YouTube's internal "Innertube" API), so there's no Google Cloud project, no API key and no daily quota to run out of - the official Data API allows only about 100 searches a day. Uses auto-generated "Artist - Topic" channels when available, and reads each video's length. |
-| AcoustID | key + `fpcalc` | **Audio fingerprinting**: identifies the audio itself, not the name |
+| AcoustID | key + `fpcalc` | **Audio fingerprinting**: identifies the audio itself, not the name. **Listen** on any track does just this, like Shazam: for a file with nothing to go on ("Track 01.mp3") it lists what AcoustID heard, best match first with how sure it is (weaker guesses included and marked), and **Use** fills in the one you know, ready to Approve & learn |
 
 **Riddims & rave**
 
@@ -1079,6 +1079,7 @@ crates whose names aren't taken.
 - 🎤 **Lyrics**: from LRCLIB, timed where possible, written into the file and optionally a `.lrc`.
 - 💿 **Release priority**: the artist's own album, EP or single before compilations and DJ mixes, unless the file says otherwise.
 - 📀 **Discs and sides**: CD1/CD2 and Side A/B folders, A1/B2 positions and whole-side rips understood, with disc and track numbers written.
+- 👂 **Listen**: identify a track by its sound alone, like Shazam, and pick from what it heard.
 - 🧭 **How it was decided**: recording, release, version, genre, risk, verification, AcoustID and MusicBrainz, step by step, with where each field came from.
 - 🎛️ **Pick any source's option**: the track's Sources tab lists every hit in each group (the same song as a 7", an album, a compilation…), each with its own **Use**, which fills in that option's artist, title, album, year and label together.
 - 🧠 **Second opinion**: a bigger model for the uncertain ones, and a vision model to check covers.

@@ -122,7 +122,8 @@ function fmtDuration(sec: number | null) {
 
 /** Pick past corrections that look like this filename, as few-shot examples. */
 export function similarCorrections(filename: string, corrections: Correction[], max = 5): Correction[] {
-  const tokens = new Set(normKey(filename.replace(/\.[^.]+$/, "")).split(" ").filter((t) => t.length > 2 && !COMMON_WORDS.has(t)))
+  // Words that name something: not "track", "remix" or a bare number ("Track 101" is no kin of another "Track 101").
+  const tokens = new Set(normKey(filename.replace(/\.[^.]+$/, "")).split(" ").filter((t) => t.length > 2 && !COMMON_WORDS.has(t) && !/^\d+$/.test(t)))
   if (!tokens.size) return []
   return corrections
     .map((c) => {
