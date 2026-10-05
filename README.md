@@ -478,8 +478,9 @@ or `A1` at the start of its name, a `CD2` or `Side B` folder. A file that says
 none of that gets the position the matched release lists (MusicBrainz,
 Discogs, Apple Music or Spotify), as long as it's going into that same album,
 and that track number is written into its tags too. The track's **File** tab
-says where its position came from. Tracks identified before this need a
-**Re-run** to pick up their sources' positions.
+says where its position came from. Tracks identified before this pick up
+their sources' positions when asked again: select them in **Tracks** and
+choose **Ask the sources again (no AI)**, or **Re-run** one track.
 
 - Clashes are joined with ` vs `, collaborations with ` & `, and three or more names become `A, B & C`.
 - Featured artists go in the artist (`A feat. B - Title`) or the title (`A - Title (feat. B)`), as you prefer.
