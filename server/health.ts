@@ -48,7 +48,7 @@ const PROBES: Record<string, string> = {
   ravearchive: "https://rave-archive.com/wp-json/",
   mixesdb: "https://www.mixesdb.com/w/api.php",
   junglist: "https://junglist.co.uk/",
-  youtube: "https://www.googleapis.com/",
+  youtube: "https://www.youtube.com/",
   acoustid: "https://api.acoustid.org/",
 }
 

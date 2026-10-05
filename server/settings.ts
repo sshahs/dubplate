@@ -34,7 +34,7 @@ export const SOURCE_META: Record<
   bandcamp: { label: "Bandcamp", needs: [], about: "Scrapes Bandcamp search - home of independent dub, grime and sound-system releases.", suits: ["Dub", "Roots", "Jungle", "Drum & bass", "Dubstep", "Grime", "UK garage", "Techno", "House", "Electronic", "Ambient", "Indie", "Punk", "Metal", "Folk", "Edits & bootlegs"] },
   archive: { label: "Internet Archive", needs: [], about: "Advanced search over archive.org - clash tapes, pirate radio sets and dubplate rips.", suits: ["Sound clashes", "Radio rips", "Live sets", "DJ mixes", "Dubplates & specials", "Blues", "Jazz"] },
   mixcloud: { label: "Mixcloud", needs: [], about: "Radio shows and sets - useful for clash and pirate-radio recordings.", suits: ["DJ mixes", "Radio rips", "Live sets", "Sound clashes"] },
-  youtube: { label: "YouTube", needs: ["apiKey"], keyLabel: "Data API v3 key", env: ["YOUTUBE_API_KEY"], about: "Many specials and dubplates only exist as uploads. Low weight - titles are messy.", signup: "https://console.cloud.google.com/apis/library/youtube.googleapis.com", suits: ["Dubplates & specials", "Sound clashes", "Edits & bootlegs", "Radio rips", "Live sets", "Afrobeats", "Amapiano", "Soca"] },
+  youtube: { label: "YouTube", needs: [], about: "Many specials and dubplates only exist as uploads. Searched the way youtube.com's own search box does - no API key and no daily quota. Low weight - titles are messy.", suits: ["Dubplates & specials", "Sound clashes", "Edits & bootlegs", "Radio rips", "Live sets", "Afrobeats", "Amapiano", "Soca"] },
   soundclashhub: {
     label: "SoundClash Hub sounds",
     needs: [],

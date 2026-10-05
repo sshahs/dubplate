@@ -4,7 +4,7 @@
 import type { Candidate, ReleaseInfo } from "../../shared/types"
 import { titleSimilarity } from "../core/normalize"
 import { discogsKind, isOwnRelease, mbKind, spotifyKind } from "../core/releases"
-import { httpJson } from "./http"
+import { HttpError, httpJson } from "./http"
 import { cleanArtistName, enc, yearOf, type SourceAdapter, type SourceQuery } from "./types"
 
 function luceneEscape(s: string) {
@@ -239,19 +239,27 @@ export const lastfm: SourceAdapter = {
 
 let spotifyToken: { value: string; expires: number; key: string } | null = null
 
+/** Sign in again next time (the token was refused, or tests). */
+export function forgetSpotifyToken() {
+  spotifyToken = null
+}
+
 async function spotifyAuth(id: string, secret: string, signal?: AbortSignal) {
   if (spotifyToken && spotifyToken.key === id && spotifyToken.expires > Date.now() + 30_000) return spotifyToken.value
-  const res = await fetch("https://accounts.spotify.com/api/token", {
+  // Through the polite client: a timeout, the log, and no hanging when Spotify says to wait.
+  const j = await httpJson<{ access_token: string; expires_in: number }>("https://accounts.spotify.com/api/token", {
     method: "POST",
     headers: {
       authorization: `Basic ${Buffer.from(`${id}:${secret}`).toString("base64")}`,
       "content-type": "application/x-www-form-urlencoded",
     },
     body: "grant_type=client_credentials",
+    ttlMs: 0,
     signal,
+  }).catch((err) => {
+    throw new Error(`Spotify sign-in failed: ${err instanceof Error ? err.message : String(err)}`)
   })
-  if (!res.ok) throw new Error(`Spotify auth failed (${res.status})`)
-  const j = (await res.json()) as { access_token: string; expires_in: number }
+  if (!j?.access_token) throw new Error("Spotify sign-in failed: no token came back")
   spotifyToken = { value: j.access_token, expires: Date.now() + j.expires_in * 1000, key: id }
   return j.access_token
 }
@@ -276,7 +284,11 @@ export const spotify: SourceAdapter = {
           external_urls?: { spotify?: string }
         }[]
       }
-    }>(`https://api.spotify.com/v1/search?type=track&limit=8&q=${enc(query)}`, { headers: { authorization: `Bearer ${token}` }, signal })
+    }>(`https://api.spotify.com/v1/search?type=track&limit=8&q=${enc(query)}`, { headers: { authorization: `Bearer ${token}` }, signal }).catch((err) => {
+      // A token Spotify no longer takes: sign in afresh for the next track.
+      if (err instanceof HttpError && err.status === 401) forgetSpotifyToken()
+      throw err
+    })
     return (j?.tracks?.items ?? []).map((t) => ({
       source: "spotify" as const,
       sourceLabel: "Spotify",
