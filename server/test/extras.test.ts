@@ -448,8 +448,12 @@ describe("hands-off", () => {
 
     saveSettings({ safety: { readOnly: false } })
     repo.updateTrack(byName["skepta shutdown.mp3"], { status: "approved", final: { artists: ["Skepta"], featuring: [], title: "Shutdown" } })
+    // Cutting tops up lyrics first: answered here, so the test never waits on LRCLIB (CI has a real network).
+    const lyrics = vi.fn(async (_url: string | URL | Request) => Response.json([]))
+    vi.stubGlobal("fetch", lyrics)
     const cut = ctx()
     await cutApproved(approved, cut)
+    expect(lyrics.mock.calls.every(([url]) => String(url).includes("lrclib.net"))).toBe(true)
     expect(cut.job.done).toBe(1)
     expect(fs.existsSync(path.join(dir, "Skepta - Shutdown.mp3"))).toBe(true)
     expect(repo.listBatches()[0].label).toBe("Hands-off")
