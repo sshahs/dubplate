@@ -107,3 +107,23 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      # Gitea doesn't tie a pushed image to its repository by itself: link it (Gitea
+      # 1.24+), so it shows under the repo's Packages. Already linked is fine; an older
+      # Gitea says so, and the link can be made by hand in the package's settings.
+      - name: Link the package to this repository
+        if: steps.can.outputs.push == 'true'
+        env:
+          TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+        run: |
+          owner="${GITHUB_REPOSITORY%%/*}"
+          repo="${GITHUB_REPOSITORY#*/}"
+          name="$(echo "$repo" | tr '[:upper:]' '[:lower:]')"
+          url="${GITHUB_SERVER_URL%/}/api/v1/packages/$owner/container/$name/-/link/$repo"
+          code=$(curl -sS -o /tmp/link.out -w '%{http_code}' -X POST -H "Authorization: token $TOKEN" "$url" || echo 000)
+          case "$code" in
+            2*) echo "Linked container package $owner/$name to $GITHUB_REPOSITORY" ;;
+            409|422) echo "Already linked: $(cat /tmp/link.out)" ;;
+            404) echo "::warning::This Gitea can't link packages over its API (1.24+ can) - link $owner/$name to $repo in the package's settings"; cat /tmp/link.out ;;
+            *) echo "::warning::Couldn't link the package ($code): $(cat /tmp/link.out)" ;;
+          esac

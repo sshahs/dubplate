@@ -390,7 +390,9 @@ Mirrored to a Gitea instance with an act runner, the same checks run from
 [`.gitea/workflows`](.gitea/workflows) (Gitea runs those instead of
 `.github/workflows`): `ci.yml` (typecheck, lint, tests, build) and
 `docker.yml`, which builds and smoke-tests the image and publishes it to that
-Gitea's own container registry (`<gitea host>/<owner>/dubplate`). The runner
+Gitea's own container registry (`<gitea host>/<owner>/dubplate`), linked to
+the repository so it shows under its Packages (Gitea 1.24+; on older versions,
+link it once in the package's settings). The runner
 needs Docker. Publishing needs a repository secret `REGISTRY_TOKEN` (a Gitea
 access token with package write access; set the variable `REGISTRY_USER` if
 the token isn't the pusher's); without it the image is built and tested but
