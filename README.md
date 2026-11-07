@@ -873,11 +873,34 @@ fingerprints to AcoustID** sends a selection now.
 </details>
 
 <details>
+<summary><b>Discogs codes: white labels no search finds</b></summary>
+
+Old jungle and drum & bass 12"s, white labels and promos often have names no
+search can match, but you can find the record on Discogs in a minute. Give
+Dubplate its code and it takes everything from that release: **Discogs code**
+on a track (next to Listen), or **Tracks → select → Use a Discogs release
+(code)…** for a whole record's worth of files at once.
+
+- Paste the release's link, the code at the bottom of its page (`[r1234567]`), a master (`[m98765]` or its link, which uses its main release) or a catalogue number (`SOUR 008`, needs your Discogs token; a number several releases share lets you pick).
+- Each file is matched to its track on the release by its title, its own position (`A2`, `B2`, side A, track 3) and its length. Change any match, or leave a file alone, before you say **Use it**.
+- The files are approved with the release's artists, titles, album, year, label, genre and track numbers, its Discogs release ID goes into the tags and its cover is used first. The release is pinned: it wins over whatever the searches find, now and on every re-run. **Undo** puts the files back.
+
+</details>
+
+<details>
 <summary><b>Adding releases to MusicBrainz</b></summary>
 
 For a record MusicBrainz doesn't have, **Add to MusicBrainz** (a track's
 Decision tab, or a selection in Tracks as one release) fills in MusicBrainz's
-release editor: title, type, artist credits, tracks and lengths, year, label,
+release editor. When Dubplate knows the record on Discogs (from a Discogs code,
+or because Discogs identified the track), it's the **whole release**, not just
+your files: every track on it in order, across its discs, with positions
+(`A1`, `B2`), lengths and artists, the label and catalogue number, barcode,
+release date and country, the format (`12" Vinyl`, `CD`…) and a link to the
+Discogs page. Your files take their own places on it, with their recordings
+where MusicBrainz knows them. You can paste a Discogs link there too, or still
+send only your files. Otherwise it's filled from your files: title, type,
+artist credits, tracks and lengths, year, label,
 known recordings, links to the pages that identified it and an edit note. You
 check everything there and submit it yourself with your MusicBrainz account -
 Dubplate never submits edits on its own. MusicBrainz then sends you back to
@@ -1106,7 +1129,8 @@ crates whose names aren't taken.
 - 🎛️ **Pick any source's option**: the track's Sources tab lists every hit in each group (the same song as a 7", an album, a compilation…), each with its own **Use**, which fills in that option's artist, title, album, year and label together.
 - 🧠 **Second opinion**: a bigger model for the uncertain ones, and a vision model to check covers.
 - 🏷️ **Canonical genres**: one genre per track from your own list, with region folders.
-- 🫆 **Give back**: send verified fingerprints to AcoustID and add missing releases to MusicBrainz.
+- 🫆 **Give back**: send verified fingerprints to AcoustID and add missing releases to MusicBrainz - the whole album from Discogs, not one track.
+- 💿 **Discogs codes**: paste a release's link or `[r…]` code and its details and tracklist go onto your files, for the white labels no search finds.
 - 🎬 **Video converter**: the audio out of AVI, 3GP, WMV, MP4 and more, kept as it is where it can be.
 - 🩹 **Broken files**: wrong extensions (fixed when cutting), downloads that stopped short, damaged audio and long silences.
 - 📱 **Review on a phone**: swipe right to approve, left to leave as-is; **Approve all** clears a queue with Undo.

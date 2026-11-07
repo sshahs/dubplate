@@ -121,7 +121,7 @@ export function artworkCandidates(track: Track): ArtLead[] {
   const hits = clusters
     .flatMap((cl) => cl.candidates)
     .filter((c) => c.artwork && (!meta?.title || fits(c, meta)))
-    .sort((a, b) => sourceRank(a.source) - sourceRank(b.source) || (b.sourceScore ?? 0) - (a.sourceScore ?? 0))
+    .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || sourceRank(a.source) - sourceRank(b.source) || (b.sourceScore ?? 0) - (a.sourceScore ?? 0))
   const seen = new Set<string>()
   const out: ArtLead[] = []
   for (const c of hits) {

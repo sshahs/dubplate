@@ -19,6 +19,7 @@ import { cantListen, listenTo } from "./listen"
 import { lyricsForTrack, lyricsTracks, topUpLyrics } from "./lyrics"
 import { checkSubmissions, eligibility, listSubmissions, submitTracks } from "./acoustid-submit"
 import { completeMbSubmission, listMbSubmissions, markMbSubmitted, startMbSubmission } from "./musicbrainz-seed"
+import { applyDiscogsRelease, lookupDiscogs } from "./discogs-code"
 import { trackInsight } from "./steps"
 import * as auth from "./auth"
 import * as tokens from "./tokens"
@@ -731,13 +732,13 @@ export function createApp() {
   app.get("/api/musicbrainz/submissions", (c) => c.json(listMbSubmissions()))
 
   app.post("/api/musicbrainz/seed", async (c) => {
-    const body = await c.req.json<Selection & { base?: string }>()
+    const body = await c.req.json<Selection & { base?: string; whole?: boolean; discogs?: string }>()
     const ids = resolveIds(body)
     if (!ids.length) return c.json({ error: "Pick the tracks for the release" }, 400)
     if (ids.length > 99) return c.json({ error: "That's a lot for one release - pick up to 99 tracks" }, 400)
     const base = settingsNow().integrations.publicUrl || body.base || new URL(c.req.url).origin
     try {
-      return c.json(startMbSubmission(ids, base))
+      return c.json(await startMbSubmission(ids, base, { whole: body.whole, discogs: body.discogs?.trim() || undefined }))
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
     }
@@ -754,6 +755,31 @@ export function createApp() {
       const r = await completeMbSubmission(Number(c.req.param("id")), body.releaseMbid ?? "")
       emit({ type: "tracks", ids: r.submission.trackIds })
       return c.json(r)
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
+
+  // ---- Discogs code: a release a person found on Discogs, put on their files ----
+  app.post("/api/discogs/lookup", async (c) => {
+    const body = await c.req.json<Selection & { code?: string }>()
+    const ids = resolveIds(body).slice(0, 99)
+    try {
+      return c.json(await lookupDiscogs(body.code ?? "", repo.getTracks(ids), settingsNow(), c.req.raw.signal))
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
+
+  app.post("/api/discogs/apply", async (c) => {
+    const body = await c.req.json<{ releaseId?: number; assignments?: { trackId: number; index: number | null }[] }>()
+    const assignments = (body.assignments ?? []).filter((a) => Number.isFinite(Number(a.trackId))).map((a) => ({ trackId: Number(a.trackId), index: a.index === null || a.index === undefined ? null : Number(a.index) }))
+    if (!body.releaseId || !assignments.some((a) => a.index !== null)) return c.json({ error: "Pick which track on the release each file is" }, 400)
+    const undoId = snapshot("Discogs release", assignments.filter((a) => a.index !== null).map((a) => a.trackId))
+    try {
+      const r = await applyDiscogsRelease(Number(body.releaseId), assignments, settingsNow(), c.req.raw.signal)
+      emit({ type: "tracks", ids: assignments.map((a) => a.trackId) })
+      return c.json({ ...r, undoId })
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
     }

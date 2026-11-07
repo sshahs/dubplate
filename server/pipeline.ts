@@ -280,8 +280,10 @@ export async function processTracks(ids: number[], startSettings: Settings, opts
             const result = await scourTrack(track, reading, settings, track.ai?.searchQueries ?? [], ctx.signal, breaker, pre)
             for (const e of result.errors) ctx.log("warn", `${e.source}: ${e.message}`, { area: "sources" })
             for (const s of result.tripped) ctx.log("error", `${s} keeps failing - skipping it for the rest of this run`, { area: "sources" })
-            track = { ...track, candidates: result.candidates }
-            updateTrack(id, { candidates: result.candidates, status: HUMAN_STATUSES.includes(track.status) ? track.status : "scoured" })
+            // A release a person named by its code stays, whatever the search finds this time.
+            const candidates = [...(track.candidates ?? []).filter((c) => c.pinned), ...result.candidates]
+            track = { ...track, candidates }
+            updateTrack(id, { candidates, status: HUMAN_STATUSES.includes(track.status) ? track.status : "scoured" })
           }
         }
 

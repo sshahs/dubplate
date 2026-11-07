@@ -301,7 +301,7 @@ describe("MusicBrainz release editor", () => {
     const tracks = await scanned(["01 sister nancy - bam bam.mp3", "02 sister nancy - transport connection.mp3"])
     repo.updateTrack(tracks[0].id, { final: { artists: ["Sister Nancy"], featuring: [], title: "Bam Bam", album: "One Two", year: 1982, label: "Techniques" }, status: "done", tags: { ...tracks[0].tags, track: 1 } })
     repo.updateTrack(tracks[1].id, { final: { artists: ["Sister Nancy"], featuring: ["Yellowman"], title: "Transport Connection", album: "One Two" }, status: "done", tags: { ...tracks[1].tags, track: 2 } })
-    const { submission, action, fields } = startMbSubmission([tracks[1].id, tracks[0].id], "http://nas:4455/")
+    const { submission, action, fields } = await startMbSubmission([tracks[1].id, tracks[0].id], "http://nas:4455/")
     expect(action).toBe("https://musicbrainz.org/release/add")
     expect(fields).toMatchObject({
       name: "One Two",

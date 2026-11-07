@@ -320,6 +320,10 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE track_data ADD COLUMN art_declined_json TEXT;
   `,
+  // 10: a MusicBrainz release filled in from a whole Discogs release: where each file sits on it.
+  `
+  ALTER TABLE mb_submissions ADD COLUMN slots_json TEXT;
+  `,
 ]
 
 export type Db = DatabaseSync

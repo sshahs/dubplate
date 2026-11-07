@@ -127,25 +127,45 @@ export interface DiscogsRelease {
   released?: string
   formats?: { name: string; descriptions?: string[] }[]
   artists?: { name: string; join?: string }[]
-  labels?: { name: string }[]
+  labels?: { name: string; catno?: string }[]
   genres?: string[]
   styles?: string[]
   images?: { type?: string; uri?: string }[]
-  tracklist?: { title: string; position?: string; duration?: string; type_?: string; artists?: { name: string; join?: string }[] }[]
+  identifiers?: { type: string; value: string }[]
+  tracklist?: DiscogsTrack[]
+}
+
+export interface DiscogsTrack {
+  title: string
+  position?: string
+  duration?: string
+  /** "track", "heading" or "index" (a group of sub-tracks) */
+  type_?: string
+  artists?: { name: string; join?: string }[]
+  extraartists?: { name: string; role?: string }[]
+  sub_tracks?: DiscogsTrack[]
+}
+
+/** A release's playable tracks in order: headings left out, an index's sub-tracks in its place. */
+export function discogsTracks(rel: DiscogsRelease): DiscogsTrack[] {
+  return (rel.tracklist ?? []).flatMap((t) => ((t.type_ ?? "track") === "index" ? (t.sub_tracks ?? []) : (t.type_ ?? "track") === "track" ? [t] : []))
 }
 
 /** Where a track sits on a Discogs release ("A2", "3", "1-05"), with how many discs its tracklist runs to. */
 function discogsPosition(rel: DiscogsRelease, position?: string): ReleasePosition | undefined {
   const discs = new Set((rel.tracklist ?? []).map((t) => releasePosition(t.position)?.disc).filter((d): d is number => !!d))
+  const side = position?.trim().match(/^([A-H])\1?$/i)?.[0]
+  // A side with one tune on it ("A", "AA" on a 12" or 7") is its own position.
+  if (side) return { track: side.toUpperCase(), ...(discs.size > 1 ? { disc: Math.floor("ABCDEFGH".indexOf(side[0].toUpperCase()) / 2) + 1, discs: discs.size } : {}) }
   return releasePosition(position, undefined, discs.size > 1 ? discs.size : undefined) ?? undefined
 }
 
-function discogsDuration(d?: string) {
-  const m = d?.match(/^(\d+):(\d{2})$/)
-  return m ? Number(m[1]) * 60 + Number(m[2]) : undefined
+export function discogsDuration(d?: string) {
+  const m = d?.match(/^(?:(\d+):)?(\d+):(\d{2})$/)
+  return m ? Number(m[1] ?? 0) * 3600 + Number(m[2]) * 60 + Number(m[3]) : undefined
 }
 
-function joinDiscogsArtists(list: { name: string; join?: string }[]) {
+export function joinDiscogsArtists(list: { name: string; join?: string }[]) {
   return list
     .map((a, i) => cleanArtistName(a.name) + (i < list.length - 1 ? ` ${a.join?.trim() || "&"} ` : ""))
     .join("")
@@ -174,19 +194,23 @@ export const discogs: SourceAdapter = {
   },
 }
 
-/** A release in full (cached for a month: releases rarely change). */
-export function discogsRelease(id: number, token: string, signal?: AbortSignal) {
-  return httpJson<DiscogsRelease>(`https://api.discogs.com/releases/${id}`, { headers: { authorization: `Discogs token=${token}` }, signal, ttlMs: 30 * 86400_000 })
+/** A release in full (cached for a month: releases rarely change). Releases can be read without a token, more slowly. */
+export function discogsRelease(id: number, token: string | undefined, signal?: AbortSignal) {
+  return httpJson<DiscogsRelease>(`https://api.discogs.com/releases/${id}`, { headers: token ? { authorization: `Discogs token=${token}` } : {}, signal, ttlMs: 30 * 86400_000 })
 }
 
 /** The release's track that best matches `title`, as a candidate (null when none is close enough). */
 export function releaseCandidate(rel: DiscogsRelease, title: string, opts: { source: Candidate["source"]; label: string; year?: number; minSimilarity?: number }): Candidate | null {
-  if (!rel.tracklist?.length) return null
-  const best = rel.tracklist
-    .filter((t) => (t.type_ ?? "track") === "track")
+  const best = discogsTracks(rel)
     .map((t) => ({ t, sim: titleSimilarity(t.title, title) }))
     .sort((a, b) => b.sim - a.sim)[0]
   if (!best || best.sim < (opts.minSimilarity ?? 0.5)) return null
+  return tracklistCandidate(rel, best.t, opts)
+}
+
+/** One track of a Discogs release as a candidate, with the release as its album. */
+export function tracklistCandidate(rel: DiscogsRelease, track: DiscogsTrack, opts: { source: Candidate["source"]; label: string; year?: number }): Candidate {
+  const best = { t: track }
   const credits = best.t.artists?.length ? best.t.artists : (rel.artists ?? [])
   return {
     source: opts.source,

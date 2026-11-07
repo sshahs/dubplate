@@ -165,6 +165,8 @@ export function scoreTrack(input: ScoreInput): Decision {
     .map((c) => {
       let rel = Math.max(0, ...hyps.map((h) => relevance(h, c) * (h.from === "ai-alt" ? 0.9 : 1)))
       if (c.fingerprint && c.sourceScore) rel = Math.max(rel, c.sourceScore * 0.95)
+      // A release a person named by its code is this track, whatever the filename says.
+      if (c.pinned) rel = 1
       return { c, rel, relPrimary: relevance(primary, c) }
     })
     .filter((x) => x.rel >= RELEVANCE_MIN)
@@ -194,8 +196,8 @@ export function scoreTrack(input: ScoreInput): Decision {
   for (const cl of clusters) {
     cl.sources = [...cl.best.keys()] as CandidateCluster["sources"]
     cl.support = round([...cl.best.entries()].reduce((s, [src, rel]) => s + weightOf(src) * rel, 0))
-    // Prefer the most authoritative spelling as the cluster representative.
-    cl.rep = [...cl.candidates].sort((a, b) => weightOf(b.source) - weightOf(a.source))[0]
+    // Prefer the most authoritative spelling as the cluster representative (a release a person named first).
+    cl.rep = [...cl.candidates].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || weightOf(b.source) - weightOf(a.source))[0]
     cl.artist = cl.rep.artist
     cl.title = cl.rep.title
   }
@@ -207,7 +209,10 @@ export function scoreTrack(input: ScoreInput): Decision {
     const firm = clusters.findIndex(confirms)
     if (firm > 0) clusters.unshift(...clusters.splice(firm, 1))
   }
-  const best = clusters.length && confirms(clusters[0]) ? clusters[0] : undefined
+  const pinnedAt = clusters.findIndex((cl) => cl.candidates.some((c) => c.pinned))
+  if (pinnedAt > 0) clusters.unshift(...clusters.splice(pinnedAt, 1))
+  const pinned = pinnedAt >= 0 ? clusters[0].candidates.find((c) => c.pinned) : undefined
+  const best = clusters.length && (pinned || confirms(clusters[0])) ? clusters[0] : undefined
   const runner = clusters[1]
   let conflict = false
   let final: number
@@ -235,7 +240,7 @@ export function scoreTrack(input: ScoreInput): Decision {
     final = 0.3 * parseScore + 0.7 * sourceScore
 
     // ---- conflict ----
-    if (runner && runner.support >= best.support * 0.6 && runner.relevance >= 0.7 && sameRecording(best.rep, runner.rep) < CLUSTER_MIN) {
+    if (!pinned && runner && runner.support >= best.support * 0.6 && runner.relevance >= 0.7 && sameRecording(best.rep, runner.rep) < CLUSTER_MIN) {
       conflict = true
       const penalty = 0.25 * (runner.support / best.support)
       final -= penalty
@@ -280,9 +285,15 @@ export function scoreTrack(input: ScoreInput): Decision {
     }
 
     // ---- choose spelling ----
-    if (sourceMatch >= 0.8 || best.candidates.some((c) => c.fingerprint)) {
+    if (pinned) {
+      final = Math.max(final, 0.97)
+      factors.push({ key: "pinned", label: "You named the release", score: 1, weight: 0, detail: `${pinned.sourceLabel} release ${pinned.externalId ?? ""}, from the code you gave` })
+    }
+    if (pinned || sourceMatch >= 0.8 || best.candidates.some((c) => c.fingerprint)) {
       basis = "sources"
-      reading = mergeFromSources(reading, best.rep, best.candidates)
+      reading = mergeFromSources(pinned ? { ...reading, artists: [], featuring: [] } : reading, best.rep, best.candidates)
+      // The release a person named says the year and label, not the earliest of the others.
+      if (pinned) reading = { ...reading, year: pinned.year ?? reading.year, label: pinned.label ?? reading.label }
     } else {
       warnings.push(`Closest source hit only matches ${Math.round(sourceMatch * 100)}% - keeping the ${basis === "ai" ? "AI" : "parsed"} reading`)
     }
@@ -307,8 +318,10 @@ export function scoreTrack(input: ScoreInput): Decision {
 
   // ---- release: release group, then release, then recording ----
   const fingerprintRecordings = new Set((best?.candidates ?? []).filter((c) => c.fingerprint && c.ids?.mbRecordingId).map((c) => c.ids!.mbRecordingId!))
-  const release =
-    best && basis === "sources"
+  const pinnedRelease = pinned?.releases?.[0]
+  const release: ReleaseChoice | null = pinnedRelease
+    ? { release: pinnedRelease, reason: `you gave its ${pinned!.sourceLabel} code`, considered: 1 }
+    : best && basis === "sources"
       ? pickRelease(releasesOf(best.candidates), {
           artists: reading.artists,
           albumTag: input.tags.album,
@@ -345,13 +358,13 @@ export function scoreTrack(input: ScoreInput): Decision {
   // knows isn't this file.)
   if (input.context) {
     const fileSays = input.context.versionSays ?? [input.context.filename, input.tags.title]
-    const heard = (best?.candidates ?? []).filter((c) => c.fingerprint).map((c) => c.title)
+    const heard = (best?.candidates ?? []).filter((c) => c.fingerprint || c.pinned).map((c) => c.title)
     if (reading.version && !versionBacked(reading.version, [...fileSays, ...heard])) {
       checked.notes.push({ field: "version", fixed: true, message: `Version "${reading.version}" left out: the file's own name and title don't say so` })
       reading = { ...reading, version: undefined }
     }
     // An audio fingerprint knows the recording itself; a text search only knows the names.
-    if (basis === "sources" && !(best?.candidates ?? []).some((c) => c.fingerprint)) {
+    if (basis === "sources" && !(best?.candidates ?? []).some((c) => c.fingerprint || c.pinned)) {
       const t = withoutUnbackedVersions(reading.title, fileSays)
       if (t.removed.length) {
         checked.notes.push({ field: "title", fixed: true, message: `Took ${t.removed.join(" ")} off the title: a source's title says so, but nothing about the file does` })

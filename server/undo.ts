@@ -7,7 +7,7 @@ import type { SQLInputValue } from "node:sqlite"
 import { getDb, tx } from "./db"
 
 /** Columns a review action or bulk edit can change: on the track row… */
-const COLUMNS = ["status", "final_json", "proposed_name", "note", "bpm", "musical_key", "art_found_json", "top_sources", "confidence"] as const
+const COLUMNS = ["status", "final_json", "proposed_name", "note", "bpm", "musical_key", "art_found_json", "top_sources", "confidence", "ids_json", "approved_by"] as const
 /** …and in track_data (a reset clears these). */
 const DATA_COLUMNS = ["ai_json", "candidates_json", "decision_json"] as const
 
