@@ -27,6 +27,7 @@ import type {
   LogLevel,
   LogSummary,
   MbSubmission,
+  DiscogsLookup,
   MediaServerConfig,
   MixSuggestion,
   Operation,
@@ -250,6 +251,10 @@ export interface MbSeed {
   submission: MbSubmission
   action: string
   fields: Record<string, string>
+  /** filled in from a whole Discogs release, with the chosen files' places on it */
+  release: { source: "discogs"; id: number; url: string; title: string; tracks: number; yours: number[] } | null
+  /** the whole release these tracks are known to be on, when only the files were used */
+  wholeAvailable: { id: number; title: string } | null
 }
 
 /** Fields bulk edit can set; null or "" clears. */
@@ -425,7 +430,10 @@ export const api = {
   acoustidSubmit: (s?: Selection) => post<Job>("/api/acoustid/submit", s ? sel(s) : {}),
   acoustidCheck: () => post<AcoustIdSubmissions & { imported: number }>("/api/acoustid/check"),
   mbSubmissions: () => get<MbSubmission[]>("/api/musicbrainz/submissions"),
-  mbSeed: (s: Selection) => post<MbSeed>("/api/musicbrainz/seed", { ...sel(s), base: window.location.origin }),
+  mbSeed: (s: Selection, opts: { whole?: boolean; discogs?: string } = {}) => post<MbSeed>("/api/musicbrainz/seed", { ...sel(s), ...opts, base: window.location.origin }),
+  discogsLookup: (s: Selection, code: string) => post<DiscogsLookup>("/api/discogs/lookup", { ...sel(s), code }),
+  discogsApply: (releaseId: number, assignments: { trackId: number; index: number | null }[]) =>
+    post<{ applied: number; skipped: number; release: { id: number; title: string }; undoId: string | null }>("/api/discogs/apply", { releaseId, assignments }),
   mbSubmitted: (id: number) => post<MbSubmission>(`/api/musicbrainz/submissions/${id}/submitted`),
   mbComplete: (id: number, releaseMbid: string) => post<{ submission: MbSubmission; recordings: number }>(`/api/musicbrainz/submissions/${id}/complete`, { releaseMbid }),
 

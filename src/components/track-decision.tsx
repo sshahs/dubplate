@@ -160,13 +160,15 @@ function openReleaseEditor(seed: MbSeed) {
   form.remove()
 }
 
-/** The tracks the release editor will be filled with, read back from its fields. */
+/** The tracks the release editor will be filled with, read back from its fields, disc by disc. */
 function seedTracks(fields: Record<string, string>) {
-  const out: { name: string; length: number | null; recording: boolean }[] = []
-  for (let i = 0; fields[`mediums.0.track.${i}.name`] !== undefined; i++) {
-    const len = fields[`mediums.0.track.${i}.length`]
-    out.push({ name: fields[`mediums.0.track.${i}.name`], length: len ? Number(len) / 1000 : null, recording: !!fields[`mediums.0.track.${i}.recording`] })
-  }
+  const out: { name: string; number: string; disc: number; length: number | null; recording: boolean }[] = []
+  for (let m = 0; fields[`mediums.${m}.track.0.name`] !== undefined; m++)
+    for (let i = 0; fields[`mediums.${m}.track.${i}.name`] !== undefined; i++) {
+      const p = `mediums.${m}.track.${i}`
+      const len = fields[`${p}.length`]
+      out.push({ name: fields[`${p}.name`], number: fields[`${p}.number`] ?? String(i + 1), disc: m + 1, length: len ? Number(len) / 1000 : null, recording: !!fields[`${p}.recording`] })
+    }
   return out
 }
 
@@ -201,14 +203,23 @@ export function MusicBrainzDialog({
   const [seed, setSeed] = useState<MbSeed | null>(null)
   const [opened, setOpened] = useState(false)
   const [link, setLink] = useState("")
+  const [discogs, setDiscogs] = useState("")
   const submissionId = seed?.submission.id ?? resume
   const close = () => {
     onOpenChange(false)
     setSeed(null)
     setOpened(false)
     setLink("")
+    setDiscogs("")
   }
-  const prepare = useMutation({ mutationFn: () => api.mbSeed(selection), onSuccess: setSeed, onError: (e) => toast.error(e.message) })
+  const prepare = useMutation({
+    mutationFn: (opts: { whole?: boolean; discogs?: string } = {}) => api.mbSeed(selection, opts),
+    onSuccess: (s) => {
+      setSeed(s)
+      setOpened(false)
+    },
+    onError: (e) => toast.error(e.message),
+  })
   const complete = useMutation({
     mutationFn: () => api.mbComplete(submissionId!, link),
     onSuccess: (r) => {
@@ -222,6 +233,8 @@ export function MusicBrainzDialog({
     onError: (e) => toast.error(e.message),
   })
   const tracks = seed ? seedTracks(seed.fields) : []
+  const yours = new Set(seed?.release?.yours ?? [])
+  const discs = new Set(tracks.map((t) => t.disc)).size
 
   return (
     <Dialog open={open} onOpenChange={(o) => (o ? onOpenChange(true) : close())}>
@@ -229,34 +242,71 @@ export function MusicBrainzDialog({
         <DialogHeader>
           <DialogTitle>Add to MusicBrainz</DialogTitle>
           <DialogDescription className="text-pretty">
-            Dubplate fills in MusicBrainz's release editor from what it found{count && count > 1 ? `, with these ${count} tracks as one release` : ""}. You check everything there and submit it
-            yourself (you need a MusicBrainz account). Afterwards the release's IDs go into the tags, so Jellyfin, Navidrome and Symphonium know it.
+            Dubplate fills in MusicBrainz's release editor from what it found. When it knows the record on Discogs, that's the whole release - every track, label, catalogue number and
+            format - not just {count && count > 1 ? "these files" : "this file"}. You check everything there and submit it yourself (you need a MusicBrainz account). Afterwards the
+            release's IDs go into the tags, so Jellyfin, Navidrome, Symphonium and your car know it.
           </DialogDescription>
         </DialogHeader>
 
         {!seed && (
-          <Button variant={resume ? "outline" : "default"} onClick={() => prepare.mutate()} disabled={prepare.isPending} className="self-start">
+          <Button variant={resume ? "outline" : "default"} onClick={() => prepare.mutate({})} disabled={prepare.isPending} className="self-start">
             {prepare.isPending && <Spinner data-icon="inline-start" />}
             {resume ? "Fill in the release editor again" : "Prepare the release"}
           </Button>
         )}
+
+        <form
+          className="space-y-1"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (discogs.trim()) prepare.mutate({ discogs: discogs.trim() })
+          }}
+        >
+          <p className="text-muted-foreground text-xs text-pretty">
+            {seed?.release ? "A different record? " : "Got the record on Discogs? "}Paste its link or <span className="font-mono">[r…]</span> code to fill in the whole release from it:
+          </p>
+          <div className="flex gap-2">
+            <Input value={discogs} onChange={(e) => setDiscogs(e.target.value)} placeholder="https://www.discogs.com/release/… or [r1234567]" aria-label="Discogs release for MusicBrainz" />
+            <Button type="submit" variant="secondary" disabled={!discogs.trim() || prepare.isPending}>
+              Use it
+            </Button>
+          </div>
+        </form>
 
         {seed && (
           <div className="space-y-2 rounded-2xl border p-3 text-sm">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-medium">{seed.fields.name}</span>
               <Badge variant="outline">{seed.fields.type}</Badge>
+              {seed.fields["mediums.0.format"] && <Badge variant="outline">{seed.fields["mediums.0.format"]}</Badge>}
               {seed.fields["events.0.date.year"] && <Badge variant="outline">{seed.fields["events.0.date.year"]}</Badge>}
             </div>
             <div className="text-muted-foreground text-xs">
               by {seedArtist(seed.fields)}
               {seed.fields["labels.0.name"] ? ` · ${seed.fields["labels.0.name"]}` : ""}
+              {seed.fields["labels.0.catalog_number"] ? ` · ${seed.fields["labels.0.catalog_number"]}` : ""}
             </div>
-            <ol className="space-y-0.5 text-xs">
+            {seed.release && (
+              <p className="text-xs text-pretty">
+                The whole release from{" "}
+                <a className="underline underline-offset-2" href={seed.release.url} target="_blank" rel="noreferrer noopener">
+                  Discogs
+                </a>
+                : {seed.release.tracks} track{seed.release.tracks === 1 ? "" : "s"}
+                {discs > 1 ? ` on ${discs} discs` : ""}, {seed.release.yours.length} of them yours.
+              </p>
+            )}
+            {seed.wholeAvailable && !seed.release && (
+              <Button size="xs" variant="outline" onClick={() => prepare.mutate({ whole: true })} disabled={prepare.isPending}>
+                Use the whole of "{seed.wholeAvailable.title}" instead
+              </Button>
+            )}
+            <ol className="max-h-64 space-y-0.5 overflow-auto text-xs">
               {tracks.map((t, i) => (
-                <li key={i} className="flex gap-2">
-                  <span className="text-muted-foreground w-5 shrink-0 text-right">{i + 1}.</span>
+                <li key={i} className={cn("flex gap-2", seed.release && !yours.has(i) && "text-muted-foreground")}>
+                  <span className="text-muted-foreground w-8 shrink-0 text-right font-mono">{discs > 1 ? `${t.disc}·${t.number}` : t.number}</span>
                   <span className="flex-1 break-words">{t.name}</span>
+                  {seed.release && yours.has(i) && <span className="text-rasta-green">yours</span>}
                   {t.recording && <span className="text-muted-foreground">known recording</span>}
                   <span className="text-muted-foreground font-mono">{fmtDuration(t.length)}</span>
                 </li>

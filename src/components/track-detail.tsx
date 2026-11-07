@@ -4,6 +4,7 @@ import {
   Alert02Icon,
   ArrowRight02Icon,
   Cancel01Icon,
+  CdIcon,
   FlashIcon,
   LinkSquare02Icon,
   RefreshIcon,
@@ -28,6 +29,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { DecisionSteps } from "@/components/track-decision"
+import { DiscogsCodeDialog } from "@/components/discogs-code-dialog"
 import { api } from "@/lib/api"
 import { fmtBytes, fmtDuration } from "@/lib/format"
 import { toastUndoable } from "@/lib/undo"
@@ -78,6 +80,7 @@ export function TrackDetail({
   const [edit, setEdit] = useState<{ trackId: number; draft: MetaDraft } | null>(null)
   // Source groups showing every option, not just the first six.
   const [allShown, setAllShown] = useState<Set<number>>(new Set())
+  const [discogsOpen, setDiscogsOpen] = useState(false)
   const saved = useMemo(() => (track ? toDraft(initialMeta(track)) : null), [track])
   const dirty = edit?.trackId === trackId
   const draft = dirty ? edit.draft : saved
@@ -244,6 +247,20 @@ export function TrackDetail({
         </Button>
         {/* Like Shazam: what the audio itself sounds like, for files with nothing else to go on. */}
         <ListenButton track={track} onUse={(c) => editDraft(candidateToMeta(c, draft))} />
+        {/* For the white labels no search finds: the release found on Discogs, by its code. */}
+        <Button variant="outline" onClick={() => setDiscogsOpen(true)}>
+          <HugeiconsIcon icon={CdIcon} strokeWidth={2} data-icon="inline-start" />
+          Discogs code
+        </Button>
+        <DiscogsCodeDialog
+          open={discogsOpen}
+          onOpenChange={setDiscogsOpen}
+          selection={{ ids: [track.id] }}
+          onDone={() => {
+            setEdit(null)
+            void refetch()
+          }}
+        />
         <Button variant="ghost" onClick={() => rerun.mutate()} disabled={rerun.isPending}>
           <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} data-icon="inline-start" />
           Re-run

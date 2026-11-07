@@ -6,6 +6,7 @@ import {
   Download04Icon,
   FileCorruptIcon,
   FingerPrintIcon,
+  CdIcon,
   Image01Icon,
   LinkSquare02Icon,
   MusicNote03Icon,
@@ -31,6 +32,7 @@ import { ConfidenceMeter, StatusBadge } from "@/components/confidence"
 import { Cover } from "@/components/cover"
 import { DjExportDialog } from "@/components/dj-export-dialog"
 import { MusicBrainzDialog } from "@/components/track-decision"
+import { DiscogsCodeDialog } from "@/components/discogs-code-dialog"
 import { QueryError } from "@/components/query-error"
 import { TrackDetail } from "@/components/track-detail"
 import { Button } from "@/components/ui/button"
@@ -195,6 +197,7 @@ export default function TracksPage() {
   const problems = params.get("problems") === "1" || undefined
   const [exporting, setExporting] = useState(false)
   const [mbOpen, setMbOpen] = useState(false)
+  const [discogsOpen, setDiscogsOpen] = useState(false)
   const [sort, setSort] = useState<Sort>("filename")
   const [dir, setDir] = useState<"asc" | "desc">("asc")
   const [selected, setSelected] = useState<Set<number>>(new Set())
@@ -430,6 +433,7 @@ export default function TracksPage() {
       />
 
       {selection && <MusicBrainzDialog open={mbOpen} onOpenChange={setMbOpen} selection={selection} count={selectionCount} />}
+      {selection && <DiscogsCodeDialog open={discogsOpen} onOpenChange={setDiscogsOpen} selection={selection} count={selectionCount} />}
 
       <DjExportDialog
         open={exporting}
@@ -559,6 +563,10 @@ export default function TracksPage() {
                     <DropdownMenuLabel>Extras</DropdownMenuLabel>
                     <DropdownMenuItem onClick={() => job.mutate("analyze")}>Analyse BPM & key</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => job.mutate("reanalyze")}>Re-analyse BPM & key</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setDiscogsOpen(true)}>
+                      <HugeiconsIcon icon={CdIcon} strokeWidth={2} />
+                      Use a Discogs release (code)…
+                    </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => job.mutate("artwork")}>
                       <HugeiconsIcon icon={Image01Icon} strokeWidth={2} />
                       Find artwork

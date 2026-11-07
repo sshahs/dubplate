@@ -423,6 +423,8 @@ export interface Candidate {
   genres?: string[]
   /** where the release came out (ISO country, e.g. "GB") */
   country?: string
+  /** a person named this release (its Discogs code): it wins over every search hit */
+  pinned?: boolean
 }
 
 export interface ConfidenceFactor {
@@ -593,6 +595,46 @@ export interface MbSubmission {
   releaseMbid: string | null
   createdAt: string
   updatedAt: string
+}
+
+/** One track of a Discogs release, as the "Discogs code" box shows it. */
+export interface DiscogsTrackRow {
+  /** its place in the release's list of playable tracks (headings left out) */
+  index: number
+  /** as Discogs writes it: "A1", "3", "1-05" */
+  position: string
+  title: string
+  /** the track's own artists, when they aren't the release's */
+  artist?: string
+  duration?: number
+}
+
+/** A Discogs release, read from its code, ready to put on tracks or send to MusicBrainz. */
+export interface DiscogsReleaseView {
+  id: number
+  url: string
+  title: string
+  artist: string
+  year?: number
+  released?: string
+  country?: string
+  label?: string
+  catno?: string
+  barcode?: string
+  /** "Vinyl, 12\", White Label" */
+  format?: string
+  kind: ReleaseKind
+  genres: string[]
+  artwork?: string
+  tracks: DiscogsTrackRow[]
+}
+
+/** What a Discogs code found: the release, or several to pick from (a catalogue number many share). */
+export interface DiscogsLookup {
+  release?: DiscogsReleaseView
+  choices?: { id: number; title: string; year?: string; label?: string; catno?: string; format?: string; country?: string; thumb?: string }[]
+  /** each track asked about, and the release's track it looks like (null: none clearly) */
+  matches?: { trackId: number; filename: string; index: number | null }[]
 }
 
 /** A scraper's recent health, to switch off one that's started returning login or home pages. */
