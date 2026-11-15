@@ -279,8 +279,8 @@ describe("versions need evidence", () => {
     expect(d.provenance?.genre).toBe("musicbrainz")
     // MusicBrainz alone: its most-used tag, written as a tag shows it
     expect(score("Domu - Save You.flac", { artists: ["Domu"], title: "Save You", genre: "Jazz" }, [mb("Save You"), hit("deezer", "Domu", "Save You")]).genre).toBe("Deep House")
-    // No source says: the AI's guess is all there is
-    expect(score("Domu - Save You.flac", { artists: ["Domu"], title: "Save You", genre: "Jazz" }, [hit("deezer", "Domu", "Save You"), hit("itunes", "Domu", "Save You")]).genre).toBe("Jazz")
+    // No source says: never the AI's guess on its own - nothing, until the artist's genres are known.
+    expect(score("Domu - Save You.flac", { artists: ["Domu"], title: "Save You", genre: "Jazz" }, [hit("deezer", "Domu", "Save You"), hit("itunes", "Domu", "Save You")]).genre).toBeUndefined()
   })
 
   it("never shows the AI an example's version this file doesn't share", () => {

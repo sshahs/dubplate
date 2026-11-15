@@ -83,9 +83,10 @@ export function metadataRulebook(naming?: Pick<Settings["naming"], "artistJoiner
 }
 
 export function systemPrompt(context: string, naming?: Pick<Settings["naming"], "artistJoiner" | "clashJoiner" | "featuring">) {
-  return `You are the music librarian inside a tagger for DJ and collector libraries. You know music across every genre (reggae, dub and dancehall, UK grime, garage, jungle and dubstep, house, techno and disco, hip-hop, R&B and soul, jazz, rock, pop, Latin, African and classical), Jamaican and UK sound-system culture especially deeply, and you are expert at untangling messy digital filenames.
+  return `You are the music librarian inside a tagger for DJ and collector libraries. You know music across every genre (hip-hop, UK rap, grime and drill, R&B and soul, pop, rock, house, techno and disco, UK garage, jungle and dubstep, reggae, dub and dancehall, jazz, Latin, African and classical), including UK and Jamaican sound-system culture, and you are expert at untangling messy digital filenames.
 
 Collection context: ${context}
+(That's the collection as a whole, to help read names. It says nothing about any one file's genre: plenty of files in it are other genres.)
 
 Given one audio file's name, folder path and any embedded tags, work out who performed it and what it is.
 
@@ -105,6 +106,7 @@ Where your answer comes from:
 - Everything you return describes this one file, read from its own name, folder and embedded tags (and the right spelling of names you know). Nothing else.
 - You may be shown other files the owner approved before. They are examples for context only: they show how the owner spells and writes names. They are different recordings - never copy anything from them into your answer: no artist, title words, version, year, album, label or riddim that this file doesn't give.
 - Before you answer, check each of version, year, label, riddim and event: if this file's name, folder or tags don't state it, it's null. The version needs the file's own name or title to state it.
+- genre: null unless you genuinely know this artist and the kind of music they make; then their genre in a word or two ("UK Rap", "Grime", "Dancehall", "Deep House"). Never use the collection context, the folder name or the app's name to pick it, and never default to one genre: a UK rapper is "UK Rap" or "Grime", not "Reggae". When unsure, null - the app looks the genre up in the music databases.
 - country: the main artist's home country as an ISO code ("GB", "US", "JM") if you genuinely know it, else null.
 - confidence: 0 to 1 - how sure you are of artists + title together.
 - searchQueries: 1 to 3 short queries you would type into MusicBrainz or Discogs to verify this.
@@ -151,7 +153,8 @@ export function buildUserPrompt(track: Track, corrections: Correction[]): string
     t.title && `title="${t.title}"`,
     t.album && `album="${t.album}"`,
     t.year && `year=${t.year}`,
-    t.genre?.length && `genre="${t.genre.join(", ")}"`,
+    // The genre the file came with: one an earlier cut wrote (maybe a guess) would only lead this one.
+    (track.original ? track.original.tags.genre : t.genre)?.length && `genre="${(track.original ? track.original.tags.genre! : t.genre!).join(", ")}"`,
     t.label && `label="${t.label}"`,
     // (not the note this app may have written itself)
     t.comment && !/^identified by dubplate$/i.test(t.comment.trim()) && `comment="${t.comment.slice(0, 120)}"`,

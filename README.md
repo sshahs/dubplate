@@ -819,9 +819,19 @@ Anthropic models that take images.
 
 With this off, the genre a track gets is the one the agreeing sources give
 most (each source's genres and styles, a MusicBrainz recording's most-used
-tags), written as a tag shows it ("Deep House"). The AI's guess only counts
-when no source gives one: an AI that knows an artist for jazz isn't a source
-tagging this tune deep house. Only a file without a genre gets one.
+tags), written as a tag shows it ("Deep House"). Where the recording's hits
+give none (Spotify, Deezer and Last.fm's search don't, and MusicBrainz often
+has none on a UK rap recording), it's the **artist's** genres on MusicBrainz
+(free, no key), or their top tags on Last.fm when a Last.fm key is set:
+"UK Hip Hop" or "UK Drill", looked up once per artist and kept. Failing
+those, the genre tag the file came with. Only a file without a genre gets one.
+
+The AI's guess is never used on its own. A small model asked for a genre it
+doesn't know gives the one the collection is mostly, so a reggae-heavy crate
+had every UK rap tune called "Reggae". After upgrading, tracks whose genre was
+only that guess are put right once: the artist's genre is looked up, or the
+genre is left empty. A file already cut with the guess goes back to Cut & Tag,
+and its genre tag is corrected, or returned to the one it came with.
 
 Off by default. **Settings → Genres** gives every track exactly one genre from
 your own list, decided by where the music's from and its style rather than
