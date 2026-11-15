@@ -1,7 +1,8 @@
 // Orchestrates interpret → scour → score for batches of tracks.
 
 import { riskOf } from "../shared/risk"
-import type { AiParse, Candidate, Settings, Track, TrackReading, TrackStatus } from "../shared/types"
+import type { AiParse, Candidate, Decision, Settings, Track, TrackReading, TrackStatus } from "../shared/types"
+import { normArtist } from "./core/normalize"
 import { interpretTrack } from "./ai/interpreter"
 import { escalate, shouldEscalate } from "./ai/escalation"
 import { overBudget } from "./ai/usage"
@@ -11,7 +12,7 @@ import { handsOff } from "./autopilot"
 import { findArtwork } from "./art"
 import { canonicalGenre } from "./genres"
 import { lyricsForTrack, needsLyrics } from "./lyrics"
-import { scoreTrack } from "./core/confidence"
+import { genreCase, scoreTrack } from "./core/confidence"
 import { parseFilename } from "./core/filename-parser"
 import { versionSays } from "./core/evidence"
 import { checkCandidate, cleanCandidate, cleanFinal, hasMarkup } from "./core/plain-text"
@@ -28,6 +29,7 @@ import { aliasMap, getTrack, identifiedTwin, knownArtists, listCorrections, stat
 import { acoustidLookup, findFpcalc, fingerprintFile } from "./sources/acoustid"
 import { folderContext } from "./scanner"
 import { genreBoost, scourTrack, SourceBreaker } from "./sources"
+import { canLookUpGenres, knownArtistGenres, lookUpArtistGenres, needsArtistGenres } from "./sources/artist-genres"
 
 /** Statuses a human set - automated passes must not overwrite them. */
 const HUMAN_STATUSES: TrackStatus[] = ["approved", "done", "rejected"]
@@ -100,6 +102,14 @@ function readingForScore(track: Track): AiParse | null {
   return { ...e.ai, alternatives: [...e.ai.alternatives, ...alt].slice(0, 5) }
 }
 
+/**
+ * The genre tag the file came with, before Dubplate wrote one (a genre it wrote from
+ * the AI's guess isn't the file's own, and would only lead the next guess).
+ */
+export function fileGenre(t: Pick<Track, "original" | "tags">): string[] {
+  return (t.original ? t.original.tags.genre : t.tags.genre) ?? []
+}
+
 export function scoreAndSave(track: Track, settings: Settings): Track {
   const decision = scoreTrack({
     heuristic: track.heuristic,
@@ -112,6 +122,8 @@ export function scoreAndSave(track: Track, settings: Settings): Track {
     thresholds: settings.confidence,
     context: { filename: track.filename, folders: folderContext(track.relDir), preferOwnRelease: settings.confidence.preferOwnRelease, versionSays: versionSays(track) },
     supporting: supportingSources(settings),
+    artistGenres: knownArtistGenres,
+    fileGenre: fileGenre(track),
   })
   if (track.escalation) {
     const { ai: _ai, ...e } = track.escalation
@@ -134,6 +146,40 @@ export function scoreAndSave(track: Track, settings: Settings): Track {
   next.proposedName = proposedFilename(next, settings)
   updateTrack(track.id, { decision, confidence: decision.confidence, status, final, approvedBy, proposedName: next.proposedName })
   return next
+}
+
+/** The decision's genre came from the hits on the recording itself (not the artist, the file's tag, or nowhere). */
+function genreFromRecording(d: Decision): boolean {
+  const g = d.genre?.toLowerCase()
+  return !!g && (d.sourceGenres ?? []).some((s) => genreCase(s).toLowerCase() === g)
+}
+
+/** The genres the AI guessed for a track, lower-cased. */
+const aiGenres = (t: Track) => [t.ai?.genre, t.escalation?.ai.genre].filter((g): g is string => !!g).map((g) => g.trim().toLowerCase())
+
+/** The track's genre is the AI's guess, not something a source or the file said. */
+function genreIsGuess(t: Track): boolean {
+  const g = (t.final?.genre ?? t.decision?.genre)?.trim().toLowerCase()
+  if (!g || !aiGenres(t).includes(g)) return false
+  if (fileGenre(t).some((x) => x.trim().toLowerCase() === g)) return false
+  return !(t.decision && genreFromRecording(t.decision) && t.decision.genre?.toLowerCase() === g)
+}
+
+/**
+ * Where the recording's hits gave no genre, ask MusicBrainz (then Last.fm) for the
+ * artist's. True when that found some - the track is then decided again with them.
+ */
+export async function lookUpGenresFor(t: Track, settings: Settings, signal?: AbortSignal): Promise<boolean> {
+  const d = t.decision
+  if (!d?.artists.length || genreFromRecording(d) || !canLookUpGenres(settings) || !needsArtistGenres(d.artists)) return false
+  // MusicBrainz artist IDs a hit already gave, so the right one of several same-named artists is asked about.
+  const mbids = new Map<string, string>()
+  for (const c of d.clusters[0]?.candidates ?? [])
+    (c.artists ?? []).forEach((name, i) => {
+      const id = c.ids?.mbArtistIds?.[i]
+      if (id && !mbids.has(normArtist(name))) mbids.set(normArtist(name), id)
+    })
+  return !!(await lookUpArtistGenres(d.artists, settings, { mbids, country: (t.escalation?.ai ?? t.ai)?.country, signal }))
 }
 
 export interface ProcessOptions {
@@ -289,6 +335,8 @@ export async function processTracks(ids: number[], startSettings: Settings, opts
 
         if (ctx.signal.aborted) return
         let scored = scoreAndSave(track, settings)
+        // No genre from the recording's hits: the artist's, from MusicBrainz, rather than the AI's guess.
+        if (await lookUpGenresFor(scored, settings, ctx.signal).catch(() => false)) scored = scoreAndSave(getTrack(id)!, settings)
 
         // Uncertain (a middle score, or sources in conflict): a second model reads it, and a person decides.
         const why = opts.interpret && !aiDisabled && !overBudget(settings) ? shouldEscalate(scored, settings) : null
@@ -498,8 +546,10 @@ const FIELDS_CHECKED = "fieldsChecked"
  * 3: a version needs the file's own first name or title to say it - not a folder, album,
  *    genre or comment, and not a name Dubplate gave it (files cut as "(Dubplate)" go back to Cut & Tag);
  *    and the genre the sources give beats the AI's guess.
+ * 4: the AI's genre is never used on its own: a genre that was only its guess is replaced by
+ *    the artist's genres on MusicBrainz (or Last.fm), or left empty.
  */
-const FIELDS_CHECK_VERSION = 3
+const FIELDS_CHECK_VERSION = 4
 
 /** The reading a track goes by: the AI's, else the filename's. */
 const readingOf = (ai: AiParse | null | undefined, heuristic: Track["heuristic"]) => (ai && (ai.title || ai.artists.length) ? ai : heuristic)
@@ -519,6 +569,17 @@ export async function recheckFields(ids: number[], settings: Settings, ctx: JobC
   const changed: number[] = []
   const recut: string[] = []
   let approved = 0
+  // Genres that were only the AI's guess: the artists' genres are looked up first (MusicBrainz, a second each).
+  if (canLookUpGenres(settings)) {
+    const guessed = ids.map((id) => getTrack(id)).filter((t): t is Track => !!t && !t.missing && genreIsGuess(t))
+    if (guessed.length) ctx.message(`Looking up the artists' genres for ${guessed.length} track${guessed.length === 1 ? "" : "s"} the AI guessed a genre for`)
+    let found = 0
+    for (const t of guessed) {
+      if (ctx.signal.aborted) return
+      if (await lookUpGenresFor(t, settings, ctx.signal).catch(() => false)) found++
+    }
+    if (guessed.length) ctx.log("info", `Looked up the artists' genres for ${guessed.length} track${guessed.length === 1 ? "" : "s"} whose genre the AI guessed (${found} found)`)
+  }
   for (const id of ids) {
     if (ctx.signal.aborted) return
     const t = getTrack(id)
@@ -553,6 +614,8 @@ export async function recheckFields(ids: number[], settings: Settings, ctx: JobC
             final = { ...final, version: undefined }
           }
         }
+        // A genre that was only the AI's guess: what the sources or the artist's genres say now, or none.
+        if (final && now && genreIsGuess({ ...t, final }) && (final.genre ?? "").toLowerCase() !== (now.genre ?? "").toLowerCase()) final = { ...final, genre: now.genre }
         const finalChanged = JSON.stringify(final) !== JSON.stringify(t.final)
         if (!anyChange && !finalChanged && !tagsWrong && JSON.stringify(heuristic) === JSON.stringify(t.heuristic)) return
         updateTrack(id, { heuristic, ai, candidates, final, proposedName: proposedFilename({ ...next, final }, settings) })

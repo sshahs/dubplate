@@ -357,7 +357,9 @@ describe("canonical genres", () => {
     expect(canonicalGenre(t(), d(["Hip Hop", "Trap"], "US"), s())).toMatchObject({ genre: "Hip-Hop", region: "" })
     // Nobody says where it's from: only the rules that don't need to know.
     expect(canonicalGenre(t(), d(["Boom Bap"]), s())).toMatchObject({ genre: "Hip-Hop" })
-    expect(canonicalGenre(t({ ai: { country: "GB", genre: "rap" } as Track["ai"] }), d([]), s())).toMatchObject({ genre: "UK Rap" })
+    // The artist's genres on MusicBrainz, when the recording's hits have none; never the AI's guess.
+    expect(canonicalGenre(t({ ai: { country: "GB" } as Track["ai"] }), { ...d([]), artistGenres: { genres: ["uk hip hop", "hip hop"], source: "MusicBrainz" } }, s())).toMatchObject({ genre: "UK Rap", from: 'MusicBrainz (the artist) ("uk hip hop", UK)' })
+    expect(canonicalGenre(t({ ai: { country: "GB", genre: "Reggae" } as Track["ai"] }), d([]), s())).toBeNull()
     expect(canonicalGenre(t(), d(["Bashment"]), s())).toMatchObject({ genre: "Reggae" })
     // Your own pick wins; nothing fitting leaves it for you; switched off is nothing at all.
     expect(canonicalGenre(t({ final: { artists: [], featuring: [], title: "", genre: "Reggae" } }), d(["Grime"]), s())).toMatchObject({ genre: "Reggae", from: "your choice" })

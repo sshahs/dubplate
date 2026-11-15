@@ -44,6 +44,8 @@ export function extrasFor(t: Track, settings: Settings): TagExtras {
   out.lyrics = lyricsToEmbed(t, settings)
   if (settings.canonicalGenres.enabled) out.canonicalGenre = { genre: canonicalGenre(t, t.decision, settings)?.genre ?? null, overwrite: settings.canonicalGenres.overwrite }
   out.replaceLyrics = settings.lyrics.replaceExisting
+  out.aiGenre = [t.ai?.genre, t.escalation?.ai.genre].filter((g): g is string => !!g)
+  if (t.original) out.fileGenre = t.original.tags.genre ?? []
   return out
 }
 

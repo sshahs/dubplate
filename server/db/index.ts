@@ -324,6 +324,16 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE mb_submissions ADD COLUMN slots_json TEXT;
   `,
+  // 11: artists' genres from MusicBrainz or Last.fm, so a track's genre needn't be the AI's guess.
+  `
+  CREATE TABLE artist_genres (
+    key TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    genres_json TEXT NOT NULL,
+    source TEXT,
+    fetched_at TEXT NOT NULL
+  );
+  `,
 ]
 
 export type Db = DatabaseSync

@@ -127,9 +127,10 @@ const canonicalOf = (rule: GenreRule, from: string): CanonicalGenre => ({ genre:
  * The one canonical genre for a track, or null (switched off, or nothing in
  * the list fits - it then needs a person to pick one). Your own choice wins,
  * then a series or kind named in the title (Daily Duppy, instrumentals), then
- * what the agreeing sources say, then the AI, then the file's own tag.
+ * what the agreeing sources say, then the artist's genres on MusicBrainz or
+ * Last.fm, then the genre tag the file came with. Never the AI's guess.
  */
-export function canonicalGenre(t: Pick<Track, "final" | "ai" | "tags" | "escalation"> & { filename?: string }, d: Decision | null, settings: Settings): CanonicalGenre | null {
+export function canonicalGenre(t: Pick<Track, "final" | "ai" | "tags" | "escalation"> & { filename?: string; original?: Track["original"] }, d: Decision | null, settings: Settings): CanonicalGenre | null {
   const cg = settings.canonicalGenres
   if (!cg.enabled || !cg.rules.length) return null
   const region = regionOf(t, d)
@@ -144,8 +145,9 @@ export function canonicalGenre(t: Pick<Track, "final" | "ai" | "tags" | "escalat
   if (titled) return canonicalOf(titled.rule, `the title ("${titled.word}")`)
   const inputs: [string[], string][] = [
     [d?.sourceGenres ?? [], "the sources"],
-    [[t.escalation?.ai.genre, t.ai?.genre].filter((g): g is string => !!g), "the AI"],
-    [t.tags.genre ?? [], "the file's tag"],
+    // Not the AI: a small model asked for a genre it doesn't know gives the one the collection is mostly.
+    [d?.artistGenres?.genres ?? [], `${d?.artistGenres?.source ?? "MusicBrainz"} (the artist)`],
+    [(t.original ? t.original.tags.genre : t.tags.genre) ?? [], "the file's own tag"],
   ]
   for (const [terms, from] of inputs) {
     // Across one input, the rule most of its genres point to wins ("deep house" and "garage house" make it

@@ -118,6 +118,12 @@ export interface TagExtras {
    * or the AI's), over whatever the file has when `overwrite` is set.
    */
   canonicalGenre?: { genre: string | null; overwrite: boolean }
+  /**
+   * The genre the AI guessed, and the genre tag the file came with: a genre tag that's
+   * only the AI's guess (written by an earlier cut, not the file's own) is put right.
+   */
+  aiGenre?: string[]
+  fileGenre?: string[]
   /** disc and track numbers from the file's name and folders, for a file whose tags don't have them */
   placement?: { disc?: number; discTotal?: number; track?: number }
 }
@@ -152,6 +158,12 @@ export function tagsFor(meta: FinalMeta, current: ExistingTags, naming: Naming, 
   if (!current.album && meta.album) out.album = meta.album
   // …and with nothing better to put there, the placeholder goes (Rewind puts it back).
   for (const f of ["album", "label"] as const) if (was[f] && !current[f] && !out[f]) out[f] = ""
+  // A genre an earlier cut wrote from the AI's guess (every UK rap tune "Reggae") isn't the file's own:
+  // it's put right, or the file's own genre goes back.
+  const lower = (gs?: string[]) => (gs ?? []).map((g) => g.trim().toLowerCase()).join("|")
+  const onFile = was.genre
+  const guessed = !!onFile?.length && !!extras.aiGenre?.some((g) => lower([g]) === lower(onFile)) && lower(onFile) !== lower(extras.fileGenre)
+  if (guessed) current = { ...current, genre: extras.fileGenre?.length ? extras.fileGenre : undefined }
   if (was.genre?.length && !current.genre?.length && !meta.genre && !extras.canonicalGenre) out.genre = []
   if (!current.year && meta.year) out.year = meta.year
   if (extras.canonicalGenre) {
@@ -159,6 +171,8 @@ export function tagsFor(meta: FinalMeta, current: ExistingTags, naming: Naming, 
     const same = current.genre?.length === 1 && current.genre[0] === g
     if (g && !same && (extras.canonicalGenre.overwrite || !current.genre?.length)) out.genre = [g]
   } else if (!current.genre?.length && meta.genre) out.genre = [meta.genre]
+  if (guessed && !out.genre) out.genre = current.genre ?? []
+  if (out.genre && lower(out.genre) === lower(onFile)) delete out.genre
   if (!current.label && meta.label) out.label = meta.label
   if (!current.riddim && meta.riddim) out.riddim = meta.riddim
   // Grouping is where DJ software shows it; only an empty one is used.

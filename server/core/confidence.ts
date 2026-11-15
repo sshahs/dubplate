@@ -40,6 +40,10 @@ export interface ScoreInput {
   }
   /** sources whose hits back others up but never confirm a track on their own */
   supporting?: Set<string>
+  /** an artist's genres as the music databases list them (already looked up: no network here) */
+  artistGenres?: (artists: string[]) => { genres: string[]; source: string } | null
+  /** the genre tag the file came with, before Dubplate wrote anything */
+  fileGenre?: string[]
 }
 
 interface Hypothesis {
@@ -340,6 +344,18 @@ export function scoreTrack(input: ScoreInput): Decision {
     reading = { ...reading, album: release.release.title, label: reading.label ?? release.release.label }
     provenance.album = `${sourceName(release.release.source)} (${KIND_LABEL[release.release.kind]})`
   }
+  // The genre: what the sources that found the recording say, else the artist's genres on the music
+  // databases, else the genre tag the file came with. Never the AI's guess on its own - a small model
+  // asked for a genre it doesn't know gives the one the collection is mostly (every UK rap tune "Reggae").
+  const recordingGenre = best && basis === "sources" ? sourceGenre(best.candidates) : undefined
+  const byArtist = recordingGenre ? null : (input.artistGenres?.(reading.artists) ?? null)
+  const artistGenre = byArtist?.genres.filter((g) => !isPlaceholder("genre", g)).map(genreCase)[0]
+  const tagGenre = (input.fileGenre ?? []).map((g) => g.trim()).find((g) => g && !isPlaceholder("genre", g))
+  reading = { ...reading, genre: recordingGenre ?? artistGenre ?? tagGenre }
+  if (recordingGenre) provenance.genre ??= sourceName(best!.rep.source)
+  else if (artistGenre) provenance.genre = `${byArtist!.source} (the artist's genres)`
+  else if (tagGenre) provenance.genre = "the file's own tag"
+  else delete provenance.genre
   const versionCheck = checkVersion(reading, release, best, clusters, input.heuristic?.position?.whole ? null : input.duration)
 
   // Every field in its place before it's proposed; what can't be put right waits for a person.
@@ -404,6 +420,7 @@ export function scoreTrack(input: ScoreInput): Decision {
     versionCheck,
     provenance,
     sourceGenres: sourceGenresOf(best?.candidates ?? []),
+    ...(byArtist ? { artistGenres: { genres: byArtist.genres, source: byArtist.source } } : {}),
     ...positionOnAlbum(reading.album, release, basis === "sources" ? (best?.candidates ?? []) : []),
     ...(checked.notes.length ? { checks: checked.notes } : {}),
   }

@@ -481,6 +481,8 @@ export interface Decision {
   escalated?: Escalation
   /** genres the sources gave, as they worded them */
   sourceGenres?: string[]
+  /** the artist's genres on MusicBrainz or Last.fm, when the recording's hits gave none */
+  artistGenres?: { genres: string[]; source: string }
   /** the one genre from the canonical list (when canonical genres are on) */
   canonicalGenre?: CanonicalGenre | null
   /** what the field check put right, and what it couldn't */
