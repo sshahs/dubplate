@@ -3,6 +3,7 @@
 import { riskOf } from "../shared/risk"
 import type { AiParse, Candidate, Decision, Settings, Track, TrackReading, TrackStatus } from "../shared/types"
 import { normArtist } from "./core/normalize"
+import { applyAlbumLock } from "./core/album-lock"
 import { interpretTrack } from "./ai/interpreter"
 import { escalate, shouldEscalate } from "./ai/escalation"
 import { overBudget } from "./ai/usage"
@@ -125,6 +126,8 @@ export function scoreAndSave(track: Track, settings: Settings): Track {
     artistGenres: knownArtistGenres,
     fileGenre: fileGenre(track),
   })
+  // Kept together with its album: the album's details, the same on every track of it.
+  if (track.albumLock) Object.assign(decision, applyAlbumLock(decision, track.albumLock, track.candidates ?? []))
   if (track.escalation) {
     const { ai: _ai, ...e } = track.escalation
     decision.escalated = e
@@ -375,6 +378,11 @@ export async function processTracks(ids: number[], startSettings: Settings, opts
     })
   )
   ctx.tracksChanged(changed)
+  // The tracks of one album, kept together: one album name, album artist, year, label and cover on all of them.
+  if (opts.scour && changed.length && !ctx.signal.aborted) {
+    const { keepAlbumsTogether } = await import("./albums")
+    await keepAlbumsTogether(changed, settings, ctx).catch((err) => ctx.log("warn", `Keeping albums together: ${err instanceof Error ? err.message : err}`))
+  }
   if (sharedCount) ctx.log("info", `${sharedCount} track${sharedCount === 1 ? " was the same audio as one" : "s were the same audio as ones"} already identified - reused that`)
   if (skippedAi) ctx.log("info", `The audio fingerprint identified ${skippedAi} track${skippedAi === 1 ? "" : "s"} outright - no AI needed`)
   if (escalatedCount) ctx.log("info", `${escalatedCount} uncertain track${escalatedCount === 1 ? "" : "s"} went to ${settings.llm.escalation.model || "the second model"} - they wait in Review`)

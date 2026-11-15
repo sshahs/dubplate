@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 
 const PAGES = {
+  albums: () => import("@/pages/albums"),
   console: () => import("@/pages/console"),
   crates: () => import("@/pages/crates"),
   dashboard: () => import("@/pages/dashboard"),
@@ -25,6 +26,7 @@ const PAGES = {
   videos: () => import("@/pages/videos"),
 }
 
+const AlbumsPage = lazy(PAGES.albums)
 const ConsolePage = lazy(PAGES.console)
 const CratesPage = lazy(PAGES.crates)
 const DashboardPage = lazy(PAGES.dashboard)
@@ -122,6 +124,7 @@ export default function App() {
                 <Route path="/libraries" element={<LibrariesPage />} />
                 <Route path="/tracks" element={<TracksPage />} />
                 <Route path="/review" element={<ReviewPage />} />
+                <Route path="/albums" element={<AlbumsPage />} />
                 <Route path="/execute" element={<ExecutePage />} />
                 <Route path="/organise" element={<OrganisePage />} />
                 <Route path="/crates" element={<CratesPage />} />

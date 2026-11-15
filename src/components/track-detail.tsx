@@ -1,6 +1,7 @@
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
   AiMagicIcon,
+  Album02Icon,
   Alert02Icon,
   ArrowRight02Icon,
   Cancel01Icon,
@@ -30,6 +31,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { DecisionSteps } from "@/components/track-decision"
 import { DiscogsCodeDialog } from "@/components/discogs-code-dialog"
+import { AlbumDialog } from "@/components/album-dialog"
 import { api } from "@/lib/api"
 import { fmtBytes, fmtDuration } from "@/lib/format"
 import { toastUndoable } from "@/lib/undo"
@@ -81,6 +83,7 @@ export function TrackDetail({
   // Source groups showing every option, not just the first six.
   const [allShown, setAllShown] = useState<Set<number>>(new Set())
   const [discogsOpen, setDiscogsOpen] = useState(false)
+  const [albumOpen, setAlbumOpen] = useState(false)
   const saved = useMemo(() => (track ? toDraft(initialMeta(track)) : null), [track])
   const dirty = edit?.trackId === trackId
   const draft = dirty ? edit.draft : saved
@@ -252,6 +255,12 @@ export function TrackDetail({
           <HugeiconsIcon icon={CdIcon} strokeWidth={2} data-icon="inline-start" />
           Discogs code
         </Button>
+        {/* The whole record it's on: the same album details on every track, approved with one OK. */}
+        <Button variant="outline" onClick={() => setAlbumOpen(true)}>
+          <HugeiconsIcon icon={Album02Icon} strokeWidth={2} data-icon="inline-start" />
+          {track.albumLock ? "Album" : "Its album…"}
+        </Button>
+        {albumOpen && <AlbumDialog open onOpenChange={setAlbumOpen} target={{ trackId: track.id }} />}
         <DiscogsCodeDialog
           open={discogsOpen}
           onOpenChange={setDiscogsOpen}

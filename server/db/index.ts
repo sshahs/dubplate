@@ -334,6 +334,10 @@ export const MIGRATIONS: string[] = [
     fetched_at TEXT NOT NULL
   );
   `,
+  // 12: the album a track is kept together with (its name, album artist, year, label, cover).
+  `
+  ALTER TABLE tracks ADD COLUMN album_json TEXT;
+  `,
 ]
 
 export type Db = DatabaseSync

@@ -1,5 +1,6 @@
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
+  Album02Icon,
   AiMagicIcon,
   CheckListIcon,
   Copy01Icon,
@@ -62,6 +63,7 @@ export const NAV = [
   { to: "/upload", label: "Upload", icon: CloudUploadIcon, group: "Selector" },
   { to: "/tracks", label: "Tracks", icon: MusicNote03Icon, group: "Selector", badge: "pending" as const },
   { to: "/review", label: "Review", icon: CheckListIcon, group: "Selector", badge: "review" as const },
+  { to: "/albums", label: "Albums", icon: Album02Icon, group: "Selector" },
   { to: "/execute", label: "Cut & Tag", icon: Scissor01Icon, group: "Selector", badge: "approved" as const },
   { to: "/organise", label: "Organise", icon: FolderTreeIcon, group: "Selector" },
   { to: "/crates", label: "Crates", icon: Vynil02Icon, group: "Selector" },

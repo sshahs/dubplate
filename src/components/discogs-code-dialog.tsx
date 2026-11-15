@@ -68,7 +68,7 @@ export function DiscogsCodeDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => (o ? onOpenChange(true) : close())}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Use a Discogs release</DialogTitle>
           <DialogDescription className="text-pretty">

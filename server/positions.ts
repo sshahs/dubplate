@@ -46,6 +46,11 @@ function recordFiles(libraryId: number, folder: string): Sibling[] {
     .map((r) => ({ id: r.id, position: parseJson<HeuristicParse | null>(r.heuristic_json, null)?.position, tags: parseJson<ExistingTags>(r.tags_json, {}) }))
 }
 
+/** The tracks of one record (its folder, and any "CD2", "Side A" folders in it). */
+export function recordTrackIds(libraryId: number, folder: string): number[] {
+  return recordFiles(libraryId, folder).map((s) => s.id)
+}
+
 /** Disc and track numbers for each of these tracks, where their names or folders give them. */
 export function placementsFor(tracks: Pick<Track, "id" | "libraryId" | "relDir" | "heuristic" | "tags">[]): Map<number, Placement> {
   const out = new Map<number, Placement>()

@@ -44,6 +44,8 @@ export function extrasFor(t: Track, settings: Settings): TagExtras {
   out.lyrics = lyricsToEmbed(t, settings)
   if (settings.canonicalGenres.enabled) out.canonicalGenre = { genre: canonicalGenre(t, t.decision, settings)?.genre ?? null, overwrite: settings.canonicalGenres.overwrite }
   out.replaceLyrics = settings.lyrics.replaceExisting
+  if (t.albumLock) out.albumLocked = true
+  if (t.albumLock?.track) out.placedOnRelease = true
   out.aiGenre = [t.ai?.genre, t.escalation?.ai.genre].filter((g): g is string => !!g)
   if (t.original) out.fileGenre = t.original.tags.genre ?? []
   return out
@@ -137,7 +139,7 @@ export function buildPlan(tracks: Track[], settings: Settings, opts: { tagsOnly?
     }
     const toPath = path.join(dir, name)
     const rename = toPath !== t.path
-    const tags = meta && s.naming.writeTags ? tagsFor(meta, t.tags, s.naming, { ...extrasFor(t, s), placement: { ...listedPlacement(t, meta), ...placements.get(t.id) } }) : {}
+    const tags = meta && s.naming.writeTags ? tagsFor(meta, t.tags, s.naming, { ...extrasFor(t, s), placement: t.albumLock?.track ? { ...placements.get(t.id), ...listedPlacement(t, meta) } : { ...listedPlacement(t, meta), ...placements.get(t.id) } }) : {}
     const tagChanges = tagDiff(t.tags, tags)
     if (!meta) issues.push("No approved artist/title yet")
     // Never cut a file with a name or tags that are plainly wrong: these need a person.
@@ -289,7 +291,9 @@ export async function executePlan(items: PlanItem[], settings: Settings, opts: {
       if (item.tagChanges.length) {
         const live = readManagedTags(track.path)
         // (markup from a web page in a field doesn't count: it's replaced)
-        const filled = (f: keyof ExistingTags) => FILL_ONLY.has(f) && live[f] !== undefined && live[f] !== "" && !emptyish(f, live[f])
+        // (an album's tracks get the album's album, year and label over their own)
+        const albumField = (f: keyof ExistingTags) => !!track.albumLock && (f === "album" || f === "year" || f === "label")
+        const filled = (f: keyof ExistingTags) => FILL_ONLY.has(f) && !albumField(f) && live[f] !== undefined && live[f] !== "" && !emptyish(f, live[f])
         const writes = item.tagChanges.filter((c) => !filled(c.field))
         tagsAfter = { ...item.tags }
         for (const c of item.tagChanges) if (filled(c.field)) (tagsAfter as Record<string, unknown>)[c.field] = live[c.field]

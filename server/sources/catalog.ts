@@ -53,6 +53,7 @@ function mbReleases(r: MbRecording, artists: string[]): ReleaseInfo[] {
     return {
       source: "musicbrainz",
       title: rel.title,
+      ...(credit?.length ? { artist: credit.join(" & ") } : {}),
       kind: mbKind(group["primary-type"], group["secondary-types"] ?? []),
       // Without a credit of its own, a release is credited like its recording.
       own: credit?.length ? isOwnRelease(credit, artists) : null,
@@ -241,6 +242,7 @@ export function discogsReleaseInfo(rel: DiscogsRelease, trackArtists: string[], 
   return {
     source: "discogs",
     title: rel.title,
+    ...(rel.artists?.length ? { artist: /^various$/i.test(rel.artists[0].name.trim()) ? "Various Artists" : joinDiscogsArtists(rel.artists) } : {}),
     kind: discogsKind(descriptions, names),
     own: isOwnRelease(rel.artists?.map((a) => cleanArtistName(a.name)), trackArtists),
     id: String(rel.id),
