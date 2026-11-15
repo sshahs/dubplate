@@ -27,6 +27,8 @@ import type {
   LogLevel,
   LogSummary,
   MbSubmission,
+  AlbumProposal,
+  AlbumSummary,
   DiscogsLookup,
   MediaServerConfig,
   MixSuggestion,
@@ -246,6 +248,19 @@ export interface AcoustIdSubmissions {
 /** A video in a library, what's inside, and what converting it will make. */
 export type VideoItem = VideoFile & { library: string; plan: ConvertPlan | null }
 
+/** Which tracks make the album: one of them (its folder's), a folder, or a selection. */
+export type AlbumTarget = { trackId: number } | { libraryId: number; folder: string } | { ids: number[] }
+
+export interface AlbumApply {
+  trackIds: number[]
+  release?: string | null
+  fields: AlbumProposal["fields"]
+  matches?: { trackId: number; index: number | null }[]
+  artworkUrl?: string | null
+  replaceArt?: boolean
+  approve: boolean
+}
+
 /** The release editor's address and the fields to post to it. */
 export interface MbSeed {
   submission: MbSubmission
@@ -431,6 +446,11 @@ export const api = {
   acoustidCheck: () => post<AcoustIdSubmissions & { imported: number }>("/api/acoustid/check"),
   mbSubmissions: () => get<MbSubmission[]>("/api/musicbrainz/submissions"),
   mbSeed: (s: Selection, opts: { whole?: boolean; discogs?: string } = {}) => post<MbSeed>("/api/musicbrainz/seed", { ...sel(s), ...opts, base: window.location.origin }),
+  albums: () => get<AlbumSummary[]>("/api/albums"),
+  albumCoverUrl: (url: string) => `/api/albums/cover?url=${encodeURIComponent(url)}`,
+  albumPropose: (target: AlbumTarget, opts: { option?: string; release?: string | null } = {}) => post<AlbumProposal>("/api/albums/propose", { ...target, ...opts }),
+  albumApply: (body: AlbumApply) => post<{ tracks: number; approved: number; skipped: number; recut: number; undoId: string | null }>("/api/albums/apply", body),
+  albumRelease: (trackIds: number[]) => post<{ released: number; undoId: string | null }>("/api/albums/release", { trackIds }),
   discogsLookup: (s: Selection, code: string) => post<DiscogsLookup>("/api/discogs/lookup", { ...sel(s), code }),
   discogsApply: (releaseId: number, assignments: { trackId: number; index: number | null }[]) =>
     post<{ applied: number; skipped: number; release: { id: number; title: string }; undoId: string | null }>("/api/discogs/apply", { releaseId, assignments }),

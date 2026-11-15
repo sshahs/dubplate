@@ -174,6 +174,7 @@ export function readManagedTags(file: string): ExistingTags {
       artist: t.performers?.length ? t.performers.join("; ") : undefined,
       title: t.title || undefined,
       album: t.album || undefined,
+      albumArtist: t.albumArtists?.length ? t.albumArtists.join("; ") : undefined,
       year: t.year || undefined,
       genre: t.genres?.length ? [...t.genres] : undefined,
       label: t.publisher || (asf ? readCustom(f, ext, ASF_LABEL) : undefined),
@@ -217,6 +218,7 @@ export function writeTags(file: string, changes: Partial<Record<keyof ExistingTa
     if ("artist" in changes) t.performers = str(changes.artist) ? [String(changes.artist)] : []
     if ("title" in changes) t.title = str(changes.title)
     if ("album" in changes) t.album = str(changes.album)
+    if ("albumArtist" in changes) t.albumArtists = str(changes.albumArtist) ? [String(changes.albumArtist)] : []
     if ("year" in changes) t.year = Number(changes.year) || 0
     if ("genre" in changes) t.genres = Array.isArray(changes.genre) ? (changes.genre as string[]) : str(changes.genre) ? [String(changes.genre)] : []
     if ("label" in changes) t.publisher = str(changes.label)

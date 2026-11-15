@@ -883,6 +883,32 @@ fingerprints to AcoustID** sends a selection now.
 </details>
 
 <details>
+<summary><b>Albums: one album, tagged the same, approved with one OK</b></summary>
+
+Each track is identified on its own, so the tracks of one album could come out
+with different album names, years, labels and covers (one track's best hit is
+the single, another's a compilation). Dubplate now looks at the tracks of a
+record's folder together (with its `CD1`, `Side A` folders):
+
+- **Which album**: the album most of the tracks are on, from their hits, their tags and the folder's name. Only hits on *this* version of each song count, so the instrumental, live and remix albums a search also turns up don't win. Of that album's editions, the original official one (the 2003 UK album, not a later US release or reissue).
+- **Read in full**: the release is read from MusicBrainz (found by its name and artist when no hit named it) or Discogs: every track, its number, disc, length and recording, the album artist, label, catalogue number, date, genre and front cover.
+- **Each file placed on it**: by the recording its hits found, else its title, else its number on the record and its length (a "Track 06" rip). A file on no track of the release keeps its own details.
+- **The same on every track**: album, album artist, year, label, genre (none on a compilation), the release's IDs and one cover, plus each file's number on the release. They're written over what the files had, so one album never shows up as several in Jellyfin, Navidrome, Plex or the car. The album artist is always written, which keeps a "feat." track with its album.
+
+After identifying, a folder that's clearly one album is **kept together**
+automatically: nothing is approved, and an album you've set yourself is never
+changed. The **Albums** page lists every album with tracks to approve. **Review &
+approve** shows the album, its cover, the release and where each file sits on
+it. You can change any of it, pick another album or paste a MusicBrainz or
+Discogs release link. Then **Approve album** approves every track at once. A
+track without an artist or title is left for review. **Tracks → select → Tag as
+one album…** does the same for any tracks, and a track's **Its album…** opens its
+folder's album. **Stop keeping together** puts each track back on its own hits,
+and **Undo** reverses an approval.
+
+</details>
+
+<details>
 <summary><b>Discogs codes: white labels no search finds</b></summary>
 
 Old jungle and drum & bass 12"s, white labels and promos often have names no
@@ -1133,6 +1159,7 @@ crates whose names aren't taken.
 - 🪝 **Download tools**: qBittorrent, slskd and Lidarr tell Dubplate when a download finishes, with API tokens made for them.
 - 🎤 **Lyrics**: from LRCLIB, timed where possible, written into the file and optionally a `.lrc`.
 - 💿 **Release priority**: the artist's own album, EP or single before compilations and DJ mixes, unless the file says otherwise.
+- 💿 **Albums**: a record's tracks tagged the same (album, album artist, year, label, numbers, cover) from its release on MusicBrainz or Discogs, and approved with one OK.
 - 📀 **Discs and sides**: CD1/CD2 and Side A/B folders, A1/B2 positions and whole-side rips understood, with disc and track numbers written.
 - 👂 **Listen**: identify a track by its sound alone, like Shazam, and pick from what it heard.
 - 🧭 **How it was decided**: recording, release, version, genre, risk, verification, AcoustID and MusicBrainz, step by step, with where each field came from.

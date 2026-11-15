@@ -372,6 +372,8 @@ export type ReleaseKind = "album" | "ep" | "single" | "standalone" | "remix" | "
 export interface ReleaseInfo {
   source: SourceId
   title: string
+  /** who the release is credited to ("Various Artists" for a compilation) */
+  artist?: string
   kind: ReleaseKind
   /** the release is the artist's own (not Various Artists or someone else's) */
   own: boolean | null
@@ -460,6 +462,7 @@ export interface Decision {
   version?: string
   year?: number
   album?: string
+  albumArtist?: string
   label?: string
   riddim?: string
   genre?: string
@@ -648,6 +651,140 @@ export interface SourceHealth {
   disabledAt: string | null
 }
 
+/**
+ * The album a track belongs to, shared by every track of it: kept on each so the
+ * album's name, album artist, year, label, genre, release and cover are the same
+ * on all of them, whatever each track's own hits said.
+ */
+export interface AlbumLock {
+  /** the tracks kept together (the same on each of them) */
+  trackIds: number[]
+  title: string
+  albumArtist?: string
+  year?: number
+  label?: string
+  /** set only when the album has one genre (not on compilations) */
+  genre?: string
+  /** the release the album is, where the sources know it */
+  release?: ReleaseInfo
+  /** the cover found for the album (shared by all its tracks) */
+  art?: ArtRef | null
+  /** a person chose this cover for every track: it replaces their own pictures */
+  replaceArt?: boolean
+  /** this track's place on the release, with its name as the release lists it */
+  track?: AlbumReleaseTrack & { discs: number }
+  /** a person chose it, or Dubplate kept the tracks of one folder together */
+  by: "person" | "auto"
+  at: string
+}
+
+/** One track of an album's release, as MusicBrainz or Discogs lists it. */
+export interface AlbumReleaseTrack {
+  disc: number
+  /** as the release numbers it: "5", "A2" */
+  number: string
+  title: string
+  artists: string[]
+  featuring: string[]
+  /** seconds */
+  length?: number
+  recordingId?: string
+}
+
+/** An album's release in full, read from MusicBrainz or Discogs. */
+export interface AlbumRelease {
+  source: "musicbrainz" | "discogs"
+  id: string
+  groupId?: string
+  url: string
+  title: string
+  artist: string
+  year?: number
+  date?: string
+  country?: string
+  label?: string
+  catno?: string
+  kind: ReleaseKind
+  status?: string
+  discs: number
+  tracks: AlbumReleaseTrack[]
+  /** the front cover's address, where the source has one */
+  artwork?: string
+  genres: string[]
+}
+
+/** How a file was matched to a track of the album's release. */
+export interface AlbumTrackMatch {
+  trackId: number
+  /** the release track's place in `tracks` (null: it isn't on this release) */
+  index: number | null
+  /** by the recording a source found, by title, or only by its place and length */
+  by: "recording" | "title" | "place" | null
+}
+
+/** One way to see a folder of tracks as an album. */
+export interface AlbumOption {
+  key: string
+  title: string
+  albumArtist?: string
+  year?: number
+  label?: string
+  genre?: string
+  /** how many of the tracks the sources or tags put on it */
+  covers: number
+  sources: string[]
+  /** a release the sources know it as ("musicbrainz:<id>", "discogs:<id>") */
+  release?: string
+}
+
+export interface AlbumProposalTrack {
+  id: number
+  filename: string
+  status: TrackStatus
+  confidence: number | null
+  artists: string[]
+  title: string
+  duration: number | null
+  /** its own disc and track number, as the file says */
+  place?: string
+}
+
+/** A group of tracks as one album: the ways to see it, the release it is, and each file's place on it. */
+export interface AlbumProposal {
+  libraryId: number
+  folder: string
+  tracks: AlbumProposalTrack[]
+  options: AlbumOption[]
+  /** the option the release and fields below are for */
+  chosen: string | null
+  release: AlbumRelease | null
+  matches: AlbumTrackMatch[]
+  /** the album fields to use (from the release, else the option) */
+  fields: { title: string; albumArtist?: string; year?: number; label?: string; genre?: string }
+  /** cover addresses to try, best first */
+  artwork: string[]
+  /** the album lock the tracks already share, if they do */
+  lock: AlbumLock | null
+}
+
+/** A folder that looks like an album, for the Albums page. */
+export interface AlbumSummary {
+  libraryId: number
+  library: string
+  folder: string
+  title: string
+  artist: string | null
+  tracks: number
+  /** tracks still to approve (not approved, cut or left as-is) */
+  toApprove: number
+  approved: number
+  done: number
+  /** kept together as one album */
+  locked: boolean
+  /** a cover to show: one of its tracks' pictures (the one found for it, or the file's own) */
+  cover: { trackId: number; which: "current" | "found"; hash: string } | null
+}
+
 /** The metadata a track will be renamed/tagged to. */
 export interface FinalMeta {
   artists: string[]
@@ -657,6 +794,8 @@ export interface FinalMeta {
   version?: string
   year?: number
   album?: string
+  /** written as the album artist, so players keep the album together (a "feat." track included) */
+  albumArtist?: string
   label?: string
   riddim?: string
   genre?: string
@@ -711,6 +850,8 @@ export interface Track {
   original: { filename: string; path: string; tags: ExistingTags; scannedAt: string } | null
   /** IDs set by hand or by a MusicBrainz submission; they win over what sources found */
   idsOverride: ExternalIds | null
+  /** the album it's kept together with: its details win over each track's own hits */
+  albumLock: AlbumLock | null
   /** a second, larger model's reading of an uncertain track (it replaces the first in scoring) */
   escalation: (Escalation & { ai: AiParse }) | null
   /** who approved it: a person, auto-approve, or a hands-off library */

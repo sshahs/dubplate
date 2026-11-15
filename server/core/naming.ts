@@ -92,6 +92,7 @@ export function decisionToFinal(d: Decision): FinalMeta {
     version: d.version,
     year: d.year,
     album: d.album,
+    ...(d.albumArtist ? { albumArtist: d.albumArtist } : {}),
     label: d.label,
     riddim: d.riddim,
     genre: d.genre,
@@ -124,6 +125,13 @@ export interface TagExtras {
    */
   aiGenre?: string[]
   fileGenre?: string[]
+  /**
+   * Kept together with its album: album, year and label are the album's on every
+   * track, written over whatever each file had (so one album never shows as several).
+   */
+  albumLocked?: boolean
+  /** placed on its album's release: the release's track and disc numbers go over the file's */
+  placedOnRelease?: boolean
   /** disc and track numbers from the file's name and folders, for a file whose tags don't have them */
   placement?: { disc?: number; discTotal?: number; track?: number }
 }
@@ -155,7 +163,14 @@ export function tagsFor(meta: FinalMeta, current: ExistingTags, naming: Naming, 
   // A field holding web page markup, or only a placeholder ("reggae" as the album), counts as empty, so it's put right.
   const was = current
   current = Object.fromEntries(Object.entries(current).filter(([k, v]) => !emptyish(k as keyof ExistingTags, v))) as ExistingTags
+  if (extras.albumLocked) {
+    // The album's own details on every track of it, over each file's own.
+    for (const f of ["album", "year", "label"] as const) if (meta[f] && meta[f] !== current[f]) (out as Record<string, unknown>)[f] = meta[f]
+    current = { ...current, album: meta.album ?? current.album, year: meta.year ?? current.year, label: meta.label ?? current.label }
+  }
   if (!current.album && meta.album) out.album = meta.album
+  // The album artist keeps an album together in players (a "feat." track included): always the album's.
+  if (meta.albumArtist && meta.albumArtist !== current.albumArtist) out.albumArtist = meta.albumArtist
   // …and with nothing better to put there, the placeholder goes (Rewind puts it back).
   for (const f of ["album", "label"] as const) if (was[f] && !current[f] && !out[f]) out[f] = ""
   // A genre an earlier cut wrote from the AI's guess (every UK rap tune "Reggae") isn't the file's own:
@@ -179,9 +194,11 @@ export function tagsFor(meta: FinalMeta, current: ExistingTags, naming: Naming, 
   if (naming.riddimGrouping && meta.riddim && !current.grouping) out.grouping = meta.riddim
   // Where it sits on its record, only where the file doesn't say already.
   const place = extras.placement
-  if (place?.track && !current.track) out.track = place.track
-  if (place?.disc && !current.disc) out.disc = place.disc
-  if (place?.discTotal && !current.discTotal) out.discTotal = place.discTotal
+  // An album's tracks get their numbers on its release, over whatever the files had.
+  const over = !!extras.placedOnRelease
+  if (place?.track && (!current.track || (over && place.track !== current.track))) out.track = place.track
+  if (place?.disc && (!current.disc || (over && place.disc !== current.disc))) out.disc = place.disc
+  if (place?.discTotal && (!current.discTotal || (over && place.discTotal !== current.discTotal))) out.discTotal = place.discTotal
   if (naming.tagComment) out.comment = "Identified by Dubplate"
   if (extras.bpm && Math.round(extras.bpm) !== Math.round(current.bpm ?? 0)) out.bpm = Math.round(extras.bpm)
   if (extras.key && extras.key !== current.key) out.key = extras.key

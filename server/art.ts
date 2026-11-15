@@ -181,9 +181,11 @@ export function artNeedsOk(track: Pick<Track, "art">, settings: Settings): boole
 }
 
 /** What cutting does with a track's found artwork: nothing, wait for a person's OK, or write it. */
-export function artPlan(track: Pick<Track, "art" | "artFound">, settings: Settings): PlanItem["art"] {
+export function artPlan(track: Pick<Track, "art" | "artFound"> & { albumLock?: Track["albumLock"] }, settings: Settings): PlanItem["art"] {
   if (!settings.artwork.embed || !track.artFound) return undefined
-  if (track.art && !settings.artwork.replaceExisting) return undefined
+  // The cover a person chose for the whole album goes on every track of it, over their own pictures.
+  const albumCover = !!track.albumLock?.replaceArt && track.albumLock.art?.hash === track.artFound.hash
+  if (track.art && !settings.artwork.replaceExisting && !albumCover) return undefined
   if (track.art?.hash === track.artFound.hash) return undefined
   const { art, artFound: found } = track
   return {

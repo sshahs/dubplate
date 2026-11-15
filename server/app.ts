@@ -14,12 +14,14 @@ import { activeProvider, interpretTrack } from "./ai/interpreter"
 import { listModels, testProvider } from "./ai/providers"
 import { usageReport } from "./ai/usage"
 import { analyzeTracks } from "./analysis"
-import { artBytes, chooseArtwork, findArtwork, originalArt, thumbnail } from "./art"
+import { artBytes, cachedArt, chooseArtwork, fetchArt, findArtwork, originalArt, thumbnail } from "./art"
 import { cantListen, listenTo } from "./listen"
 import { lyricsForTrack, lyricsTracks, topUpLyrics } from "./lyrics"
 import { checkSubmissions, eligibility, listSubmissions, submitTracks } from "./acoustid-submit"
 import { completeMbSubmission, listMbSubmissions, markMbSubmitted, startMbSubmission } from "./musicbrainz-seed"
 import { applyDiscogsRelease, lookupDiscogs } from "./discogs-code"
+import { albumTrackIds, applyAlbum, listAlbums, proposeAlbum, releaseAlbum, type ApplyAlbum } from "./albums"
+import { recordTrackIds } from "./positions"
 import { trackInsight } from "./steps"
 import * as auth from "./auth"
 import * as tokens from "./tokens"
@@ -151,6 +153,7 @@ function cleanFinalInput(input: Partial<FinalMeta>): FinalMeta {
     version: clean(input.version) || undefined,
     year: Number.isFinite(year) && year > 1900 && year < 2100 ? year : undefined,
     album: clean(input.album) || undefined,
+    albumArtist: clean(input.albumArtist) || undefined,
     label: clean(input.label) || undefined,
     riddim: clean(input.riddim).replace(/\s+riddim$/i, "") || undefined,
     genre: clean(input.genre) || undefined,
@@ -460,7 +463,7 @@ export function createApp() {
       } else if (body.action === "unapprove") {
         repo.updateTrack(id, { status: t.decision?.status ?? "new", final: null, approvedBy: null })
       } else if (body.action === "reset") {
-        repo.updateTrack(id, { ai: null, candidates: null, decision: null, final: null, confidence: null, proposedName: null, status: "new", note: null, approvedBy: null })
+        repo.updateTrack(id, { ai: null, candidates: null, decision: null, final: null, confidence: null, proposedName: null, status: "new", note: null, approvedBy: null, albumLock: null })
       }
       changed++
     }
@@ -758,6 +761,65 @@ export function createApp() {
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
     }
+  })
+
+  // ---- albums: the tracks of one record tagged together, approved with one OK ----
+  app.get("/api/albums", (c) => c.json(listAlbums()))
+
+  /** The tracks of a record, by one of them or by its folder. */
+  const albumIds = (body: Selection & { trackId?: number; libraryId?: number; folder?: string }) =>
+    body.trackId ? albumTrackIds(Number(body.trackId)) : body.libraryId !== undefined && body.folder !== undefined ? recordTrackIds(Number(body.libraryId), String(body.folder)) : resolveIds(body)
+
+  app.post("/api/albums/propose", async (c) => {
+    const body = await c.req.json<Selection & { trackId?: number; libraryId?: number; folder?: string; option?: string; release?: string | null }>()
+    const ids = albumIds(body)
+    if (!ids.length) return c.json({ error: "Pick the tracks of the album" }, 400)
+    if (ids.length > 300) return c.json({ error: "That's more than one album - pick up to 300 tracks" }, 400)
+    try {
+      return c.json(await proposeAlbum(ids, settingsNow(), { option: body.option, release: body.release, signal: c.req.raw.signal }))
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
+
+  app.post("/api/albums/apply", async (c) => {
+    const body = await c.req.json<Omit<ApplyAlbum, "by">>()
+    const ids = (body.trackIds ?? []).map(Number).filter(Number.isFinite)
+    if (!ids.length) return c.json({ error: "Pick the tracks of the album" }, 400)
+    const undoId = snapshot(body.approve ? "Approve album" : "Keep album together", ids)
+    try {
+      const r = await applyAlbum({ ...body, trackIds: ids, by: "person" }, settingsNow(), c.req.raw.signal)
+      emit({ type: "tracks", ids })
+      return c.json({ ...r, undoId })
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+  })
+
+  /** A cover the sources offer, through Dubplate (cached), so the browser needn't reach the cover hosts itself. */
+  app.get("/api/albums/cover", async (c) => {
+    const url = c.req.query("url") ?? ""
+    let host = ""
+    try {
+      host = new URL(url).host
+    } catch {
+      return c.json({ error: "Not a cover address" }, 400)
+    }
+    // Only the hosts covers come from: nothing else is fetched for the browser.
+    if (!/(?:^|\.)(?:coverartarchive\.org|discogs\.com|mzstatic\.com|dzcdn\.net|deezer\.com|scdn\.co|bcbits\.com)$/.test(host)) return c.json({ error: "Not a cover address" }, 400)
+    const ref = await fetchArt(url, /coverartarchive/.test(host) ? "musicbrainz" : /discogs/.test(host) ? "discogs" : "itunes", c.req.raw.signal).catch(() => null)
+    const bytes = ref ? cachedArt(ref.hash) : null
+    if (!ref || !bytes) return c.json({ error: "No cover there" }, 404)
+    return c.body(new Uint8Array(bytes), 200, { "content-type": ref.mime, "cache-control": "private, max-age=86400" })
+  })
+
+  app.post("/api/albums/release", async (c) => {
+    const body = await c.req.json<{ trackIds?: number[] }>()
+    const ids = (body.trackIds ?? []).map(Number).filter(Number.isFinite)
+    const undoId = snapshot("Stop keeping together", ids)
+    const n = releaseAlbum(ids, settingsNow())
+    emit({ type: "tracks", ids })
+    return c.json({ released: n, undoId })
   })
 
   // ---- Discogs code: a release a person found on Discogs, put on their files ----

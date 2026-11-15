@@ -8,10 +8,12 @@ import { artistSimilarity, titleSimilarity } from "./normalize"
 export function idsFor(decision: Decision | null | undefined, meta: FinalMeta | null | undefined): ExternalIds {
   if (!decision || !meta?.title || !meta.artists.length) return {}
   const cluster = decision.clusters.find((c) => titleSimilarity(c.title, meta.title) >= 0.85 && artistSimilarity(c.artist, meta.artists) >= 0.7)
-  if (!cluster) return {}
+  // A track placed on its album's release (and nothing else) still gets that release's IDs.
+  const onAlbum = decision.release?.reason.startsWith("the album ")
+  if (!cluster && !onAlbum) return {}
   const out: ExternalIds = {}
   // A fingerprint match is the surest recording; otherwise the catalogue's own best-scored hit.
-  const mb = cluster.candidates
+  const mb = (cluster?.candidates ?? [])
     .filter((c) => c.ids?.mbRecordingId)
     .sort((a, b) => Number(!!b.fingerprint) - Number(!!a.fingerprint) || (b.sourceScore ?? 0) - (a.sourceScore ?? 0))
   if (mb[0]?.ids) {
@@ -22,7 +24,7 @@ export function idsFor(decision: Decision | null | undefined, meta: FinalMeta | 
     out.mbReleaseId = same.find((c) => c.ids?.mbReleaseId)?.ids?.mbReleaseId
     out.mbArtistIds = same.find((c) => c.ids?.mbArtistIds?.length)?.ids?.mbArtistIds
   }
-  const discogs = cluster.candidates.find((c) => c.ids?.discogsReleaseId)
+  const discogs = cluster?.candidates.find((c) => c.ids?.discogsReleaseId)
   if (discogs?.ids?.discogsReleaseId) out.discogsReleaseId = discogs.ids.discogsReleaseId
   // The chosen release (the artist's own album over a compilation…) decides which release IDs are written.
   const chosen = decision.release?.release

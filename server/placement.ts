@@ -17,9 +17,18 @@ export function metaFor(t: Track): FinalMeta | null {
   return meta ? checkFields(meta, { names: false }).fields : null
 }
 
+/** Placed on its album's release: the release's number and disc count, not the file's own or its old album tag's. */
+const onRelease = (t: Pick<Track, "albumLock">) => !!t.albumLock?.track
+
+/** Where the track sits, for {track}, {position} and {disc}: the file's own, or the release's for a track placed on it. */
+function placeOf(t: Track, meta: FinalMeta) {
+  if (onRelease(t)) return placeValues({}, null, listedPosition({ decision: t.decision, tags: {} }, meta))
+  return placeValues(t.tags, t.heuristic?.position, listedPosition(t, meta))
+}
+
 /** What a source's position adds to the file's tags: its track number (and disc of a set), only as numbers. */
-export function listedPlacement(t: Pick<Track, "decision" | "tags">, meta: FinalMeta): Placement | undefined {
-  const p = listedPosition(t, meta)
+export function listedPlacement(t: Pick<Track, "decision" | "tags" | "albumLock">, meta: FinalMeta): Placement | undefined {
+  const p = listedPosition(onRelease(t) ? { decision: t.decision, tags: {} } : t, meta)
   if (!p || !/^\d+$/.test(p.track)) return undefined
   const multi = (p.discs ?? 0) > 1 || (p.disc ?? 0) > 1
   return { track: Number(p.track), ...(multi && p.disc ? { disc: p.disc, ...(p.discs ? { discTotal: p.discs } : {}) } : {}) }
@@ -30,7 +39,7 @@ export function proposedFilename(t: Track, settings: Settings): string | null {
   const meta = metaFor(t)
   if (!meta || !meta.title || !meta.artists.length) return null
   const s = settingsForLibrary(settings, placementLibraryId(t.libraryId))
-  const base = renderTemplate(s.naming.template, meta, s.naming, placeValues(t.tags, t.heuristic?.position, listedPosition(t, meta)))
+  const base = renderTemplate(s.naming.template, meta, s.naming, placeOf(t, meta))
   return base ? `${base}.${extFor(t, settings)}` : null
 }
 
@@ -50,7 +59,7 @@ export function extFor(t: Pick<Track, "ext" | "fileCheck">, settings: Settings):
  */
 export function folderValues(t: Track, meta: FinalMeta, settings: Settings): FolderValues {
   const artist = formatArtist(meta, settings.naming, false)
-  const year = t.tags.year || meta.year
+  const year = (t.albumLock && meta.year) || t.tags.year || meta.year
   // Canonical genres on: the folder follows the one genre from your list (and its region folder).
   const canonical = settings.canonicalGenres?.enabled ? canonicalGenre(t, t.decision, settings) : null
   const genre = settings.canonicalGenres?.enabled ? (canonical?.folder ?? "") : (t.tags.genre?.[0] || meta.genre || "").split(/[,;/]/)[0].trim()
@@ -58,12 +67,13 @@ export function folderValues(t: Track, meta: FinalMeta, settings: Settings): Fol
   return {
     artist,
     firstartist: meta.artists[0] ?? "",
-    albumartist: t.tags.albumArtist || artist,
-    album: t.tags.album || meta.album || "",
-    disc: placeValues(t.tags, t.heuristic?.position, listedPosition(t, meta)).disc ?? "",
+    // An album kept together goes by the album's details, so its tracks share one folder.
+    albumartist: (t.albumLock && meta.albumArtist) || t.tags.albumArtist || meta.albumArtist || artist,
+    album: (t.albumLock && meta.album) || t.tags.album || meta.album || "",
+    disc: placeOf(t, meta).disc ?? "",
     year: year ? String(year) : "",
     decade: decadeOf(year),
-    label: t.tags.label || meta.label || "",
+    label: (t.albumLock && meta.label) || t.tags.label || meta.label || "",
     riddim: t.tags.riddim || meta.riddim || "",
     genre,
     region: canonical?.region ?? "",

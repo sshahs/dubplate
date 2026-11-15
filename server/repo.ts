@@ -135,6 +135,7 @@ export function rowToTrack(r: Row): Track {
     fingerprint: parseJson<Track["fingerprint"]>(r.fingerprint_json, null),
     original: parseJson<Track["original"]>(r.original_json, null),
     idsOverride: parseJson<Track["idsOverride"]>(r.ids_json, null),
+    albumLock: parseJson<Track["albumLock"]>(r.album_json, null),
     approvedBy: (r.approved_by as Track["approvedBy"]) ?? null,
     escalation: parseJson<Track["escalation"]>(r.escalation_json, null),
     createdAt: r.created_at as string,
@@ -318,7 +319,7 @@ export function queryTrackIds(q: TrackQuery): number[] {
   return (getDb().prepare(`SELECT id FROM tracks ${sql} ORDER BY id`).all(...params) as { id: number }[]).map((r) => r.id)
 }
 
-const JSON_COLS = new Set(["tags", "heuristic", "ai", "candidates", "decision", "final", "analysis", "art", "artFound", "aside", "fileCheck", "lyrics", "fingerprint", "original", "idsOverride", "escalation", "artDeclined"])
+const JSON_COLS = new Set(["tags", "heuristic", "ai", "candidates", "decision", "final", "analysis", "art", "artFound", "aside", "fileCheck", "lyrics", "fingerprint", "original", "idsOverride", "albumLock", "escalation", "artDeclined"])
 /** Kept in track_data rather than on the track row. */
 const DATA_COLS: Record<string, string> = {
   heuristic: "heuristic_json",
@@ -359,6 +360,7 @@ const COLS: Record<string, string> = {
   aside: "aside_json",
   fileCheck: "file_check_json",
   idsOverride: "ids_json",
+  albumLock: "album_json",
   approvedBy: "approved_by",
 }
 
